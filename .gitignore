@@ -1,0 +1,82 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment variables
+.env
+.env.local
+
+# Cache and artifacts
+cache/
+*.pkl
+*.pickle
+
+# Model weights (keep structure, ignore weights)
+models/weights/
+*.pth
+*.pt
+*.onnx
+*.pb
+*.tar
+
+# Logs
+logs/
+*.log
+
+# Data (keep sample docs, ignore raw data)
+data/raw/
+*.pdf
+*.jpg
+*.jpeg
+*.png
+!data/sample_docs/*.pdf
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Python build artifacts
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Docker (keep docker-compose.yml and Dockerfile)
+*.dockerignore

@@ -1,0 +1,46 @@
+# Core dependencies
+# Note: Python 3.10.11+ is required (specified in venv setup)
+
+# PDF and image processing
+PyMuPDF>=1.23.0
+pdf2image>=1.16.3
+Pillow>=10.0.0
+opencv-python>=4.8.0
+
+# Layout detection
+layoutparser>=0.3.4
+# detectron2>=0.6  # Optional - LayoutParser works with PaddleDetection backend
+torch>=2.0.0,<2.3.0
+torchvision>=0.15.0,<0.18.0
+
+# OCR
+paddlepaddle>=2.5.0
+paddleocr>=2.7.0
+pytesseract>=0.3.10
+
+# LLM/VLM (Ollama client)
+ollama>=0.1.0
+requests>=2.31.0
+
+# Table processing
+table-transformer>=0.1.0
+transformers>=4.30.0
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+streamlit>=1.28.0
+
+# Utilities
+numpy>=1.24.0
+pandas>=2.0.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Logging
+loguru>=0.7.0
+

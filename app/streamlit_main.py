@@ -578,18 +578,22 @@ def main():
                 st.session_state.heuristic_strictness = heuristic_strictness
                 
                 slm_toggle = st.checkbox(
-                    "Enable Semantic Labeling (Ollama)",
+                    "Enable Semantic Labeling (SLM)",
                     value=st.session_state.enable_slm,
-                    help="Requires Ollama running with Qwen2.5-7B-Instruct pulled locally."
+                    help="Uses Qwen2.5-7B-Instruct via Ollama to assign semantic roles (title, h1, h2, header, footer, etc.) to text blocks. Requires: 1) Ollama running (ollama serve), 2) Model pulled (ollama pull qwen2.5:7b-instruct)"
                 )
                 st.session_state.enable_slm = slm_toggle
+                if slm_toggle:
+                    st.caption("⚠️ Make sure Ollama is running and model is available, otherwise labeling will fail silently.")
                 
                 vlm_toggle = st.checkbox(
-                    "Enable Qwen-VL for tables/figures",
+                    "Enable Qwen-VL for tables/figures (VLM)",
                     value=st.session_state.enable_vlm,
-                    help="Used for table structure + figure classification when Ollama Qwen-VL is available."
+                    help="Uses Qwen-VL via Ollama for advanced table structure extraction and figure classification. Requires: 1) Ollama running (ollama serve), 2) Model pulled (ollama pull qwen-vl)"
                 )
                 st.session_state.enable_vlm = vlm_toggle
+                if vlm_toggle:
+                    st.caption("⚠️ Make sure Ollama is running and Qwen-VL model is available.")
             
             # Visualization settings
             with st.expander("🎨 Visualization", expanded=False):
@@ -1003,7 +1007,7 @@ def main():
     
     with col_image:
         # Display annotated image
-        st.image(annotated_image, use_column_width=True)
+        st.image(annotated_image, width='stretch')
         
         # Stats and metrics below image
         st.markdown("---")
@@ -1071,7 +1075,7 @@ def main():
                     
                     if block.text and block.text.strip():
                         st.markdown("**Extracted Text:**")
-                        st.text_area("", block.text, height=150, key=f"text_{block.id}", label_visibility="collapsed", disabled=True)
+                        st.text_area("Block Text", block.text or "(No text extracted)", height=150, key=f"text_{block.id}", label_visibility="collapsed", disabled=True)
                     else:
                         st.info("No text extracted yet. Run OCR to extract text from this block.")
         else:

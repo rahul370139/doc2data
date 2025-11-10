@@ -109,12 +109,13 @@ class OCRPipeline:
         if x1 <= x0 or y1 <= y0:
             return "", []  # Invalid bbox, skip silently
         
-        # Early exit: Skip very large blocks (likely images without text)
+        # Only skip extremely large blocks (>80% of page) - these are likely full-page images
+        # But still try OCR on large blocks (60-80%) as they might contain text
         block_area = (x1 - x0) * (y1 - y0)
         page_area = image.shape[0] * image.shape[1]
         area_ratio = block_area / page_area if page_area > 0 else 0
         
-        if area_ratio > 0.6:  # Block is >60% of page - likely full-page image
+        if area_ratio > 0.8:  # Block is >80% of page - likely full-page image
             return "", []  # Skip silently
         
         block_image = image[y0:y1, x0:x1]
@@ -126,6 +127,13 @@ class OCRPipeline:
         # Ensure minimum size for OCR
         if block_image.shape[0] < 10 or block_image.shape[1] < 10:
             return "", []  # Too small, skip silently
+        
+        # CRITICAL: Make image contiguous and writable to avoid PaddleOCR tensor memory errors
+        # This is especially important for parallel processing
+        if not block_image.flags['C_CONTIGUOUS']:
+            block_image = np.ascontiguousarray(block_image)
+        if not block_image.flags['WRITEABLE']:
+            block_image = block_image.copy()
         
         # Optional pre-processing: resize + contrast + sharpening
         fallback_proc = block_image
@@ -168,10 +176,20 @@ class OCRPipeline:
             
             # Additional contrast enhancement
             proc = cv2.convertScaleAbs(proc, alpha=1.2, beta=10)
+            # Ensure contiguous and writable
+            if not proc.flags['C_CONTIGUOUS']:
+                proc = np.ascontiguousarray(proc)
+            if not proc.flags['WRITEABLE']:
+                proc = proc.copy()
             fallback_proc = proc
         except Exception:
             proc = block_image
-            fallback_proc = block_image
+            # Ensure contiguous and writable even for fallback
+            if not proc.flags['C_CONTIGUOUS']:
+                proc = np.ascontiguousarray(proc)
+            if not proc.flags['WRITEABLE']:
+                proc = proc.copy()
+            fallback_proc = proc
 
         # Run OCR
         try:
@@ -496,23 +514,25 @@ class OCRPipeline:
                 else:
                     page_image = fallback
             
+            # Try to extract from digital text layer first (if available)
             digital_words = getattr(page_obj, "digital_words", []) if page_obj else []
             page_has_digital = getattr(page_obj, "digital_text", False) if page_obj else False
-            block_has_digital = hasattr(block, "metadata") and block.metadata.get("digital_text", False)
-            skip_ocr = skip_ocr_for_digital and (block_has_digital or (page_has_digital and digital_words))
             
-            if skip_ocr:
-                extracted = False
-                if (not block.word_boxes or not block.text) and digital_words:
-                    text, word_boxes = self._extract_from_digital_layer(block, digital_words)
-                    if word_boxes:
-                        block.word_boxes = word_boxes
-                        block.text = text
-                        extracted = True
-                if extracted:
+            # Only use digital text if we have actual word boxes AND block doesn't already have text
+            if skip_ocr_for_digital and digital_words and (not block.word_boxes or not block.text):
+                text, word_boxes = self._extract_from_digital_layer(block, digital_words)
+                if word_boxes and text and text.strip():
+                    # Successfully extracted from digital layer
+                    block.word_boxes = word_boxes
+                    block.text = text
                     skipped_blocks.append(block)
                     continue
-                # Digital layer was expected but yielded nothing; fall through to OCR
+                # Digital extraction failed or incomplete - fall through to OCR
+            
+            # If block already has text from digital layer, skip OCR
+            if skip_ocr_for_digital and block.text and block.text.strip() and block.word_boxes:
+                skipped_blocks.append(block)
+                continue
             
             # Process ALL block types that might contain text
             # This includes: TEXT, TITLE, LIST, FORM, TABLE, and even FIGURES with text
@@ -542,15 +562,16 @@ class OCRPipeline:
             def process_single_block(block_and_image):
                 block, page_image = block_and_image
                 try:
-                    # Add timeout protection - skip if block is too large (likely not text)
+                    # Only skip extremely large blocks (>80% of page)
+                    # Process large blocks (50-80%) as they might contain text
                     x0, y0, x1, y1 = block.bbox
                     block_area = (x1 - x0) * (y1 - y0)
                     page_area = page_image.shape[0] * page_image.shape[1] if hasattr(page_image, 'shape') else 1
                     area_ratio = block_area / page_area if page_area > 0 else 0
                     
-                    # Skip very large blocks (likely images/figures without text)
-                    if area_ratio > 0.5:
-                        return block, "", [], "Block too large (likely image)"
+                    # Only skip extremely large blocks (likely full-page images)
+                    if area_ratio > 0.8:
+                        return block, "", [], "Block too large (>80% of page)"
                     
                     text, word_boxes = self.extract_text_from_block(
                         page_image,
@@ -564,6 +585,7 @@ class OCRPipeline:
             print(f"🔄 Processing {len(blocks_to_process)} blocks in parallel ({self.max_workers} workers)...")
             completed = 0
             failed = 0
+            successful = 0
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 futures = {executor.submit(process_single_block, item): item for item in blocks_to_process}
                 
@@ -595,16 +617,17 @@ class OCRPipeline:
         else:
             # Sequential processing with progress
             total = len(blocks_to_process)
+            successful = 0
             for idx, (block, page_image) in enumerate(blocks_to_process, 1):
                 try:
-                    # Skip very large blocks
+                    # Only skip extremely large blocks (>80% of page)
                     x0, y0, x1, y1 = block.bbox
                     block_area = (x1 - x0) * (y1 - y0)
                     page_area = page_image.shape[0] * page_image.shape[1] if hasattr(page_image, 'shape') else 1
                     area_ratio = block_area / page_area if page_area > 0 else 0
                     
-                    if area_ratio > 0.5:
-                        print(f"  ⏭️ Skipping large block {block.id} ({area_ratio:.1%} of page)")
+                    if area_ratio > 0.8:
+                        print(f"  ⏭️ Skipping extremely large block {block.id} ({area_ratio:.1%} of page)")
                         block.text = ""
                         block.word_boxes = []
                         continue
@@ -619,10 +642,14 @@ class OCRPipeline:
                     )
                     block.text = text
                     block.word_boxes = word_boxes
+                    if text and text.strip():
+                        successful += 1
                 except Exception as e:
                     print(f"⚠️ OCR error for block {block.id}: {e}")
                     block.text = ""
                     block.word_boxes = []
+            
+            print(f"✅ OCR complete: {successful}/{total} blocks with text extracted")
         
         # Collect all processed blocks (preserve order)
         processed_blocks = []

@@ -90,6 +90,15 @@ class PaddleOCRWrapper:
             if image.shape[0] < 10 or image.shape[1] < 10:
                 print(f"⚠️ Image too small for OCR: {image.shape}")
                 return word_boxes
+            
+            # CRITICAL: Make image contiguous in memory to avoid tensor memory errors
+            # PaddleOCR requires contiguous arrays, especially in parallel processing
+            if not image.flags['C_CONTIGUOUS']:
+                image = np.ascontiguousarray(image)
+            
+            # Ensure image is writable (some views are read-only)
+            if not image.flags['WRITEABLE']:
+                image = image.copy()
                 
             # Run OCR (new API doesn't use cls parameter)
             result = self.ocr.ocr(image)

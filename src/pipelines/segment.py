@@ -643,26 +643,9 @@ class LayoutSegmenter:
                         blocks = self._layout_to_blocks(layout, page_id)
                         print(f"  ✓ Retry with threshold {new_threshold:.2f} returned {len(blocks)} blocks")
             
-            # Automatic threshold back-off ONLY if we get too few blocks or only one class
-            # But don't go too low (minimum 0.15) to maintain quality
-            retry_threshold = 0.15  # Minimum quality threshold
-            current_threshold = getattr(self.model, "threshold", self.extra_config.get("threshold", 0.25))
-            
-            # Check if we're only detecting one class (e.g., only tables)
-            type_counts = Counter(b.type for b in blocks)
-            only_one_class = len(type_counts) == 1
-            
-            # Only retry if we have very few blocks AND we're above minimum threshold
-            if (self._should_retry_with_lower_threshold(blocks) or only_one_class) and current_threshold > retry_threshold + 0.05:
-                new_threshold = max(retry_threshold, current_threshold * 0.8)  # Small reduction, not half
-                if new_threshold < current_threshold - 1e-3:
-                    reason = "only one class detected" if only_one_class else f"only {len(blocks)} blocks"
-                    print(f"  ℹ Low layout recall ({reason}); lowering threshold {current_threshold:.2f}→{new_threshold:.2f}")
-                    self.model.threshold = new_threshold
-                    self.extra_config["threshold"] = new_threshold
-                    layout = self.model.detect(image)
-                    blocks = self._layout_to_blocks(layout, page_id)
-                    print(f"  ✓ Retry returned {len(blocks)} blocks with types: {dict(Counter(b.type for b in blocks))}")
+            # Disable automatic threshold back-off to ensure deterministic behavior
+            # User controls threshold via UI, no automatic adjustments
+            # This ensures consistent results on refresh
         
         except Exception as e:
             print(f"Error in layout detection: {e}")
@@ -1125,6 +1108,12 @@ class LayoutSegmenter:
         # Find connected components
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(dilated, connectivity=8)
         
+        # Limit processing to avoid performance issues with too many components
+        max_components = 5000  # Reasonable limit
+        if num_labels > max_components:
+            print(f"  ⚠️ Too many connected components ({num_labels}), limiting to {max_components}")
+            num_labels = max_components
+        
         height, width = image.shape[:2]
         page_area = height * width
         page_height = height
@@ -1138,7 +1127,7 @@ class LayoutSegmenter:
         added_count = 0
         text_blocks = []
         
-        for i in range(1, num_labels):  # Skip background (label 0)
+        for i in range(1, min(num_labels, max_components)):  # Skip background (label 0), limit processing
             x, y, w, h, area = stats[i]
             
             if area < min_area or area > max_area:

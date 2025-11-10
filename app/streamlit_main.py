@@ -20,7 +20,7 @@ import cv2
 import time
 from uuid import uuid4
 
-from utils.models import Document, Block, BlockType, TableBlock, FigureBlock
+from utils.models import Document, Block, BlockType, BlockRole, TableBlock, FigureBlock
 from utils.config import Config
 from src.pipelines.ingest import ingest_document
 from src.pipelines.segment import LayoutSegmenter
@@ -877,11 +877,16 @@ def main():
                     page_images
                 )
                 if not sidebar_collapsed:
-                    if st.session_state.get("enable_slm", Config.ENABLE_SLM):
-                        status_msg = "✅ Labeling completed"
+                    enable_slm = st.session_state.get("enable_slm", Config.ENABLE_SLM)
+                    if enable_slm:
+                        labeled_count = len([b for b in st.session_state.blocks if b.role and b.role != BlockRole.UNKNOWN])
+                        total_text_blocks = len([b for b in st.session_state.blocks if b.type in [BlockType.TEXT, BlockType.TITLE, BlockType.LIST] and b.text])
+                        if labeled_count > 0:
+                            st.sidebar.success(f"✅ Labeling complete: {labeled_count}/{total_text_blocks} text blocks labeled")
+                        else:
+                            st.sidebar.warning("⚠️ No blocks labeled. Check if Ollama is running and model is available.")
                     else:
-                        status_msg = "✅ Labeling skipped (enable Ollama SLM to run)"
-                    st.sidebar.success(status_msg)
+                        st.sidebar.info("ℹ️ Semantic labeling is disabled. Enable 'Enable Semantic Labeling (Ollama)' in Model Settings to use SLM.")
                 st.session_state.document = None
                 st.session_state.assembled_json_dict = None
                 st.session_state.assembled_json_str = None

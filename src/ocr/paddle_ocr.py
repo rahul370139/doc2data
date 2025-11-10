@@ -35,9 +35,12 @@ class PaddleOCRWrapper:
         
         try:
             # Use minimal parameters compatible with PaddleOCR 3.x
+            # Disable angle classifier and GPU to avoid tensor memory issues
             self.ocr = PaddleOCR(
-                use_angle_cls=self.use_angle_cls,
-                lang=self.lang
+                use_angle_cls=False,  # Disable to avoid tensor memory issues
+                lang=self.lang,
+                use_gpu=False,  # Explicitly disable GPU to avoid tensor issues on CPU
+                enable_mkldnn=False  # Disable MKLDNN to avoid tensor memory issues
             )
             init_time = time.time() - start_time
             print(f"✅ PaddleOCR initialized in {init_time:.2f}s")

@@ -558,14 +558,24 @@ def main():
                 st.session_state.layout_model_choice = selected_model
                 
                 det_threshold = st.slider(
-                    "Detection Threshold",
-                    min_value=0.10,
-                    max_value=0.80,
-                    value=st.session_state.get("layout_threshold", 0.25),  # Lower default for granularity
+                    "ML Model Detection Threshold",
+                    min_value=0.05,
+                    max_value=0.50,
+                    value=st.session_state.get("layout_threshold", 0.25),
                     step=0.05,
-                    help="Lower = more granular blocks, Higher = fewer high-confidence blocks"
+                    help="Lower = more blocks detected (may include noise). Higher = fewer, higher-confidence blocks. Recommended: 0.15-0.25"
                 )
                 st.session_state.layout_threshold = det_threshold
+                
+                heuristic_strictness = st.slider(
+                    "Heuristic Strictness",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=st.session_state.get("heuristic_strictness", 0.7),
+                    step=0.1,
+                    help="Controls how strict heuristic rules are. Higher = fewer false positives (logos as FORM, # as LIST). Lower = more aggressive detection. Recommended: 0.6-0.8"
+                )
+                st.session_state.heuristic_strictness = heuristic_strictness
                 
                 slm_toggle = st.checkbox(
                     "Enable Semantic Labeling (Ollama)",

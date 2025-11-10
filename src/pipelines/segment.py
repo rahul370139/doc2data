@@ -2295,7 +2295,6 @@ class LayoutSegmenter:
         blocks = self._augment_text_with_heuristic(image, blocks, page_id, heuristic_strictness)
         
         # Reclassify ambiguous blocks using texture cues (before merging)
-        heuristic_strictness = getattr(self, 'heuristic_strictness', 0.7)
         blocks = self._reclassify_blocks_by_texture(image, blocks, page_id, heuristic_strictness)
         
         # Merge overlapping boxes first (conservative - only truly overlapping)

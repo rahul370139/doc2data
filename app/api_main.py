@@ -39,7 +39,11 @@ ocr_pipeline = None
 slm_labeler = None
 table_processor = None
 figure_processor = None
-assembler = DocumentAssembler()
+assembler = DocumentAssembler(
+    process_tables=True,
+    process_figures=True,
+    use_vlm=Config.ENABLE_VLM
+)
 
 
 class HealthResponse(BaseModel):
@@ -154,7 +158,21 @@ async def segment_endpoint(file_hash: str):
             image = np.array(Image.open(io.BytesIO(img_data)))
             
             # Segment page
-            blocks = segmenter.segment_page(image, page_data["page_id"])
+            # Call segmenter with kwargs only if supported
+            try:
+                import inspect
+                sig = inspect.signature(segmenter.segment_page)
+                kwargs = {}
+                if "digital_words" in sig.parameters:
+                    kwargs["digital_words"] = None
+                blocks = segmenter.segment_page(
+                    image,
+                    page_data["page_id"],
+                    **kwargs
+                )
+            except Exception:
+                # Fallback: minimal call
+                blocks = segmenter.segment_page(image, page_data["page_id"]) 
             all_blocks.extend([block.to_dict() for block in blocks])
         
         result = {
@@ -220,8 +238,7 @@ async def label_endpoint(file_hash: str):
     try:
         global slm_labeler
         if slm_labeler is None:
-            # Stubbed: defaults to disabled for local testing
-            slm_labeler = SLMLabeler(enabled=False)
+            slm_labeler = SLMLabeler(enabled=Config.ENABLE_SLM)
         
         # Similar pattern as OCR endpoint
         result = {
@@ -298,4 +315,3 @@ if __name__ == "__main__":
         port=Config.API_PORT,
         reload=True
     )
-

@@ -10,117 +10,9 @@ import pdf2image
 from io import BytesIO
 import re
 
-from utils.models import PageImage
+from utils.models import PageImage, WordBox
 from utils.config import Config
 from src.processing.preprocessing import preprocess_image
-
-
-def _autorotate(image: np.ndarray, page_id: int = 0) -> np.ndarray:
-    """
-    Detect if bitmap is rotated 90/180/270° and fix it.
-    Returns the original image if orientation is already correct.
-    
-    This handles cases where the PDF page bitmap itself is stored sideways,
-    regardless of PDF /Rotate metadata.
-    """
-    try:
-        import cv2
-    except ImportError:
-        return image
-    
-    # Robust check: score 0/90/180/270 with geometry + tiny OCR and only rotate
-    # if the best orientation clearly improves over 0°. This avoids flipping
-    # forms that have strong vertical structure.
-    try:
-        import pytesseract
-        import cv2
-        # Downscale for speed
-        h, w = image.shape[:2]
-        scale = 1200.0 / max(h, w)
-        if scale < 1.0:
-            small = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-        else:
-            small = image
-        rotations = {
-            0: small,
-            90: cv2.rotate(small, cv2.ROTATE_90_CLOCKWISE),
-            180: cv2.rotate(small, cv2.ROTATE_180),
-            270: cv2.rotate(small, cv2.ROTATE_90_COUNTERCLOCKWISE),
-        }
-
-        def line_score(img: np.ndarray) -> Tuple[float, float]:
-            gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if len(img.shape) == 3 else img
-            edges = cv2.Canny(gray, 50, 150)
-            lines = cv2.HoughLinesP(
-                edges, 1, np.pi / 180, threshold=120,
-                minLineLength=max(img.shape[1] // 5, 80),
-                maxLineGap=15
-            )
-            if lines is None:
-                return 0.0, 0.0
-            horiz_len = 0.0
-            vert_len = 0.0
-            for l in lines:
-                x1, y1, x2, y2 = l[0]
-                dx, dy = x2 - x1, y2 - y1
-                length = float(np.hypot(dx, dy))
-                ang = abs(np.degrees(np.arctan2(dy, dx)))
-                if ang < 10 or ang > 170:
-                    horiz_len += length
-                elif 80 < ang < 100:
-                    vert_len += length
-            return horiz_len, vert_len
-
-        def ocr_score(img: np.ndarray) -> float:
-            txt = pytesseract.image_to_string(img, config="--psm 6")
-            alnum = sum(ch.isalnum() for ch in txt)
-            length = max(len(txt), 1)
-            return alnum / float(length)
-
-        combined_scores = {}
-        for ang, img in rotations.items():
-            hlen, vlen = line_score(img)
-            ls = (hlen - 0.5 * vlen) / max(img.shape[0] * img.shape[1] / 2000.0, 1.0)
-            os = ocr_score(img)
-            combined = 0.75 * ls + 0.25 * os
-            combined_scores[ang] = combined
-
-        # Choose best angle but require strong margin over 0°
-        best_angle = max(combined_scores, key=lambda k: combined_scores[k])
-        gain = combined_scores[best_angle] - combined_scores.get(0, 0.0)
-        # Absolute and relative margins
-        margin_abs = 0.15
-        if best_angle != 0 and gain > margin_abs:
-            clockwise = {
-                90: cv2.ROTATE_90_CLOCKWISE,
-                180: cv2.ROTATE_180,
-                270: cv2.ROTATE_90_COUNTERCLOCKWISE
-            }
-            print(f"  🔄 Page {page_id}: combined scoring {combined_scores} → rotate {best_angle}° (gain={gain:.3f})")
-            return cv2.rotate(image, clockwise[best_angle])
-    except Exception:
-        pass
-    
-    # Fallback: Use Hough line detection to detect text orientation
-    try:
-        import cv2
-        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) if len(image.shape) == 3 else image.copy()
-        edges = cv2.Canny(gray, 50, 150)
-        lines = cv2.HoughLines(edges, 1, np.pi/180, 200)
-        
-        if lines is not None and len(lines) > 5:
-            # Count horizontal vs vertical lines
-            horizontal = sum(1 for l in lines if abs(l[0][1]) < np.pi/8)  # ~0° or ~180°
-            vertical = sum(1 for l in lines if abs(l[0][1] - np.pi/2) < np.pi/8)  # ~90°
-            
-            # If predominantly vertical lines, page is sideways
-            if vertical > horizontal * 2:
-                print(f"  🔄 Page {page_id}: detected sideways bitmap (vertical lines: {vertical}, horizontal: {horizontal}), correcting…")
-                return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-    except Exception:
-        pass
-    
-    return image
 
 
 def detect_and_correct_rotation(image: np.ndarray, page_id: int = 0) -> np.ndarray:
@@ -357,10 +249,13 @@ def ingest_document(
             denoise=denoise
         )
         
-        # Check if page has digital text
+        # Check if page has digital text and store word boxes if available
         has_digital_text = False
+        page_digital_words: List[WordBox] = []
         if digital_text_data and page_id < len(digital_text_data):
-            has_digital_text = digital_text_data[page_id]["has_digital_text"]
+            page_info = digital_text_data[page_id]
+            has_digital_text = page_info["has_digital_text"]
+            page_digital_words = list(page_info.get("words", []))
             preprocess_meta["digital_text_extracted"] = has_digital_text
         
         # Create PageImage object
@@ -372,10 +267,10 @@ def ingest_document(
             height=height,
             dpi=dpi,
             digital_text=has_digital_text,
+            digital_words=page_digital_words,
             preprocess_metadata=preprocess_meta
         )
         
         pages.append(page_image)
     
     return pages
-

@@ -29,15 +29,18 @@ def validate_ocr(pdf_path: str):
     segmenter = LayoutSegmenter()
     all_blocks = []
     for page in pages:
-        blocks = segmenter.segment_page(page.image, page.page_id)
+        blocks = segmenter.segment_page(
+            page.image,
+            page.page_id,
+            digital_words=getattr(page, "digital_words", None)
+        )
         all_blocks.extend(blocks)
     
     print(f"Total blocks: {len(all_blocks)}")
     
     # OCR
     ocr_pipeline = OCRPipeline()
-    page_images = [page.image for page in pages]
-    processed_blocks = ocr_pipeline.process_blocks(all_blocks, page_images)
+    processed_blocks = ocr_pipeline.process_blocks(all_blocks, pages)
     
     # Count blocks with text
     blocks_with_text = sum(1 for b in processed_blocks if b.text and len(b.text.strip()) > 0)
@@ -53,4 +56,3 @@ if __name__ == "__main__":
         validate_ocr(sys.argv[1])
     else:
         print("Usage: python validate_ocr.py <pdf_path>")
-

@@ -1,28 +1,27 @@
 """
-Semantic labeling pipeline - STUBBED (Step 4 skipped for local testing).
-LLM/VLM integration will be added when GPU stack is available.
+Semantic labeling pipeline using Qwen2.5-7B-Instruct via Ollama.
 """
 from typing import List, Dict, Any, Optional
 from utils.models import Block, BlockRole, BlockType
+from utils.config import Config
 
 
 class SLMLabeler:
     """
-    Semantic labeling using SLM - STUBBED.
+    Semantic labeling using SLM (Qwen2.5-7B-Instruct via Ollama).
     
-    This is a no-op implementation that skips LLM/VLM calls.
-    Blocks will retain their basic types but won't have semantic roles assigned.
+    When disabled, blocks will retain their basic types but won't have semantic roles assigned.
     To enable: Set ENABLE_SLM=true in .env and ensure Ollama is running.
     """
     
-    def __init__(self, enabled: bool = False):
+    def __init__(self, enabled: Optional[bool] = None):
         """
         Initialize SLM labeler.
         
         Args:
-            enabled: Whether to enable LLM labeling (default: False for local testing)
+            enabled: Whether to enable LLM labeling (default: from Config.ENABLE_SLM)
         """
-        self.enabled = enabled
+        self.enabled = enabled if enabled is not None else Config.ENABLE_SLM
         self.client = None
         self.model = None
         
@@ -31,7 +30,7 @@ class SLMLabeler:
                 from src.vlm.ollama_client import get_ollama_client
                 from utils.config import Config
                 self.client = get_ollama_client()
-                self.model = Config.SLM_MODEL
+                self.model = Config.OLLAMA_MODEL_SLM
                 print("✓ SLM labeling enabled (Ollama required)")
             except Exception as e:
                 print(f"⚠ SLM enabled but Ollama unavailable: {e}")

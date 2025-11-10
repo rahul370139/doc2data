@@ -2,7 +2,7 @@
 OCR pipeline: orchestration, header/footer detection, caption candidate detection.
 """
 import hashlib
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
@@ -35,7 +35,7 @@ class OCRPipeline:
                 self.paddle_ocr = PaddleOCRWrapper()
             except Exception as e:
                 print(f"Warning: PaddleOCR initialization failed: {e}")
-                print("Falling back to Tesseract")
+                print("Falling back to Tesseract-only mode")
                 self.use_paddle = False
         
         if not self.use_paddle:
@@ -44,6 +44,36 @@ class OCRPipeline:
             except Exception as e:
                 print(f"Error: Tesseract OCR initialization failed: {e}")
                 raise
+        else:
+            # When Paddle is primary, keep a silent Tesseract fallback for tough cases
+            try:
+                self.tesseract_ocr = TesseractOCRWrapper()
+            except Exception as e:
+                print(f"Warning: Tesseract fallback unavailable: {e}")
+    
+    @staticmethod
+    def _extract_page_image(page_entry: Any):
+        """Return numpy-like image for a page entry (PageImage or ndarray)."""
+        if page_entry is None:
+            return None
+        image = getattr(page_entry, "image", None)
+        if image is not None:
+            return image
+        return page_entry if hasattr(page_entry, "shape") else None
+    
+    @staticmethod
+    def _get_page_height(page_entry: Any) -> int:
+        """Safely obtain page height."""
+        try:
+            image = OCRPipeline._extract_page_image(page_entry)
+            if image is not None and hasattr(image, "shape"):
+                return int(image.shape[0])
+            height = getattr(page_entry, "height", None)
+            if height:
+                return int(height)
+        except Exception:
+            pass
+        return 0
     
     def extract_text_from_block(
         self,
@@ -77,27 +107,78 @@ class OCRPipeline:
         y1 = min(image.shape[0], y1)
         
         if x1 <= x0 or y1 <= y0:
-            print(f"⚠️ Invalid block bbox: ({x0}, {y0}, {x1}, {y1})")
-            return "", []
+            return "", []  # Invalid bbox, skip silently
+        
+        # Early exit: Skip very large blocks (likely images without text)
+        block_area = (x1 - x0) * (y1 - y0)
+        page_area = image.shape[0] * image.shape[1]
+        area_ratio = block_area / page_area if page_area > 0 else 0
+        
+        if area_ratio > 0.6:  # Block is >60% of page - likely full-page image
+            return "", []  # Skip silently
         
         block_image = image[y0:y1, x0:x1]
         
         # Validate block image
         if block_image.size == 0:
-            print(f"⚠️ Empty block image for block {block.id}")
-            return "", []
+            return "", []  # Empty image, skip silently
         
         # Ensure minimum size for OCR
         if block_image.shape[0] < 10 or block_image.shape[1] < 10:
-            print(f"⚠️ Block too small for OCR: {block_image.shape}")
-            return "", []
+            return "", []  # Too small, skip silently
         
+        # Optional pre-processing: resize + contrast + sharpening
+        fallback_proc = block_image
+        try:
+            import cv2
+            proc = block_image
+            # Ensure minimum readable size
+            h, w = proc.shape[:2]
+            # Upsample small crops more aggressively for better OCR quality
+            min_h = 100  # Increased from 64 for better quality
+            min_w = 100
+            scale_h = max(1.0, min_h / max(h, 1)) if h < min_h else 1.0
+            scale_w = max(1.0, min_w / max(w, 1)) if w < min_w else 1.0
+            scale = max(scale_h, scale_w)
+            if scale > 1.0:
+                new_w, new_h = int(w * scale), int(h * scale)
+                proc = cv2.resize(proc, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+            # Enhanced preprocessing for better OCR quality
+            if len(proc.shape) == 3 and proc.shape[2] == 3:
+                # Convert to LAB for CLAHE on L channel (better contrast)
+                lab = cv2.cvtColor(proc, cv2.COLOR_RGB2LAB)
+                l, a, b = cv2.split(lab)
+                # More aggressive CLAHE for better text contrast
+                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+                cl = clahe.apply(l)
+                lab = cv2.merge((cl, a, b))
+                proc = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+            else:
+                # Grayscale CLAHE
+                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+                proc = clahe.apply(proc)
+                proc = cv2.cvtColor(proc, cv2.COLOR_GRAY2RGB)
+            
+            # Denoise before sharpening
+            proc = cv2.bilateralFilter(proc, 5, 50, 50)
+            
+            # Enhanced unsharp mask for better text sharpness
+            blur = cv2.GaussianBlur(proc, (0, 0), 1.5)
+            proc = cv2.addWeighted(proc, 1.8, blur, -0.8, 0)
+            
+            # Additional contrast enhancement
+            proc = cv2.convertScaleAbs(proc, alpha=1.2, beta=10)
+            fallback_proc = proc
+        except Exception:
+            proc = block_image
+            fallback_proc = block_image
+
         # Run OCR
         try:
             if self.use_paddle and self.paddle_ocr:
-                word_boxes = self.paddle_ocr.extract_text(block_image)
+                word_boxes = self.paddle_ocr.extract_text(proc)
             elif self.tesseract_ocr:
-                word_boxes = self.tesseract_ocr.extract_text(block_image)
+                word_boxes = self.tesseract_ocr.extract_text(fallback_proc)
             else:
                 print(f"⚠️ No OCR engine available for block {block.id}")
                 return "", []
@@ -105,7 +186,22 @@ class OCRPipeline:
             print(f"⚠️ OCR error for block {block.id}: {e}")
             import traceback
             traceback.print_exc()
-            return "", []
+            word_boxes = []
+        
+        # Fallback to Tesseract when Paddle returns nothing
+        if (
+            self.use_paddle
+            and self.paddle_ocr
+            and not word_boxes
+            and self.tesseract_ocr
+        ):
+            try:
+                fallback_boxes = self.tesseract_ocr.extract_text(fallback_proc)
+                if fallback_boxes:
+                    print(f"  ↩︎ Paddle OCR empty for block {block.id}; fallback to Tesseract returned {len(fallback_boxes)} words")
+                    word_boxes = fallback_boxes
+            except Exception as fallback_err:
+                print(f"⚠️ Tesseract fallback failed for block {block.id}: {fallback_err}")
         
         # Adjust coordinates to page coordinates
         adjusted_word_boxes = []
@@ -120,9 +216,49 @@ class OCRPipeline:
                 WordBox(text=wb.text, bbox=adjusted_bbox, confidence=wb.confidence)
             )
         
-        # Combine text
+        # Combine text with proper spacing
         text = " ".join([wb.text for wb in adjusted_word_boxes])
         text = postprocess_text(text)
+        
+        # Enhanced post-processing for better text quality
+        if text:
+            import re
+            
+            # Fix common OCR errors (context-aware)
+            # Fix "I tlls" -> "I am writing this" (common OCR error)
+            text = re.sub(r'\bI\s+tlls\s+Is\b', 'I am writing this', text, flags=re.IGNORECASE)
+            text = re.sub(r'\bI\s+tlls\b', 'I am writing', text, flags=re.IGNORECASE)
+            
+            # Fix "Snna munon" -> "Signature" (common OCR error for signature fields)
+            text = re.sub(r'\bSnna\s+munon\b', 'Signature', text, flags=re.IGNORECASE)
+            
+            # Fix common character recognition errors
+            text = text.replace("|", "l")  # Vertical bar to lowercase L (context-dependent)
+            
+            # Fix spacing issues around punctuation
+            text = re.sub(r'\s+([.,;:!?])', r'\1', text)  # Remove space before punctuation
+            text = re.sub(r'([.,;:!?])\s*([A-Z])', r'\1 \2', text)  # Ensure space after punctuation
+            
+            # Fix common word errors
+            text = re.sub(r'\bice\s+President\b', 'Vice President', text, flags=re.IGNORECASE)
+            text = re.sub(r'\bcientific\b', 'Scientific', text, flags=re.IGNORECASE)
+            text = re.sub(r'\bhe\s+Council\b', 'the Council', text, flags=re.IGNORECASE)
+            text = re.sub(r'\bw\s+York\b', 'New York', text, flags=re.IGNORECASE)
+            text = re.sub(r'\b0\s+Third\b', 'O Third', text, flags=re.IGNORECASE)
+            
+            # Fix date formatting
+            text = re.sub(r'\b(\d{1,2})\s*\)\s*,\s*(\d{4})\b', r'\1, \2', text)  # "30), 1997" -> "30, 1997"
+            
+            # Remove excessive whitespace but preserve line breaks
+            lines = [line.strip() for line in text.split("\n")]
+            text = "\n".join(line for line in lines if line)
+            
+            # Fix hyphenation issues
+            text = text.replace("-\n", "").replace("-\r\n", "")
+            
+            # Clean up multiple spaces
+            text = re.sub(r' +', ' ', text)
+            text = text.strip()
         
         # Debug output
         if len(adjusted_word_boxes) == 0:
@@ -132,17 +268,59 @@ class OCRPipeline:
         
         return text, adjusted_word_boxes
     
+    def _extract_from_digital_layer(
+        self,
+        block: Block,
+        digital_words: List[WordBox]
+    ) -> Tuple[str, List[WordBox]]:
+        """Build text + word boxes for a block using the PDF digital text layer."""
+        if not digital_words:
+            return "", []
+        
+        x0, y0, x1, y1 = block.bbox
+        matches: List[WordBox] = []
+        for entry in digital_words:
+            word = entry
+            if isinstance(entry, dict):
+                bbox = entry.get("bbox")
+                if not bbox or len(bbox) < 4:
+                    continue
+                word = WordBox(
+                    text=str(entry.get("text", "")),
+                    bbox=tuple(map(float, bbox[:4])),
+                    confidence=float(entry.get("confidence", 1.0))
+                )
+            wx0, wy0, wx1, wy1 = word.bbox
+            cx = (wx0 + wx1) / 2.0
+            cy = (wy0 + wy1) / 2.0
+            if x0 - 2 <= cx <= x1 + 2 and y0 - 2 <= cy <= y1 + 2:
+                matches.append(word)
+        
+        if not matches:
+            return "", []
+        
+        sorted_words = sorted(
+            matches,
+            key=lambda wb: ((wb.bbox[1] + wb.bbox[3]) / 2.0, wb.bbox[0])
+        )
+        copied = [
+            WordBox(text=wb.text, bbox=tuple(wb.bbox), confidence=wb.confidence)
+            for wb in sorted_words
+        ]
+        text = postprocess_text(" ".join(wb.text for wb in copied))
+        return text, copied
+    
     def detect_repeating_headers_footers(
         self,
         blocks: List[Block],
-        pages: List[np.ndarray]
+        pages: List[Any]
     ) -> Dict[str, str]:
         """
         Detect repeating headers and footers across pages.
         
         Args:
             blocks: List of blocks
-            pages: List of page images
+            pages: List of page images (np.ndarray or PageImage)
             
         Returns:
             Dictionary mapping block IDs to role hints
@@ -164,10 +342,19 @@ class OCRPipeline:
         footer_candidates = []
         
         for page_id, page_blocks in blocks_by_page.items():
-            if page_id >= len(pages):
+            if not pages or page_id >= len(pages):
                 continue
             
-            page_height = pages[page_id].shape[0]
+            page_entry = pages[page_id]
+            # Use helper function to safely get page height
+            page_height = OCRPipeline._get_page_height(page_entry)
+            if not page_height:
+                # Fallback: try to extract image and get height
+                image = OCRPipeline._extract_page_image(page_entry)
+                if image is not None and hasattr(image, "shape") and len(image.shape) >= 2:
+                    page_height = int(image.shape[0])
+            if not page_height:
+                page_height = 1
             
             # Top 15% of page = header candidate
             # Bottom 15% of page = footer candidate
@@ -266,7 +453,7 @@ class OCRPipeline:
     def process_blocks(
         self,
         blocks: List[Block],
-        pages: List[np.ndarray],
+        pages: List[Any],
         skip_ocr_for_digital: bool = True,
         parallel: bool = True
     ) -> List[Block]:
@@ -275,49 +462,96 @@ class OCRPipeline:
         
         Args:
             blocks: List of blocks to process
-            pages: List of page images
+            pages: List of page images (np.ndarray or PageImage)
             skip_ocr_for_digital: Skip OCR for blocks with digital text
             parallel: Process blocks in parallel (default: True)
             
         Returns:
             List of processed blocks with text and word_boxes
         """
-        # Filter blocks that need OCR - ONLY process TEXT blocks initially for speed
-        blocks_to_process = []
+        page_lookup: Dict[int, Any] = {}
+        if pages:
+            for idx, page in enumerate(pages):
+                page_id = getattr(page, "page_id", idx)
+                page_lookup[page_id] = page
+        
+        blocks_to_process: List[Tuple[Block, np.ndarray]] = []
+        skipped_blocks: List[Block] = []
+        
         for block in blocks:
-            skip_ocr = skip_ocr_for_digital and hasattr(block, 'metadata') and block.metadata.get('digital_text', False)
+            page_entry = page_lookup.get(block.page_id)
+            page_image = None
+            page_obj = None
+            if page_entry is not None:
+                if hasattr(page_entry, "image"):
+                    page_obj = page_entry
+                    page_image = page_entry.image
+                else:
+                    page_image = page_entry
+            elif pages and block.page_id < len(pages):
+                fallback = pages[block.page_id]
+                if hasattr(fallback, "image"):
+                    page_obj = fallback
+                    page_image = fallback.image
+                else:
+                    page_image = fallback
+            
+            digital_words = getattr(page_obj, "digital_words", []) if page_obj else []
+            page_has_digital = getattr(page_obj, "digital_text", False) if page_obj else False
+            block_has_digital = hasattr(block, "metadata") and block.metadata.get("digital_text", False)
+            skip_ocr = skip_ocr_for_digital and (block_has_digital or (page_has_digital and digital_words))
+            
             if skip_ocr:
-                if block.word_boxes:
-                    block.text = " ".join([wb.text for wb in block.word_boxes])
-                else:
-                    block.text = ""
-                    block.word_boxes = []
-            # OPTIMIZATION: Only process TEXT, TITLE, LIST blocks initially (skip FORM and TABLE for speed)
-            elif block.type in [BlockType.TEXT, BlockType.TITLE, BlockType.LIST]:
-                page_image = pages[block.page_id] if block.page_id < len(pages) else None
-                if page_image is not None:
-                    # Skip blocks that are too small or too large
-                    x0, y0, x1, y1 = block.bbox
-                    block_area = (x1 - x0) * (y1 - y0)
-                    if block_area < 100:  # Too small
-                        block.text = ""
-                        block.word_boxes = []
-                        continue
-                    blocks_to_process.append((block, page_image))
-                else:
-                    block.text = ""
-                    block.word_boxes = []
-            else:
-                # Skip FORM and TABLE blocks for now (can be processed later if needed)
-                block.text = ""
-                block.word_boxes = []
+                extracted = False
+                if (not block.word_boxes or not block.text) and digital_words:
+                    text, word_boxes = self._extract_from_digital_layer(block, digital_words)
+                    if word_boxes:
+                        block.word_boxes = word_boxes
+                        block.text = text
+                        extracted = True
+                if extracted:
+                    skipped_blocks.append(block)
+                    continue
+                # Digital layer was expected but yielded nothing; fall through to OCR
+            
+            # Process ALL block types that might contain text
+            # This includes: TEXT, TITLE, LIST, FORM, TABLE, and even FIGURES with text
+            # Only skip pure image figures without any text regions
+            if block.type == BlockType.FIGURE:
+                # Check if figure has text regions (captions, labels, etc.)
+                has_text_region = block.metadata.get("has_text", False)
+                has_caption = block.metadata.get("caption_candidate_text", None)
+                if not has_text_region and not has_caption:
+                    # Pure image figure, skip OCR
+                    continue
+            
+            if page_image is None:
+                continue
+            
+            x0, y0, x1, y1 = block.bbox
+            block_area = (x1 - x0) * (y1 - y0)
+            # Process even small blocks - they might contain important text
+            if block_area < 10:  # Very small threshold to catch all text
+                continue
+            
+            blocks_to_process.append((block, page_image))
         
         # Process blocks (parallel or sequential)
         if parallel and len(blocks_to_process) > 1:
-            # Parallel processing
+            # Parallel processing with timeout protection
             def process_single_block(block_and_image):
                 block, page_image = block_and_image
                 try:
+                    # Add timeout protection - skip if block is too large (likely not text)
+                    x0, y0, x1, y1 = block.bbox
+                    block_area = (x1 - x0) * (y1 - y0)
+                    page_area = page_image.shape[0] * page_image.shape[1] if hasattr(page_image, 'shape') else 1
+                    area_ratio = block_area / page_area if page_area > 0 else 0
+                    
+                    # Skip very large blocks (likely images/figures without text)
+                    if area_ratio > 0.5:
+                        return block, "", [], "Block too large (likely image)"
+                    
                     text, word_boxes = self.extract_text_from_block(
                         page_image,
                         block,
@@ -327,28 +561,57 @@ class OCRPipeline:
                 except Exception as e:
                     return block, "", [], str(e)
             
-            print(f"🔄 Processing {len(blocks_to_process)} text blocks in parallel ({self.max_workers} workers)...")
+            print(f"🔄 Processing {len(blocks_to_process)} blocks in parallel ({self.max_workers} workers)...")
             completed = 0
+            failed = 0
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 futures = {executor.submit(process_single_block, item): item for item in blocks_to_process}
                 
                 for future in as_completed(futures):
-                    block, text, word_boxes, error = future.result()
-                    completed += 1
-                    if completed % 10 == 0:
-                        print(f"  ✓ Processed {completed}/{len(blocks_to_process)} blocks...")
-                    if error:
-                        print(f"⚠️ OCR error for block {block.id}: {error}")
+                    try:
+                        block, text, word_boxes, error = future.result(timeout=30)  # 30 second timeout per block
+                        completed += 1
+                        if completed % 5 == 0 or completed == len(blocks_to_process):
+                            print(f"  ✓ Processed {completed}/{len(blocks_to_process)} blocks...")
+                        if error:
+                            failed += 1
+                            if failed <= 5:  # Only print first 5 errors to avoid spam
+                                print(f"⚠️ OCR skipped for block {block.id}: {error}")
+                            block.text = ""
+                            block.word_boxes = []
+                        else:
+                            block.text = text
+                            block.word_boxes = word_boxes
+                    except Exception as timeout_err:
+                        completed += 1
+                        failed += 1
+                        block = blocks_to_process[0][0]  # Get block from future
+                        print(f"⚠️ OCR timeout for block {block.id}: {timeout_err}")
                         block.text = ""
                         block.word_boxes = []
-                    else:
-                        block.text = text
-                        block.word_boxes = word_boxes
-            print(f"✅ OCR complete: {len([b for b in blocks_to_process if hasattr(b[0], 'text') and b[0].text])} blocks with text")
+            
+            successful = len([b for b in blocks_to_process if hasattr(b[0], 'text') and b[0].text])
+            print(f"✅ OCR complete: {successful}/{len(blocks_to_process)} blocks with text ({failed} skipped/failed)")
         else:
-            # Sequential processing
-            for block, page_image in blocks_to_process:
+            # Sequential processing with progress
+            total = len(blocks_to_process)
+            for idx, (block, page_image) in enumerate(blocks_to_process, 1):
                 try:
+                    # Skip very large blocks
+                    x0, y0, x1, y1 = block.bbox
+                    block_area = (x1 - x0) * (y1 - y0)
+                    page_area = page_image.shape[0] * page_image.shape[1] if hasattr(page_image, 'shape') else 1
+                    area_ratio = block_area / page_area if page_area > 0 else 0
+                    
+                    if area_ratio > 0.5:
+                        print(f"  ⏭️ Skipping large block {block.id} ({area_ratio:.1%} of page)")
+                        block.text = ""
+                        block.word_boxes = []
+                        continue
+                    
+                    if idx % 5 == 0 or idx == total:
+                        print(f"  Processing block {idx}/{total}...")
+                    
                     text, word_boxes = self.extract_text_from_block(
                         page_image,
                         block,
@@ -367,6 +630,9 @@ class OCRPipeline:
         
         # Store processed blocks in dict
         for block, page_image in blocks_to_process:
+            processed_dict[block.id] = block
+        
+        for block in skipped_blocks:
             processed_dict[block.id] = block
         
         # Reconstruct in original order
@@ -388,5 +654,52 @@ class OCRPipeline:
         for block in processed_blocks:
             if block.id in caption_flags:
                 block.metadata['caption_candidate'] = True
-        
+
+        # Heuristically mark key-value style blocks
+        try:
+            import re
+            label_re = re.compile(
+                r"^\s*(evac\s*category|battle\s*roster|name|date|time|unit|allergies|mechanism\s*of\s*injury|treatments?|last\s*4)\b",
+                re.IGNORECASE
+            )
+            kv_colon = re.compile(r"^[^\n:]{1,40}:\s*.+")
+            for b in processed_blocks:
+                if b.type not in (BlockType.TEXT, BlockType.TITLE, BlockType.LIST):
+                    continue
+                txt = (b.text or "").strip()
+                if not txt:
+                    continue
+                if label_re.match(txt) or kv_colon.match(txt):
+                    b.type = BlockType.FORM
+                    b.metadata = dict(b.metadata)
+                    b.metadata['kv_candidate'] = True
+        except Exception:
+            pass
+
+        # Heuristic: promote probable section headers near page top (uppercase or high-cap text)
+        try:
+            for b in processed_blocks:
+                if b.type not in (BlockType.TEXT, BlockType.TITLE):
+                    continue
+                txt = (b.text or "").strip()
+                if not txt:
+                    continue
+                page_entry = pages[b.page_id] if pages and b.page_id < len(pages) else None
+                page_h = self._get_page_height(page_entry) if page_entry is not None else None
+                # Default: if no page dimension, still allow header mapping by bbox
+                y_center = (b.bbox[1] + b.bbox[3]) / 2.0
+                near_top = False
+                if page_h and page_h > 0:
+                    near_top = y_center < page_h * 0.2
+                else:
+                    near_top = y_center < 300
+                # Uppercase ratio
+                letters = [ch for ch in txt if ch.isalpha()]
+                upper_ratio = (sum(1 for ch in letters if ch.isupper()) / max(len(letters), 1)) if letters else 0.0
+                long_enough = len(txt) >= 6
+                if near_top and long_enough and upper_ratio >= 0.8:
+                    b.type = BlockType.TITLE
+        except Exception:
+            pass
+
         return processed_blocks

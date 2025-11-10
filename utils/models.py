@@ -57,6 +57,7 @@ class PageImage:
     height: int
     dpi: int = 300
     digital_text: bool = False  # True if PDF has digital text layer
+    digital_words: List[WordBox] = field(default_factory=list)
     preprocess_metadata: Dict[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):

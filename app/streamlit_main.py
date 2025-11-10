@@ -5,6 +5,7 @@ Professional UI with collapsible sidebar and enhanced visualization.
 import sys
 from pathlib import Path
 import json
+import inspect
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent
@@ -14,10 +15,12 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from collections import Counter
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List, Dict, Any
 import cv2
+import time
+from uuid import uuid4
 
-from utils.models import Document, Block, BlockType
+from utils.models import Document, Block, BlockType, TableBlock, FigureBlock
 from utils.config import Config
 from src.pipelines.ingest import ingest_document
 from src.pipelines.segment import LayoutSegmenter
@@ -54,6 +57,47 @@ st.markdown("""
         border-radius: 0.5rem;
         margin: 0.5rem 0;
     }
+    .result-card {
+        border: 1px solid #E0E3EB;
+        border-radius: 10px;
+        padding: 0.85rem 1rem;
+        margin-bottom: 0.6rem;
+        background: #fff;
+        transition: all 0.15s ease;
+    }
+    .result-card:hover {
+        border-color: #5F6FFF;
+        box-shadow: 0 2px 6px rgba(95,111,255,0.15);
+    }
+    .result-card.active {
+        border-color: #3956D1;
+        box-shadow: 0 4px 10px rgba(57,86,209,0.25);
+        background: #EEF2FF;
+    }
+    .result-card .result-label {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #68718A;
+        margin-bottom: 0.25rem;
+    }
+    .result-card .result-text {
+        font-size: 0.95rem;
+        color: #131620;
+        line-height: 1.4;
+        white-space: pre-wrap;
+    }
+    .block-pill {
+        padding: 0.35rem 0.65rem;
+        border-radius: 999px;
+        border: 1px solid #E0E3EB;
+        margin: 0.2rem 0;
+        cursor: pointer;
+    }
+    .block-pill.active {
+        border-color: #1E88E5;
+        background: #E3F2FD;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -62,6 +106,256 @@ def _bgr_to_hex(color: Tuple[int, int, int]) -> str:
     """Convert BGR color tuple to HEX string."""
     b, g, r = color
     return f"#{int(r):02x}{int(g):02x}{int(b):02x}"
+
+
+def _format_duration(seconds: Optional[float]) -> str:
+    if not seconds or seconds <= 0:
+        return "—"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _render_block_text(block: Block) -> str:
+    text = (block.text or "").strip()
+    if text:
+        return text
+    if isinstance(block, TableBlock):
+        if block.headers or block.body:
+            lines = []
+            if block.headers:
+                for header_row in block.headers:
+                    lines.append("| " + " | ".join(header_row) + " |")
+                    lines.append("| " + " | ".join(["---"] * len(header_row)) + " |")
+            if block.body:
+                for row in block.body:
+                    lines.append("| " + " | ".join(row) + " |")
+            return "\n".join(lines) if lines else "[Table region]"
+        if block.shape:
+            rows, cols = block.shape
+            return f"[Table region ~ {rows}x{cols}]"
+        return "[Table region]"
+    if isinstance(block, FigureBlock):
+        return block.caption or "[Figure region]"
+    return "[Empty]"
+
+
+def _set_highlight(block_id: str):
+    st.session_state.highlight_id = block_id
+
+
+def _build_result_summary(
+    blocks: List[Block],
+    pages: List[Any],
+    duration: Optional[float] = None
+) -> Dict[str, Any]:
+    if not blocks or not pages:
+        return {}
+    
+    pages_map: Dict[int, Dict[str, Any]] = {}
+    for page in pages:
+        pages_map[page.page_id] = {
+            "page_id": page.page_id,
+            "page_number": page.page_id + 1,
+            "blocks": [],
+            "char_count": 0
+        }
+    
+    sorted_blocks = sorted(blocks, key=lambda b: (b.page_id, b.bbox[1], b.bbox[0]))
+
+    # Build page lookup to normalize coordinates
+    page_dims: Dict[int, Tuple[int, int]] = {}
+    for p in pages:
+        try:
+            if hasattr(p, "image") and getattr(p, "image", None) is not None:
+                image_obj = getattr(p, "image")
+                if hasattr(image_obj, "shape") and len(image_obj.shape) >= 2:
+                    h, w = int(image_obj.shape[0]), int(image_obj.shape[1])
+                elif hasattr(image_obj, "size"):
+                    w, h = image_obj.size  # type: ignore[attr-defined]
+                else:
+                    h = int(getattr(p, "height", 1) or 1)
+                    w = int(getattr(p, "width", 1) or 1)
+            elif hasattr(p, "width") and hasattr(p, "height"):
+                w, h = int(getattr(p, "width", 1) or 1), int(getattr(p, "height", 1) or 1)
+            else:
+                h = int(getattr(p, "height", 1) or 1)
+                w = int(getattr(p, "width", 1) or 1)
+        except Exception:
+            w, h = 1, 1
+        page_dims[getattr(p, "page_id", 0)] = (max(w, 1), max(h, 1))
+
+    def norm_bbox(page_id: int, bbox: Tuple[float, float, float, float]) -> Dict[str, float]:
+        w, h = page_dims.get(page_id, (1, 1))
+        x0, y0, x1, y1 = bbox
+        left = max(0.0, float(x0) / max(w, 1))
+        top = max(0.0, float(y0) / max(h, 1))
+        width = max(0.0, float(x1 - x0) / max(w, 1))
+        height = max(0.0, float(y1 - y0) / max(h, 1))
+        return {
+            "left": left,
+            "top": top,
+            "width": width,
+            "height": height,
+            "page": page_id + 1,
+            "original_page": page_id + 1,
+        }
+
+    def map_type_for_summary(block: Block) -> str:
+        if block.type == BlockType.TITLE:
+            return "Section Header"
+        if block.type == BlockType.FORM:
+            return "Key Value"
+        if block.type == BlockType.TABLE:
+            return "Table"
+        if block.type == BlockType.FIGURE:
+            return "Figure"
+        return "text"
+    for block in sorted_blocks:
+        page_entry = pages_map.setdefault(block.page_id, {
+            "page_id": block.page_id,
+            "page_number": block.page_id + 1,
+            "blocks": [],
+            "char_count": 0
+        })
+        text = _render_block_text(block)
+        entry = {
+            "id": block.id,
+            "type": map_type_for_summary(block),
+            "role": block.role.value if block.role else None,
+            "type_label": block.role.value if block.role else block.type.value,
+            "text": text,
+            "text_markdown": text.replace("\n", "  \n"),
+            "char_count": len(text),
+            "confidence": block.confidence,
+            "bbox": block.bbox,
+            "bbox_norm": norm_bbox(block.page_id, block.bbox),
+        }
+        page_entry["blocks"].append(entry)
+        page_entry["char_count"] += len(text)
+    
+    pages_list = []
+    chunks = []
+    total_chars = 0
+    for page_id in sorted(pages_map):
+        entry = pages_map[page_id]
+        entry["block_count"] = len(entry["blocks"])
+        total_chars += entry["char_count"]
+        pages_list.append(entry)
+        chunk_text = "\n\n".join([b["text"] for b in entry["blocks"] if b["text"]])
+        chunks.append({
+            "page_number": entry["page_number"],
+            "content": chunk_text,
+            "embed": chunk_text,
+            "enriched": None,
+            "enrichment_success": False,
+            "char_count": len(chunk_text),
+            "blocks": [
+                {
+                    "type": b["type"],
+                    "bbox": b["bbox_norm"],
+                    "content": b["text"],
+                    "image_url": None,
+                    "confidence": "high" if (b["confidence"] or 0) >= 0.8 else "low",
+                    "granular_confidence": {
+                        "extract_confidence": None,
+                        "parse_confidence": float(b["confidence"] or 0.0),
+                    },
+                }
+                for b in entry["blocks"]
+            ]
+        })
+    
+    summary = {
+        "job_id": str(uuid4()),
+        "duration": duration or 0.0,
+        "usage": {
+            "num_pages": len(pages),
+            "credits": round(len(pages) * 0.75, 2),
+            "total_characters": total_chars
+        },
+        "result": {
+            "type": "full",
+            "pages": pages_list,
+            "chunks": chunks
+        }
+    }
+    return summary
+
+
+def _render_results_panel(summary: Dict[str, Any]):
+    if not summary:
+        return
+    st.header("Results")
+    usage = summary.get("usage", {})
+    result_data = summary.get("result", {})
+    pages = result_data.get("pages", [])
+    chunks = result_data.get("chunks", [])
+    
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        st.metric("Pages parsed", usage.get("num_pages", 0))
+    with col_b:
+        st.metric("Processing time", _format_duration(summary.get("duration")))
+    with col_c:
+        st.metric("Total chunks", len(chunks))
+    
+    st.download_button(
+        "⬇️ Download Result JSON",
+        json.dumps(summary, indent=2),
+        file_name="doc2data_result.json",
+        mime="application/json",
+        use_container_width=True
+    )
+    
+    highlight_id = st.session_state.get("highlight_id")
+    all_choices: List[Tuple[str, str]] = []
+    for page in pages:
+        for block_entry in page.get("blocks", []):
+            block_label = block_entry.get("type_label", block_entry.get("type", "text"))
+            preview = (block_entry.get("text", "") or "").replace("\n", " ").strip()
+            preview = preview[:80] + ("…" if len(preview) > 80 else "")
+            choice_label = f"Page {page['page_number']} • {block_label} • {preview or '[Empty]'}"
+            all_choices.append((choice_label, block_entry["id"]))
+    
+    if all_choices:
+        labels = [label for label, _ in all_choices]
+        id_map = {label: block_id for label, block_id in all_choices}
+        default_index = 0
+        if highlight_id:
+            for idx, (_, block_id) in enumerate(all_choices):
+                if block_id == highlight_id:
+                    default_index = idx
+                    break
+        selected_label = st.selectbox(
+            "Jump to block",
+            options=labels,
+            index=default_index,
+            label_visibility="collapsed"
+        )
+        selected_id = id_map[selected_label]
+        if selected_id != highlight_id:
+            st.session_state.highlight_id = selected_id
+            highlight_id = selected_id
+    
+    for page in pages:
+        st.subheader(f"Page {page['page_number']} • {page.get('block_count', 0)} blocks • {page.get('char_count', 0)} characters")
+        for block_entry in page.get("blocks", []):
+            is_active = highlight_id == block_entry["id"]
+            card_class = "result-card active" if is_active else "result-card"
+            block_label = block_entry.get("type_label", block_entry.get("type", "text"))
+            text_md = block_entry.get("text_markdown", "")
+            text_html = text_md.replace("\n", "<br/>") if text_md else "<span style='color:#9AA0B5;'>[Empty]</span>"
+            st.markdown(
+                f"""
+                <div class="{card_class}">
+                    <div class="result-label">{block_label} • Page {page['page_number']}</div>
+                    <div class="result-text">{text_html}</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+            # Cards highlight automatically based on selectbox / page radio; no per-card buttons
 
 
 def draw_annotated_image(
@@ -180,6 +474,12 @@ def main():
         st.session_state.show_labels = True
     if "label_size" not in st.session_state:
         st.session_state.label_size = 0.6
+    if "enable_slm" not in st.session_state:
+        st.session_state.enable_slm = Config.ENABLE_SLM
+    if "enable_vlm" not in st.session_state:
+        st.session_state.enable_vlm = Config.ENABLE_VLM
+    if "result_summary" not in st.session_state:
+        st.session_state.result_summary = None
     
     # Sidebar (collapsible)
     if not sidebar_collapsed:
@@ -241,12 +541,13 @@ def main():
             st.session_state.run_ingest = st.checkbox("1️⃣ Ingest", value=st.session_state.run_ingest, help="Load and preprocess document")
             st.session_state.run_segment = st.checkbox("2️⃣ Segment", value=st.session_state.run_segment, help="Detect layout blocks")
             st.session_state.run_ocr = st.checkbox("3️⃣ OCR", value=st.session_state.run_ocr, help="Extract text from blocks")
-            st.session_state.run_label = st.checkbox("4️⃣ Label", value=st.session_state.run_label, help="Semantic labeling (stubbed)")
-            st.session_state.run_assemble = st.checkbox("5️⃣ Assemble", value=st.session_state.run_assemble, help="Generate JSON/Markdown")
+            st.session_state.run_label = st.checkbox("4️⃣ Label", value=st.session_state.run_label, help="Semantic labeling via Ollama SLM")
+            st.session_state.run_assemble = st.checkbox("5️⃣ Assemble", value=st.session_state.run_assemble, help="Build JSON/Markdown with tables + figures")
             
             # Model settings
             with st.expander("🔧 Model Settings", expanded=False):
-                default_model = (Config.LAYOUT_MODEL or "publaynet").lower()
+                from utils.config import Config as ConfigClass
+                default_model = (ConfigClass.LAYOUT_MODEL or "publaynet").lower()
                 model_options = ["publaynet", "prima", "docbank", "tablebank"]
                 selected_model = st.selectbox(
                     "Layout Model",
@@ -265,6 +566,20 @@ def main():
                     help="Lower = more granular blocks, Higher = fewer high-confidence blocks"
                 )
                 st.session_state.layout_threshold = det_threshold
+                
+                slm_toggle = st.checkbox(
+                    "Enable Semantic Labeling (Ollama)",
+                    value=st.session_state.enable_slm,
+                    help="Requires Ollama running with Qwen2.5-7B-Instruct pulled locally."
+                )
+                st.session_state.enable_slm = slm_toggle
+                
+                vlm_toggle = st.checkbox(
+                    "Enable Qwen-VL for tables/figures",
+                    value=st.session_state.enable_vlm,
+                    help="Used for table structure + figure classification when Ollama Qwen-VL is available."
+                )
+                st.session_state.enable_vlm = vlm_toggle
             
             # Visualization settings
             with st.expander("🎨 Visualization", expanded=False):
@@ -362,6 +677,8 @@ def main():
         st.session_state.current_page_idx = 0  # Default to first page
     
     # Run pipeline stages
+    pipeline_start = time.time()
+    
     if run_ingest:
         with st.spinner("🔄 Ingesting document..."):
             try:
@@ -372,6 +689,9 @@ def main():
                 st.session_state.assembled_json_dict = None
                 st.session_state.assembled_json_str = None
                 st.session_state.assembled_markdown = None
+                st.session_state.result_summary = None
+                st.session_state.result_summary = None
+                st.session_state.result_summary = None
                 if not sidebar_collapsed:
                     st.sidebar.success(f"✅ {len(pages)} pages loaded")
             except Exception as e:
@@ -384,27 +704,50 @@ def main():
         with st.spinner("🔄 Detecting layout blocks..."):
             try:
                 # Use cached segmenter for faster inference (models are loaded once)
+                # But don't cache by threshold - allow threshold changes
                 @st.cache_resource
-                def get_segmenter(model_name, threshold):
-                    return LayoutSegmenter(
+                def get_segmenter_base(model_name):
+                    print(f"🔄 Initializing LayoutSegmenter (this may take 1-2 minutes on first run)...")
+                    print(f"   Model: {model_name}")
+                    # Initialize with default threshold, we'll override it
+                    segmenter = LayoutSegmenter(
                         model_name=model_name,
-                        score_threshold=threshold,
+                        score_threshold=0.25,  # Default, will be overridden
                         enable_table_model=True
                     )
+                    print(f"✅ LayoutSegmenter initialized successfully")
+                    return segmenter
                 
-                segmenter = get_segmenter(
-                    st.session_state.get("layout_model_choice", "publaynet"),
-                    st.session_state.get("layout_threshold", 0.25)  # Lower default for better granularity
+                # Get base segmenter (cached by model only)
+                segmenter = get_segmenter_base(
+                    st.session_state.get("layout_model_choice", "publaynet")
                 )
+                
+                # Override threshold and heuristic strictness (not cached, so changes are respected)
+                current_threshold = st.session_state.get("layout_threshold", 0.25)
+                heuristic_strictness = st.session_state.get("heuristic_strictness", 0.7)
+                segmenter.extra_config["threshold"] = current_threshold
+                segmenter.heuristic_strictness = heuristic_strictness
+                if hasattr(segmenter.model, "threshold"):
+                    segmenter.model.threshold = current_threshold
+                print(f"   Using ML threshold: {current_threshold}, Heuristic strictness: {heuristic_strictness}")
                 all_blocks = []
                 
                 progress_bar = st.progress(0)
+                segment_sig = inspect.signature(segmenter.segment_page)
+                supports_digital = "digital_words" in segment_sig.parameters
+                
                 for idx, page in enumerate(st.session_state.pages):
+                    kwargs = {
+                        "merge_boxes": True,
+                        "resolve_order": True
+                    }
+                    if supports_digital:
+                        kwargs["digital_words"] = getattr(page, "digital_words", None)
                     blocks = segmenter.segment_page(
                         page.image,
                         page.page_id,
-                        merge_boxes=True,
-                        resolve_order=True
+                        **kwargs
                     )
                     all_blocks.extend(blocks)
                     progress_bar.progress((idx + 1) / len(st.session_state.pages))
@@ -429,118 +772,86 @@ def main():
                 st.code(traceback.format_exc())
     
     if run_ocr and st.session_state.blocks and st.session_state.pages:
-        # Get current page index from session state (set by page navigation or default to 0)
-        current_page_idx = st.session_state.current_page_idx
-        if current_page_idx >= len(st.session_state.pages):
-            current_page_idx = 0
-            st.session_state.current_page_idx = 0
         try:
-            # Use cached OCR pipeline for faster inference (models loaded once)
+            # Lazy OCR pipeline initialization (cached to avoid re-initialization)
             @st.cache_resource
             def get_ocr_pipeline():
-                return OCRPipeline(max_workers=4)  # Use parallel processing
+                print("🔄 Initializing OCR pipeline (one-time, may take 30-60 seconds)...")
+                return OCRPipeline(max_workers=4)
             
             ocr_pipeline = get_ocr_pipeline()
+            # Process ALL blocks that might contain text (not just TEXT/TITLE/LIST)
+            # This includes FORMS, TABLES, and even FIGURES (if they have text regions)
+            all_blocks = st.session_state.blocks
             
-            # OPTIMIZATION: Only process blocks from the currently displayed page
-            current_page_id = current_page_idx
-            current_page_image = st.session_state.pages[current_page_id].image if current_page_id < len(st.session_state.pages) else None
-            
-            if current_page_image is None:
-                st.warning("⚠️ No page image available for OCR")
+            if not all_blocks:
+                st.warning("⚠️ No blocks detected for OCR.")
                 st.stop()
             
-            # Filter blocks for current page only
-            valid_blocks = []
-            skipped_count = 0
-            page_area = current_page_image.shape[0] * current_page_image.shape[1]
+            st.info(f"🔄 Processing OCR on {len(all_blocks)} blocks (all types) across {len(st.session_state.pages)} pages...")
+            processed_batch = ocr_pipeline.process_blocks(
+                all_blocks,  # Process ALL blocks, not just text-like ones
+                st.session_state.pages,
+                skip_ocr_for_digital=True,
+                parallel=True
+            )
             
+            # Update blocks with OCR results
+            processed_map = {block.id: block for block in processed_batch}
+            final_blocks: List[Block] = []
             for block in st.session_state.blocks:
-                # Only process blocks from the current page
-                if block.page_id != current_page_id:
-                    continue
-                
-                x0, y0, x1, y1 = block.bbox
-                block_area = (x1 - x0) * (y1 - y0)
-                
-                # Skip blocks that are too small (less than 100 pixels)
-                if block_area < 100:
-                    skipped_count += 1
-                    continue
-                
-                # Skip figure blocks that are too large (likely misclassified, will be slow)
-                if block.type == BlockType.FIGURE and block_area > page_area * 0.5:
-                    skipped_count += 1
-                    continue
-                
-                # Only process TEXT blocks initially for speed (skip FORM and TABLE)
-                if block.type in [BlockType.TEXT, BlockType.TITLE, BlockType.LIST]:
-                    valid_blocks.append(block)
+                if block.id in processed_map:
+                    # Use the processed block (which has text and word_boxes)
+                    processed_block = processed_map[block.id]
+                    final_blocks.append(processed_block)
                 else:
-                    skipped_count += 1
-            
-            if not valid_blocks:
-                st.warning(f"⚠️ No valid blocks to process with OCR (skipped {skipped_count} blocks)")
-                st.stop()
-            
-            # Show progress
-            progress_container = st.container()
-            with progress_container:
-                st.info(f"🔄 Processing OCR on page {current_page_id + 1}: {len(valid_blocks)} blocks (skipped {skipped_count} invalid/large blocks)...")
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-            
-            # Process blocks for current page only
-            processed_blocks_dict = {}
-            total_blocks = len(valid_blocks)
-            
-            if total_blocks > 0:
-                # Process all blocks for current page
-                page_images_list = [current_page_image]  # Only current page
-                batch_result = ocr_pipeline.process_blocks(
-                    valid_blocks,
-                    page_images_list,
-                    skip_ocr_for_digital=True,
-                    parallel=True
-                )
-                
-                # Store results
-                for block in batch_result:
-                    processed_blocks_dict[block.id] = block
-                    progress = len(processed_blocks_dict) / total_blocks
-                    progress_bar.progress(progress)
-                    status_text.text(f"Processed: {len(processed_blocks_dict)}/{total_blocks} blocks ({int(progress*100)}%)")
-            
-            # Reconstruct full block list (preserve order, include skipped blocks)
-            final_blocks = []
-            for block in st.session_state.blocks:
-                if block.id in processed_blocks_dict:
-                    final_blocks.append(processed_blocks_dict[block.id])
-                else:
-                    # Keep original block if not processed (will have empty text)
-                    if not hasattr(block, 'text') or block.text is None:
+                    # Keep original block, ensure text attribute exists
+                    if not hasattr(block, "text") or block.text is None:
                         block.text = ""
+                    if not hasattr(block, "word_boxes") or block.word_boxes is None:
                         block.word_boxes = []
                     final_blocks.append(block)
             
             st.session_state.blocks = final_blocks
             
-            # Clear progress indicators
-            progress_bar.empty()
-            status_text.empty()
-            progress_container.empty()
+            # Count blocks with extracted text (check both text attribute and word_boxes)
+            populated_blocks = []
+            for b in final_blocks:
+                # Check if block has text (non-empty string)
+                has_text = False
+                text_content = ""
+                if hasattr(b, "text") and b.text is not None:
+                    text_content = str(b.text).strip()
+                    has_text = len(text_content) > 0
+                
+                # Also check word_boxes as fallback
+                has_word_boxes = False
+                if hasattr(b, "word_boxes") and b.word_boxes:
+                    has_word_boxes = len(b.word_boxes) > 0
+                    # If we have word_boxes but no text, reconstruct text
+                    if not has_text and has_word_boxes:
+                        text_content = " ".join([wb.text for wb in b.word_boxes if hasattr(wb, "text") and wb.text])
+                        has_text = len(text_content.strip()) > 0
+                
+                if has_text or has_word_boxes:
+                    populated_blocks.append(b)
             
-            # Count results
-            text_blocks = [b for b in final_blocks if b.text and len(b.text.strip()) > 0]
-            total_chars = sum(len(b.text) for b in text_blocks)
+            total_chars = sum(
+                len(str(b.text)) if (hasattr(b, "text") and b.text) else 
+                sum(len(wb.text) for wb in b.word_boxes if hasattr(wb, "text") and wb.text)
+                for b in populated_blocks
+            )
             
             if not sidebar_collapsed:
-                st.sidebar.success(f"✅ OCR complete: {len(text_blocks)}/{len(final_blocks)} blocks have text ({total_chars:,} chars)")
+                st.sidebar.success(
+                    f"✅ OCR complete: {len(populated_blocks)}/{len(final_blocks)} blocks with text extracted ({total_chars:,} chars)"
+                )
             
             st.session_state.document = None
             st.session_state.assembled_json_dict = None
             st.session_state.assembled_json_str = None
             st.session_state.assembled_markdown = None
+            st.session_state.result_summary = None
         except Exception as e:
             st.error(f"❌ OCR error: {e}")
             import traceback
@@ -549,14 +860,18 @@ def main():
     if run_label and st.session_state.blocks:
         with st.spinner("🔄 Labeling blocks..."):
             try:
-                slm_labeler = SLMLabeler(enabled=False)  # Stubbed
-                page_images = [page.image for page in st.session_state.pages] if st.session_state.pages else []
+                slm_labeler = SLMLabeler(enabled=st.session_state.get("enable_slm", Config.ENABLE_SLM))
+                page_images = st.session_state.pages if st.session_state.pages else []
                 st.session_state.blocks = slm_labeler.label_blocks(
                     st.session_state.blocks,
                     page_images
                 )
                 if not sidebar_collapsed:
-                    st.sidebar.success("✅ Labeling completed (stubbed)")
+                    if st.session_state.get("enable_slm", Config.ENABLE_SLM):
+                        status_msg = "✅ Labeling completed"
+                    else:
+                        status_msg = "✅ Labeling skipped (enable Ollama SLM to run)"
+                    st.sidebar.success(status_msg)
                 st.session_state.document = None
                 st.session_state.assembled_json_dict = None
                 st.session_state.assembled_json_str = None
@@ -567,7 +882,29 @@ def main():
     if run_assemble and st.session_state.blocks:
         with st.spinner("🔄 Assembling document..."):
             try:
-                assembler = DocumentAssembler()
+                try:
+                    assembler = DocumentAssembler(
+                        process_tables=True,
+                        process_figures=True,
+                        use_vlm=st.session_state.get("enable_vlm", Config.ENABLE_VLM)
+                    )
+                except TypeError:
+                    assembler = DocumentAssembler()
+                
+                # If many textual blocks have empty text, auto-run OCR now
+                text_like = {BlockType.TEXT, BlockType.TITLE, BlockType.LIST}
+                needs_ocr = any((b.type in text_like) and not (b.text and b.text.strip()) for b in st.session_state.blocks)
+                if needs_ocr and st.session_state.pages:
+                    @st.cache_resource
+                    def _get_ocr_pipeline_for_assemble():
+                        return OCRPipeline(max_workers=2)
+                    ocr_pipeline = _get_ocr_pipeline_for_assemble()
+                    st.session_state.blocks = ocr_pipeline.process_blocks(
+                        st.session_state.blocks,
+                        st.session_state.pages,
+                        skip_ocr_for_digital=True,
+                        parallel=False
+                    )
                 
                 doc = Document(
                     doc_id=document_label or document_path.name,
@@ -582,6 +919,11 @@ def main():
                 st.session_state.assembled_json_dict = assembled_json
                 st.session_state.assembled_json_str = json.dumps(assembled_json, indent=2)
                 st.session_state.assembled_markdown = assembled_markdown
+                st.session_state.result_summary = _build_result_summary(
+                    st.session_state.blocks,
+                    st.session_state.pages or [],
+                    duration=time.time() - pipeline_start
+                )
                 if not sidebar_collapsed:
                     st.sidebar.success("✅ Assembly completed")
             except Exception as e:
@@ -638,180 +980,133 @@ def main():
     else:
         annotated_image = page_image
     
-    # Layout: Image on left, info on right (or full width if sidebar collapsed)
-    if sidebar_collapsed:
-        # Full width layout when sidebar collapsed
+    # Professional two-column layout: Image left, Results/JSON right (like Reducto/Extend)
+    st.subheader(f"📄 Page {page_idx + 1} of {num_pages}")
+    
+    # Main content area: Image on left, Results/JSON on right
+    col_image, col_results = st.columns([1.2, 1])
+    
+    with col_image:
+        # Display annotated image
         st.image(annotated_image, use_column_width=True)
         
-        # Stats below image
-        col1, col2, col3, col4 = st.columns(4)
+        # Stats and metrics below image
+        st.markdown("---")
+        st.subheader("📊 Statistics")
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Total Blocks", len(page_blocks))
         with col2:
             type_counts = Counter([b.type.value for b in page_blocks])
-            st.metric("Types", len(type_counts))
+            st.metric("Block Types", len(type_counts))
         with col3:
             avg_conf = np.mean([b.confidence for b in page_blocks]) if page_blocks else 0
-            st.metric("Avg Confidence", f"{avg_conf:.2f}")
+            st.metric("Avg Confidence", f"{avg_conf:.3f}")
+        
+        # Additional metrics
+        col4, col5 = st.columns(2)
         with col4:
+            text_blocks = [b for b in page_blocks if b.text and b.text.strip()]
+            st.metric("Text Blocks", len(text_blocks))
+        with col5:
             if st.session_state.assembled_json_dict:
                 st.metric("Status", "✅ Complete")
             else:
                 st.metric("Status", "🔄 Processing")
         
-        # Tabs for outputs
-        tab1, tab2, tab3 = st.tabs(["📊 Blocks", "📄 JSON", "📝 Markdown"])
+        # Processing time if available
+        if st.session_state.get("result_summary"):
+            summary = st.session_state.result_summary
+            if "processing_time" in summary:
+                time_str = summary["processing_time"]
+                st.caption(f"⏱️ Processing time: {time_str}")
         
-        with tab1:
-            if page_blocks:
-                blocks_data = []
-                for block in page_blocks:
-                    blocks_data.append({
-                        "ID": block.id,
-                        "Type": block.type.value,
-                        "Confidence": f"{block.confidence:.3f}",
-                        "Text": (block.text or "")[:100] + ("..." if block.text and len(block.text) > 100 else ""),
-                        "BBox": f"({block.bbox[0]:.0f}, {block.bbox[1]:.0f}, {block.bbox[2]:.0f}, {block.bbox[3]:.0f})"
-                    })
-                st.dataframe(pd.DataFrame(blocks_data), use_container_width=True, hide_index=True)
+        st.markdown("---")
+        
+        # Block summary table
+        if page_blocks:
+            st.subheader("📋 Block Summary")
+            summary_data = []
+            for block_type, count in Counter([b.type.value for b in page_blocks]).most_common():
+                blocks_of_type = [b for b in page_blocks if b.type.value == block_type]
+                avg_conf = np.mean([b.confidence for b in blocks_of_type])
+                text_count = sum(1 for b in blocks_of_type if b.text and b.text.strip())
+                summary_data.append({
+                    "Type": block_type.upper(),
+                    "Count": count,
+                    "With Text": text_count,
+                    "Avg Confidence": f"{avg_conf:.3f}"
+                })
+            st.dataframe(pd.DataFrame(summary_data), use_container_width=True, hide_index=True)
+            
+            # Block list (read-only, no interaction to avoid re-runs)
+            st.subheader("📝 Detected Blocks")
+            for idx, block in enumerate(page_blocks, 1):
+                with st.expander(f"{idx}. {block.type.value.upper()} - {block.id[:20]}...", expanded=False):
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        st.markdown(f"**ID:** `{block.id}`")
+                        st.markdown(f"**Type:** `{block.type.value}`")
+                        if block.role:
+                            st.markdown(f"**Role:** `{block.role.value}`")
+                        st.markdown(f"**Confidence:** `{block.confidence:.3f}`")
+                    with col_b:
+                        st.markdown(f"**BBox:** `{block.bbox}`")
+                        st.markdown(f"**Page:** `{block.page_id + 1}`")
+                    
+                    if block.text and block.text.strip():
+                        st.markdown("**Extracted Text:**")
+                        st.text_area("", block.text, height=150, key=f"text_{block.id}", label_visibility="collapsed", disabled=True)
+                    else:
+                        st.info("No text extracted yet. Run OCR to extract text from this block.")
+        else:
+            st.info("No blocks detected. Run 'Segment' to detect layout blocks.")
+    
+    with col_results:
+        # Results and JSON tabs on the right
+        tab_results, tab_json = st.tabs(["📊 Results", "📄 JSON"])
+        
+        with tab_results:
+            if st.session_state.get("result_summary"):
+                _render_results_panel(st.session_state.result_summary)
             else:
-                st.info("No blocks detected. Run 'Segment' stage.")
+                st.info("Run 'Assemble' to generate the consolidated results summary.")
+                # Show quick page-level summary
+                if page_blocks:
+                    st.subheader("Page Blocks")
+                    for idx, block in enumerate(page_blocks[:10], 1):  # Show first 10
+                        snippet = (block.text or "").strip()[:100]
+                        st.markdown(f"**{idx}. {block.type.value.upper()}**")
+                        if snippet:
+                            st.caption(snippet)
+                        st.markdown("---")
         
-        with tab2:
+        with tab_json:
+            # JSON viewer with download buttons
             if st.session_state.assembled_json_dict:
                 st.json(st.session_state.assembled_json_dict)
-                st.download_button(
-                    "⬇️ Download JSON",
-                    st.session_state.assembled_json_str,
-                    file_name=f"{document_label or 'document'}.json",
-                    mime="application/json"
-                )
+                st.markdown("---")
+                if st.session_state.assembled_json_str:
+                    st.download_button(
+                        "⬇️ Download JSON",
+                        st.session_state.assembled_json_str,
+                        file_name=f"{document_label or 'document'}.json",
+                        mime="application/json",
+                        use_container_width=True
+                    )
+                if st.session_state.assembled_markdown:
+                    st.download_button(
+                        "⬇️ Download Markdown",
+                        st.session_state.assembled_markdown,
+                        file_name=f"{document_label or 'document'}.md",
+                        mime="text/markdown",
+                        use_container_width=True
+                    )
             elif page_blocks:
                 blocks_dict = [block.to_dict() for block in page_blocks]
                 st.json(blocks_dict)
             else:
-                st.info("Run 'Assemble' to generate JSON")
-        
-        with tab3:
-            if st.session_state.assembled_markdown:
-                st.markdown(st.session_state.assembled_markdown)
-                st.download_button(
-                    "⬇️ Download Markdown",
-                    st.session_state.assembled_markdown,
-                    file_name=f"{document_label or 'document'}.md",
-                    mime="text/markdown"
-                )
-            else:
-                st.info("Run 'Assemble' to generate Markdown")
-    
-    else:
-        # Two-column layout when sidebar visible
-        col_img, col_info = st.columns([2, 1])
-        
-        with col_img:
-            st.subheader(f"📄 Page {page_idx + 1} of {num_pages}")
-            
-            # Display annotated image
-            st.image(annotated_image, use_column_width=True)
-            
-            # Quick stats
-            col_stat1, col_stat2, col_stat3 = st.columns(3)
-            with col_stat1:
-                st.metric("Blocks", len(page_blocks))
-            with col_stat2:
-                type_counts = Counter([b.type.value for b in page_blocks])
-                st.metric("Types", len(type_counts))
-            with col_stat3:
-                avg_conf = np.mean([b.confidence for b in page_blocks]) if page_blocks else 0
-                st.metric("Confidence", f"{avg_conf:.2f}")
-            
-            # Block selector
-            if page_blocks:
-                st.subheader("🔍 Select Block")
-                block_options = {
-                    f"{b.id} ({b.type.value})": b.id
-                    for b in page_blocks
-                }
-                selected_block_key = st.selectbox(
-                    "Choose block to highlight",
-                    options=list(block_options.keys()),
-                    index=0 if highlight_id else None,
-                    key="block_select"
-                )
-                if selected_block_key:
-                    st.session_state.highlight_id = block_options[selected_block_key]
-                    if st.button("Highlight"):
-                        st.rerun()
-        
-        with col_info:
-            st.subheader("📊 Block Details")
-            
-            if highlight_id:
-                selected_block = next((b for b in page_blocks if b.id == highlight_id), None)
-                if selected_block:
-                    st.markdown(f"**ID:** `{selected_block.id}`")
-                    st.markdown(f"**Type:** `{selected_block.type.value}`")
-                    if selected_block.role:
-                        st.markdown(f"**Role:** `{selected_block.role.value}`")
-                    st.markdown(f"**Confidence:** `{selected_block.confidence:.3f}`")
-                    st.markdown(f"**BBox:** `{selected_block.bbox}`")
-                    
-                    if selected_block.text:
-                        st.markdown("**Text:**")
-                        st.text_area("", selected_block.text, height=200, key="block_text", label_visibility="collapsed")
-            
-            # Block summary table
-            if page_blocks:
-                st.subheader("📋 Block Summary")
-                summary_data = []
-                for block_type, count in Counter([b.type.value for b in page_blocks]).most_common():
-                    blocks_of_type = [b for b in page_blocks if b.type.value == block_type]
-                    avg_conf = np.mean([b.confidence for b in blocks_of_type])
-                    summary_data.append({
-                        "Type": block_type.upper(),
-                        "Count": count,
-                        "Avg Conf": f"{avg_conf:.2f}"
-                    })
-                st.dataframe(pd.DataFrame(summary_data), use_container_width=True, hide_index=True)
-            
-            # Outputs
-            st.subheader("📥 Outputs")
-            
-            if st.session_state.assembled_json_dict:
-                st.download_button(
-                    "⬇️ Download JSON",
-                    st.session_state.assembled_json_str,
-                    file_name=f"{document_label or 'document'}.json",
-                    mime="application/json",
-                    use_container_width=True
-                )
-            
-            if st.session_state.assembled_markdown:
-                st.download_button(
-                    "⬇️ Download Markdown",
-                    st.session_state.assembled_markdown,
-                    file_name=f"{document_label or 'document'}.md",
-                    mime="text/markdown",
-                    use_container_width=True
-                )
-            
-            # Tabs for detailed view
-            tab1, tab2 = st.tabs(["JSON", "Markdown"])
-            
-            with tab1:
-                if st.session_state.assembled_json_dict:
-                    st.json(st.session_state.assembled_json_dict)
-                elif page_blocks:
-                    blocks_dict = [block.to_dict() for block in page_blocks]
-                    st.json(blocks_dict)
-                else:
-                    st.info("Run 'Assemble' for full JSON")
-            
-            with tab2:
-                if st.session_state.assembled_markdown:
-                    st.markdown(st.session_state.assembled_markdown)
-                else:
-                    st.info("Run 'Assemble' for Markdown")
+                st.info("Run 'Assemble' to generate full JSON output.")
 
 
 if __name__ == "__main__":

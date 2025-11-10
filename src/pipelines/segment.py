@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
 import layoutparser as lp
 import numpy as np
-from utils.models import Block, BlockType, TableBlock, FigureBlock
+from utils.models import Block, BlockType, TableBlock, FigureBlock, WordBox
 from utils.config import Config
+from src.processing.postprocessing import postprocess_text
 
 try:
     from layoutparser.models.paddledetection.catalog import LABEL_MAP_CATALOG
@@ -30,11 +31,11 @@ class LayoutSegmenter:
     def __init__(
         self,
         model_name: Optional[str] = None,
-        score_threshold: float = 0.25,  # Lower default for more granular detection
+        score_threshold: float = 0.25,  # Balanced threshold (PubLayNet: 0.25-0.4 for good balance)
         target_size: Optional[Tuple[int, int]] = None,
-        table_threshold: float = 0.25,
+        table_threshold: float = 0.25,  # Balanced threshold for tables
         enable_table_model: bool = True,
-        split_large_blocks: bool = True,  # Enable splitting large blocks
+        split_large_blocks: bool = False,  # Disable aggressive splitting - let model do its job
         max_block_area_ratio: float = 0.3  # Max block area as ratio of page
     ):
         """
@@ -101,9 +102,29 @@ class LayoutSegmenter:
             elif hasattr(element, "confidence"):
                 confidence = float(element.confidence)
             
+            # Use class-specific thresholds for better multi-class detection
+            threshold = self.extra_config.get("threshold", 0.25)
+            
+            # Lower thresholds for text/forms/figures to ensure all classes are detected
+            if block_type in {BlockType.TEXT, BlockType.TITLE, BlockType.LIST}:
+                threshold = max(0.15, threshold * 0.7)  # More lenient for text blocks
+            elif block_type == BlockType.FORM:
+                threshold = max(0.15, threshold * 0.7)  # More lenient for forms
+            elif block_type == BlockType.FIGURE:
+                threshold = max(0.15, threshold * 0.7)  # More lenient for figures
+            elif block_type == BlockType.TABLE:
+                threshold = max(0.2, threshold * 0.85)  # Slightly more lenient for tables
+            
+            # Filter by confidence threshold
+            if confidence < threshold:
+                continue
+            
             metadata = {
                 "model_config": self.model_config or "unknown",
-                "model_backend": self.model_backend or ("heuristic" if self.use_heuristic else "unknown")
+                "model_backend": self.model_backend or ("heuristic" if self.use_heuristic else "unknown"),
+                "detection_method": "ml_model",
+                "detection_confidence": confidence,
+                "detection_threshold_used": threshold
             }
             block_kwargs = {
                 "id": block_id,
@@ -262,6 +283,7 @@ class LayoutSegmenter:
         
         if key in ("publaynet", "default", "text"):
             return [
+                ("detectron2", "lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config"),
                 ("paddle", "lp://PubLayNet/ppyolov2_r50vd_dcn_365e/config"),
                 ("paddle", "lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config"),
                 ("auto", "lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config"),
@@ -438,14 +460,7 @@ class LayoutSegmenter:
     ) -> List[Block]:
         """
         Enhance block list with heuristic form detection.
-        
-        Args:
-            image: Page image
-            blocks: Existing blocks
-            page_id: Page identifier
-            
-        Returns:
-            Updated block list
+        Only adds form blocks if they don't overlap significantly with existing blocks.
         """
         candidates = self._detect_form_candidates(image)
         if not candidates:
@@ -453,16 +468,26 @@ class LayoutSegmenter:
         
         updated_blocks: List[Block] = list(blocks)
         table_blocks = [b for b in updated_blocks if b.type == BlockType.TABLE]
+        form_blocks = [b for b in updated_blocks if b.type == BlockType.FORM]
         
+        added_count = 0
         for candidate in candidates:
             cand_bbox = candidate["bbox"]
             
             # Skip if heavily overlapping with table
             overlaps_table = any(
-                self._calculate_iou(cand_bbox, tbl.bbox) > 0.6
+                self._calculate_iou(cand_bbox, tbl.bbox) > 0.5
                 for tbl in table_blocks
             )
             if overlaps_table:
+                continue
+            
+            # Skip if already detected as form
+            overlaps_form = any(
+                self._calculate_iou(cand_bbox, form.bbox) > 0.4
+                for form in form_blocks
+            )
+            if overlaps_form:
                 continue
             
             best_block: Optional[Block] = None
@@ -473,7 +498,8 @@ class LayoutSegmenter:
                     best_iou = iou
                     best_block = block
             
-            if best_block and best_iou >= 0.45 and best_block.type not in (BlockType.TABLE, BlockType.FIGURE):
+            # Only reclassify if significant overlap and not already table/figure
+            if best_block and best_iou >= 0.5 and best_block.type not in (BlockType.TABLE, BlockType.FIGURE):
                 prev_type = best_block.type
                 best_block.type = BlockType.FORM
                 best_block.confidence = max(best_block.confidence, candidate["confidence"])
@@ -485,7 +511,7 @@ class LayoutSegmenter:
                     "form_iou": best_iou,
                     "form_detector": "line_density"
                 })
-            else:
+            elif best_iou < 0.3:  # Only add new block if it doesn't overlap much with existing
                 clipped_bbox = self._clip_bbox(cand_bbox, image.shape[1], image.shape[0])
                 new_block = Block(
                     id=f"{page_id}-form-{len(updated_blocks)}",
@@ -503,6 +529,10 @@ class LayoutSegmenter:
                     }
                 )
                 updated_blocks.append(new_block)
+                added_count += 1
+        
+        if added_count > 0:
+            print(f"  ➕ Added {added_count} form blocks via heuristics")
         
         return updated_blocks
     
@@ -533,8 +563,8 @@ class LayoutSegmenter:
         # Find contours
         contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        # Filter and create blocks
-        min_area = (image.shape[0] * image.shape[1]) * 0.001  # 0.1% of image area
+        # Filter and create blocks - reasonable threshold to avoid noise
+        min_area = (image.shape[0] * image.shape[1]) * 0.002  # 0.2% of image area (reasonable threshold)
         
         for i, contour in enumerate(contours):
             area = cv2.contourArea(contour)
@@ -613,17 +643,26 @@ class LayoutSegmenter:
                         blocks = self._layout_to_blocks(layout, page_id)
                         print(f"  ✓ Retry with threshold {new_threshold:.2f} returned {len(blocks)} blocks")
             
-            # Automatic threshold back-off if we get too few blocks
-            retry_threshold = 0.05
+            # Automatic threshold back-off ONLY if we get too few blocks or only one class
+            # But don't go too low (minimum 0.15) to maintain quality
+            retry_threshold = 0.15  # Minimum quality threshold
             current_threshold = getattr(self.model, "threshold", self.extra_config.get("threshold", 0.25))
-            if self._should_retry_with_lower_threshold(blocks) and current_threshold - retry_threshold > 1e-3:
-                new_threshold = max(retry_threshold, current_threshold * 0.5)
+            
+            # Check if we're only detecting one class (e.g., only tables)
+            type_counts = Counter(b.type for b in blocks)
+            only_one_class = len(type_counts) == 1
+            
+            # Only retry if we have very few blocks AND we're above minimum threshold
+            if (self._should_retry_with_lower_threshold(blocks) or only_one_class) and current_threshold > retry_threshold + 0.05:
+                new_threshold = max(retry_threshold, current_threshold * 0.8)  # Small reduction, not half
                 if new_threshold < current_threshold - 1e-3:
-                    print(f"  ℹ Low layout recall (only {len(blocks)} blocks); lowering threshold {current_threshold:.2f}→{new_threshold:.2f}")
+                    reason = "only one class detected" if only_one_class else f"only {len(blocks)} blocks"
+                    print(f"  ℹ Low layout recall ({reason}); lowering threshold {current_threshold:.2f}→{new_threshold:.2f}")
                     self.model.threshold = new_threshold
                     self.extra_config["threshold"] = new_threshold
                     layout = self.model.detect(image)
                     blocks = self._layout_to_blocks(layout, page_id)
+                    print(f"  ✓ Retry returned {len(blocks)} blocks with types: {dict(Counter(b.type for b in blocks))}")
         
         except Exception as e:
             print(f"Error in layout detection: {e}")
@@ -699,6 +738,106 @@ class LayoutSegmenter:
             if not overlaps:
                 filtered.append(block)
         return filtered
+    
+    def _detect_figures_heuristic(
+        self,
+        image: np.ndarray,
+        blocks: List[Block],
+        page_id: int
+    ) -> List[Block]:
+        """
+        Detect figure regions using heuristics (images, diagrams, charts).
+        This complements ML model detection for better figure coverage.
+        """
+        try:
+            import cv2
+        except ImportError:
+            return blocks
+        
+        height, width = image.shape[:2]
+        page_area = height * width
+        
+        # Find regions that might be figures
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = image.copy()
+        
+        # Detect large uniform regions (likely images)
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        figure_candidates = []
+        min_area = page_area * 0.01  # At least 1% of page
+        
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < min_area:
+                continue
+            
+            x, y, w, h = cv2.boundingRect(contour)
+            aspect_ratio = w / float(h) if h > 0 else 0
+            
+            # Skip very thin or very wide regions (likely lines)
+            if aspect_ratio > 10 or aspect_ratio < 0.1:
+                continue
+            
+            # Check if region has low text density (likely image/figure)
+            crop = gray[y:y+h, x:x+w]
+            if crop.size == 0:
+                continue
+            
+            # Calculate edge density (figures have more edges)
+            edges = cv2.Canny(crop, 50, 150)
+            edge_density = cv2.countNonZero(edges) / float(w * h)
+            
+            # Check if already detected as figure
+            bbox = (float(x), float(y), float(x+w), float(y+h))
+            overlaps_figure = any(
+                b.type == BlockType.FIGURE and self._calculate_iou(bbox, b.bbox) > 0.3
+                for b in blocks
+            )
+            
+            if overlaps_figure:
+                continue
+            
+            # If it has high edge density and low text density, it's likely a figure
+            if edge_density > 0.05:
+                figure_candidates.append({
+                    "bbox": bbox,
+                    "confidence": min(0.7, edge_density * 5),
+                    "edge_density": edge_density
+                })
+        
+        # Add figure blocks
+        updated_blocks = list(blocks)
+        added_count = 0
+        for idx, candidate in enumerate(figure_candidates):
+            # Check if overlaps with existing blocks significantly
+            overlaps = any(
+                self._calculate_iou(candidate["bbox"], b.bbox) > 0.5
+                for b in updated_blocks
+            )
+            
+            if not overlaps:
+                figure_block = Block(
+                    id=f"{page_id}-figure-heuristic-{idx}",
+                    type=BlockType.FIGURE,
+                    bbox=candidate["bbox"],
+                    page_id=page_id,
+                    confidence=candidate["confidence"],
+                    metadata={
+                        "detected_by": "figure_heuristic",
+                        "edge_density": candidate["edge_density"]
+                    }
+                )
+                updated_blocks.append(figure_block)
+                added_count += 1
+        
+        if added_count > 0:
+            print(f"  ➕ Added {added_count} figure blocks via heuristics")
+        
+        return updated_blocks
     
     def _detect_tables_with_model(
         self,
@@ -952,30 +1091,259 @@ class LayoutSegmenter:
         self,
         image: np.ndarray,
         blocks: List[Block],
-        page_id: int
+        page_id: int,
+        heuristic_strictness: float = 0.7
     ) -> List[Block]:
-        """Add heuristic text/list blocks when ML model misses them."""
-        text_like_types = {BlockType.TEXT, BlockType.TITLE, BlockType.LIST}
-        existing_text = sum(1 for b in blocks if b.type in text_like_types)
-        if existing_text >= max(3, len(blocks) // 4):
+        """
+        Add heuristic text/list blocks using connected components analysis.
+        Uses advanced CV methods to detect text regions missed by ML model.
+        """
+        try:
+            import cv2
+        except ImportError:
             return blocks
         
-        heuristic_blocks = self.detect_layout_heuristic(image, page_id)
-        page_height = image.shape[0]
-        for hb in heuristic_blocks:
-            if hb.type not in text_like_types:
+        text_like_types = {BlockType.TEXT, BlockType.TITLE, BlockType.LIST}
+        existing_text = sum(1 for b in blocks if b.type in text_like_types)
+        
+        # Always augment to ensure we catch all text regions
+        # Use connected components for better text detection
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = image.copy()
+        
+        # Apply adaptive threshold for better text detection
+        binary = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
+        )
+        
+        # Use morphological operations to connect text components (lighter touch)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        dilated = cv2.dilate(binary, kernel, iterations=1)
+        
+        # Find connected components
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(dilated, connectivity=8)
+        
+        height, width = image.shape[:2]
+        page_area = height * width
+        page_height = height
+        # Dynamic thresholds: if we already have many text-like blocks, be stricter
+        if existing_text >= 12:
+            min_area = page_area * 0.0005  # 0.05% of page to cut noise
+        else:
+            min_area = page_area * 0.00015  # slightly looser than before for small text
+        max_area = page_area * 0.5  # Max 50% of page
+        
+        added_count = 0
+        text_blocks = []
+        
+        for i in range(1, num_labels):  # Skip background (label 0)
+            x, y, w, h, area = stats[i]
+            
+            if area < min_area or area > max_area:
                 continue
-            if any(self._calculate_iou(hb.bbox, existing.bbox) > 0.25 for existing in blocks):
+            
+            # Skip extreme aspect ratios only (keep narrow labels)
+            aspect_ratio = w / float(h) if h > 0 else 0
+            if aspect_ratio > 30 or aspect_ratio < 0.05:
                 continue
-            # Promote top-of-page text blocks to title
-            if hb.type == BlockType.TEXT and hb.bbox[1] < page_height * 0.12:
-                hb.type = BlockType.TITLE
-                hb.level = 0
-                hb.metadata["role_hint"] = "title_candidate"
-            hb.metadata.update({"detected_by": "text_heuristic"})
-            blocks.append(hb)
+            
+            # Calculate text density in this region
+            crop = binary[y:y+h, x:x+w]
+            if crop.size == 0:
+                continue
+            
+            text_density = cv2.countNonZero(crop) / float(w * h)
+            
+            # Text regions should have reasonable text density
+            if text_density < 0.03 or text_density > 0.92:
+                continue
+            
+            bbox = (float(x), float(y), float(x+w), float(y+h))
+            
+            # Check if overlaps significantly with existing blocks
+            overlaps = any(self._calculate_iou(bbox, existing.bbox) > 0.4 for existing in blocks)
+            if overlaps:
+                continue
+            
+            # Determine block type based on position, size, and content characteristics
+            # Stricter LIST detection: require multiple indicators, not just aspect ratio
+            is_potential_list = (
+                aspect_ratio < 0.6 and 
+                h > page_height * 0.05 and
+                area > page_area * 0.001  # Minimum area for list (not single character)
+            )
+            
+            # Check for list markers or patterns (bullets, numbers, etc.)
+            # Stricter LIST detection based on heuristic_strictness (0.0 = lenient, 1.0 = very strict)
+            # Higher strictness = higher thresholds to avoid false positives
+            min_text_density = 0.10 + (0.10 * heuristic_strictness)  # 0.10 to 0.20
+            min_width = 15 + (10 * heuristic_strictness)  # 15 to 25
+            min_height = 25 + (10 * heuristic_strictness)  # 25 to 35
+            
+            is_list = (
+                is_potential_list and
+                text_density > min_text_density and
+                w > min_width and h > min_height
+            )
+            
+            if y < page_height * 0.15 and h < page_height * 0.1:
+                block_type = BlockType.TITLE
+            elif is_list:
+                block_type = BlockType.LIST
+            else:
+                block_type = BlockType.TEXT
+            
+            text_block = Block(
+                id=f"text_cc_{page_id}_{i}",
+                type=block_type,
+                bbox=bbox,
+                page_id=page_id,
+                confidence=min(0.7, text_density * 2),
+                metadata={
+                    "detected_by": "text_connected_components",
+                    "text_density": text_density,
+                    "aspect_ratio": aspect_ratio,
+                    "area_ratio": area / page_area if page_area > 0 else 0,
+                    "reasoning": f"Detected via connected components: aspect_ratio={aspect_ratio:.2f}, text_density={text_density:.3f}"
+                }
+            )
+            text_blocks.append(text_block)
+            added_count += 1
+        
+        if added_count > 0:
+            print(f"  ➕ Added {added_count} text/title/list blocks via connected components")
+            blocks.extend(text_blocks)
         
         return blocks
+
+    def _attach_digital_text(
+        self,
+        blocks: List[Block],
+        digital_words: Optional[List[WordBox]]
+    ) -> List[Block]:
+        """
+        Attach digital text (when available) to blocks so OCR can be skipped.
+        
+        Args:
+            blocks: Detected blocks
+            digital_words: Word boxes extracted from PDF text layer
+        
+        Returns:
+            Blocks with digital text metadata populated
+        """
+        if not digital_words:
+            return blocks
+        
+        for block in blocks:
+            x0, y0, x1, y1 = block.bbox
+            words_in_block: List[WordBox] = []
+            for entry in digital_words:
+                word = entry
+                if isinstance(entry, dict):
+                    bbox = entry.get("bbox")
+                    if not bbox or len(bbox) < 4:
+                        continue
+                    word = WordBox(
+                        text=str(entry.get("text", "")),
+                        bbox=tuple(map(float, bbox[:4])),
+                        confidence=float(entry.get("confidence", 1.0))
+                    )
+                wx0, wy0, wx1, wy1 = word.bbox
+                cx = (wx0 + wx1) / 2.0
+                cy = (wy0 + wy1) / 2.0
+                if (x0 - 2) <= cx <= (x1 + 2) and (y0 - 2) <= cy <= (y1 + 2):
+                    words_in_block.append(word)
+            
+            if not words_in_block:
+                continue
+            
+            sorted_words = sorted(
+                words_in_block,
+                key=lambda wb: ((wb.bbox[1] + wb.bbox[3]) / 2.0, wb.bbox[0])
+            )
+            copied_words = [
+                WordBox(
+                    text=wb.text,
+                    bbox=tuple(wb.bbox),
+                    confidence=wb.confidence
+                )
+                for wb in sorted_words
+            ]
+            block.word_boxes = copied_words
+            block.text = postprocess_text(" ".join(wb.text for wb in copied_words))
+            block.metadata = dict(block.metadata)
+            block.metadata["digital_text"] = True
+            block.metadata["digital_word_count"] = len(copied_words)
+        
+        return blocks
+    
+    def _tighten_bbox(
+        self,
+        image: np.ndarray,
+        bbox: Tuple[float, float, float, float],
+        margin: int = 5
+    ) -> Tuple[float, float, float, float]:
+        """
+        Tighten bounding box to remove blank space around content.
+        
+        Args:
+            image: Page image
+            bbox: Original bounding box [x0, y0, x1, y1]
+            margin: Margin to keep around content (pixels)
+            
+        Returns:
+            Tightened bounding box
+        """
+        try:
+            import cv2
+        except ImportError:
+            return bbox
+        
+        x0, y0, x1, y1 = map(int, bbox)
+        height, width = image.shape[:2]
+        
+        # Clip to image bounds
+        x0 = max(0, min(width - 1, x0))
+        x1 = max(x0 + 1, min(width, x1))
+        y0 = max(0, min(height - 1, y0))
+        y1 = max(y0 + 1, min(height, y1))
+        
+        crop = image[y0:y1, x0:x1]
+        if crop.size == 0:
+            return bbox
+        
+        # Convert to grayscale
+        if len(crop.shape) == 3:
+            gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = crop.copy()
+        
+        # Threshold to find content
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        
+        # Find bounding box of non-zero pixels
+        rows = np.any(binary, axis=1)
+        cols = np.any(binary, axis=0)
+        
+        if not np.any(rows) or not np.any(cols):
+            return bbox  # No content found
+        
+        y_min, y_max = np.where(rows)[0][[0, -1]]
+        x_min, x_max = np.where(cols)[0][[0, -1]]
+        
+        # Add margin and convert back to page coordinates
+        new_x0 = max(0, x0 + x_min - margin)
+        new_y0 = max(0, y0 + y_min - margin)
+        new_x1 = min(width, x0 + x_max + 1 + margin)
+        new_y1 = min(height, y0 + y_max + 1 + margin)
+        
+        # Ensure minimum size
+        if new_x1 - new_x0 < 10 or new_y1 - new_y0 < 10:
+            return bbox
+        
+        return (float(new_x0), float(new_y0), float(new_x1), float(new_y1))
     
     def _analyze_block_content(
         self,
@@ -988,7 +1356,9 @@ class LayoutSegmenter:
         except ImportError:
             return None
         
-        x0, y0, x1, y1 = map(int, block.bbox)
+        # Use tightened bbox for analysis (but don't modify the block's bbox yet)
+        tight_bbox = self._tighten_bbox(image, block.bbox, margin=2)
+        x0, y0, x1, y1 = map(int, tight_bbox)
         height, width = image.shape[:2]
         x0 = max(0, min(width - 1, x0))
         x1 = max(x0 + 1, min(width, x1))
@@ -1042,66 +1412,165 @@ class LayoutSegmenter:
             "area": area
         }
     
+    def _validate_table_block(
+        self,
+        image: np.ndarray,
+        block: Block
+    ) -> bool:
+        """
+        Validate if a table block actually has table structure.
+        Returns False if block should be reclassified.
+        """
+        if block.type != BlockType.TABLE:
+            return True
+        
+        features = self._analyze_block_content(image, block)
+        if not features:
+            return True  # Can't validate, keep as-is
+        
+        line_density = features["line_density"]
+        text_density = features["text_density"]
+        horiz = features["horizontal_density"]
+        vert = features["vertical_density"]
+        
+        # Strong table indicators: high line density with both horizontal and vertical lines
+        has_grid_structure = line_density > 0.02 and horiz > 0.008 and vert > 0.008
+        
+        # If it's a large block (>30% page area) without strong table structure, it's likely misclassified
+        page_area = float(image.shape[0] * image.shape[1])
+        block_area = (block.bbox[2] - block.bbox[0]) * (block.bbox[3] - block.bbox[1])
+        block_area_ratio = block_area / page_area if page_area > 0 else 0
+        
+        if block_area_ratio > 0.30 and not has_grid_structure:
+            # Large block without table structure - likely figure or form
+            if text_density > 0.05:
+                return False  # Reclassify as form
+            elif line_density < 0.01:
+                return False  # Reclassify as figure
+            return False
+        
+        # For smaller blocks, be more lenient
+        if block_area_ratio > 0.15 and not has_grid_structure:
+            # Medium-sized block - check if it has any table-like features
+            if line_density < 0.01 and text_density < 0.02:
+                return False  # Likely a figure
+        
+        return True
+    
     def _reclassify_blocks_by_texture(
         self,
         image: np.ndarray,
         blocks: List[Block],
-        page_id: int
+        page_id: int,
+        heuristic_strictness: float = 0.7
     ) -> List[Block]:
-        """Use simple texture cues to relabel misclassified figure blocks."""
+        """Use texture cues to relabel misclassified blocks (figures, huge tables, forms)."""
         page_area = float(image.shape[0] * image.shape[1])
         updated_blocks: List[Block] = []
+        existing_tables = [b for b in blocks if b.type == BlockType.TABLE]
         
         for block in blocks:
-            # Skip if already correctly classified
-            if block.type in {BlockType.TEXT, BlockType.TITLE, BlockType.LIST, BlockType.TABLE, BlockType.FORM}:
-                updated_blocks.append(block)
-                continue
+            block_area = max((block.bbox[2] - block.bbox[0]) * (block.bbox[3] - block.bbox[1]), 1.0)
+            block_area_ratio = block_area / page_area if page_area > 0 else 0.0
+            new_type: Optional[BlockType] = None
+            features: Optional[Dict[str, float]] = None
             
-            # For large figure blocks, analyze content to reclassify
-            block_area = (block.bbox[2] - block.bbox[0]) * (block.bbox[3] - block.bbox[1])
-            block_area_ratio = block_area / page_area if page_area > 0 else 0
+            # Extremely large "table" detections are often entire-page forms
+            if block.type == BlockType.TABLE and block_area_ratio > 0.55:
+                new_type = BlockType.FORM
             
-            # If it's a large figure (>20% of page), it's likely misclassified
-            if block.type == BlockType.FIGURE and block_area_ratio > 0.20:
-                features = self._analyze_block_content(image, block)
-                if not features:
-                    updated_blocks.append(block)
-                    continue
-                
-                block.metadata = dict(block.metadata)
-                block.metadata.setdefault("texture_features", features)
-                
-                line_density = features["line_density"]
-                text_density = features["text_density"]
-                horiz = features["horizontal_density"]
-                vert = features["vertical_density"]
-                stroke_density = features["stroke_density"]
-                
-                new_type: Optional[BlockType] = None
-                
-                # If it has dense grid lines, it's likely a table or form
-                if line_density > 0.03 and horiz > 0.01 and vert > 0.01:
-                    # Check if it has table-like structure
-                    if text_density < 0.4:  # Low text, high structure = table
-                        new_type = BlockType.TABLE
-                    else:  # High text + structure = form
+            # Validate large table blocks using line density
+            elif block.type == BlockType.TABLE and block_area_ratio > 0.18:
+                if not self._validate_table_block(image, block):
+                    features = self._analyze_block_content(image, block)
+                    text_density = features["text_density"] if features else 0.0
+                    line_density = features["line_density"] if features else 0.0
+                    if text_density > 0.05 and line_density > 0.01:
                         new_type = BlockType.FORM
-                # If it has high text density, it's likely text
-                elif text_density > 0.06 and line_density < 0.02:
-                    # Check height to determine title vs text
-                    if (block.bbox[3] - block.bbox[1]) < image.shape[0] * 0.15:
-                        new_type = BlockType.TITLE
+                    elif text_density < 0.02:
+                        new_type = BlockType.FIGURE
                     else:
-                        new_type = BlockType.TEXT
-                # If it has form-like characteristics
-                elif stroke_density > 0.03 and block_area_ratio > 0.10:
-                    new_type = BlockType.FORM
-                
-                if new_type and new_type != block.type:
-                    print(f"  🔄 Reclassified block {block.id} from {block.type.value} to {new_type.value} (area: {block_area_ratio:.1%}, line_density: {line_density:.3f}, text_density: {text_density:.3f})")
-                    block.type = new_type
-                    block.metadata["reclassified_by"] = "texture_analysis"
+                        new_type = BlockType.FORM
+            
+            # Reclassify figures/unknowns with enough area
+            # Add logo/image detection to prevent misclassification as FORM
+            elif block.type in {BlockType.FIGURE, BlockType.UNKNOWN} or (block.type == BlockType.TABLE and block_area_ratio <= 0.18):
+                features = self._analyze_block_content(image, block)
+                if features:
+                    line_density = features["line_density"]
+                    text_density = features["text_density"]
+                    horiz = features["horizontal_density"]
+                    vert = features["vertical_density"]
+                    stroke_density = features["stroke_density"]
+                    
+                    # Logo/image detection: high stroke density but very low text density = likely image/logo
+                    # Adjust thresholds based on heuristic_strictness
+                    stroke_threshold = 0.06 + (0.04 * heuristic_strictness)  # 0.06 to 0.10
+                    text_threshold = 0.08 - (0.03 * heuristic_strictness)  # 0.08 to 0.05
+                    
+                    is_likely_logo_or_image = (
+                        stroke_density > stroke_threshold and
+                        text_density < text_threshold and
+                        block_area_ratio < 0.15
+                    )
+                    
+                    # If it's likely a logo/image, keep as FIGURE, don't reclassify as FORM
+                    if is_likely_logo_or_image:
+                        # Keep as FIGURE, don't change
+                        new_type = None
+                    else:
+                        has_grid = line_density > 0.032 and horiz > 0.010 and vert > 0.010
+                        if has_grid:
+                            if block_area_ratio > 0.35:
+                                new_type = BlockType.FORM
+                            else:
+                                new_type = BlockType.TABLE if text_density < 0.45 else BlockType.FORM
+                        elif text_density > 0.08 and line_density < 0.02:
+                            height = block.bbox[3] - block.bbox[1]
+                            new_type = BlockType.TITLE if height < image.shape[0] * 0.12 else BlockType.TEXT
+                        else:
+                            # Stricter FORM classification based on heuristic_strictness
+                            stroke_threshold = 0.06 + (0.04 * heuristic_strictness)  # 0.06 to 0.10
+                            area_threshold = 0.06 + (0.04 * heuristic_strictness)  # 0.06 to 0.10
+                            text_threshold = 0.05 - (0.02 * heuristic_strictness)  # 0.05 to 0.03
+                            
+                            if stroke_density > stroke_threshold and block_area_ratio > area_threshold and text_density < text_threshold:
+                                new_type = BlockType.FORM
+            
+            if new_type == BlockType.TABLE and block_area_ratio > 0.45:
+                # Avoid turning full-width regions into tables
+                new_type = BlockType.FORM
+            
+            if new_type == BlockType.TABLE:
+                overlaps = any(
+                    self._calculate_iou(block.bbox, tbl.bbox) > 0.65
+                    for tbl in existing_tables
+                    if tbl is not block
+                )
+                if overlaps:
+                    new_type = None
+                else:
+                    existing_tables.append(block)
+            
+            if new_type and new_type != block.type:
+                original_type = block.type
+                block.type = new_type
+                block.metadata = dict(block.metadata)
+                block.metadata["reclassified_by"] = "texture_analysis"
+                block.metadata["original_type"] = original_type.value
+                if features:
+                    block.metadata["texture_features"] = features
+                    # Add reasoning for reclassification
+                    reasoning_parts = []
+                    if features.get("line_density", 0) > 0.032:
+                        reasoning_parts.append(f"high_line_density={features['line_density']:.3f}")
+                    if features.get("stroke_density", 0) > 0.05:
+                        reasoning_parts.append(f"high_stroke_density={features['stroke_density']:.3f}")
+                    if features.get("text_density", 0) < 0.05:
+                        reasoning_parts.append(f"low_text_density={features['text_density']:.3f}")
+                    if block_area_ratio > 0.35:
+                        reasoning_parts.append(f"large_area_ratio={block_area_ratio:.2f}")
+                    block.metadata["reclassification_reasoning"] = "; ".join(reasoning_parts) if reasoning_parts else "texture_analysis"
             
             updated_blocks.append(block)
         
@@ -1574,6 +2043,114 @@ class LayoutSegmenter:
             return "form"
         return "other"
     
+    def _merge_adjacent_blocks(
+        self,
+        blocks: List[Block],
+        image: np.ndarray,
+        distance_threshold: float = 20.0
+    ) -> List[Block]:
+        """
+        Merge ONLY small adjacent blocks of the same type that are clearly related.
+        This groups small form fields and key-value pairs, but preserves large distinct blocks.
+        """
+        if len(blocks) <= 1:
+            return blocks
+        
+        height, width = image.shape[:2]
+        page_area = height * width
+        
+        merged = []
+        used = set()
+        
+        # Sort by y-position then x-position
+        sorted_blocks = sorted(blocks, key=lambda b: (b.bbox[1], b.bbox[0]))
+        
+        for i, block1 in enumerate(sorted_blocks):
+            if i in used:
+                continue
+            
+            current_blocks = [block1]
+            current_bbox = list(block1.bbox)
+            block_type = block1.type
+            
+            # Calculate block1 area
+            block1_area = (block1.bbox[2] - block1.bbox[0]) * (block1.bbox[3] - block1.bbox[1])
+            block1_area_ratio = block1_area / page_area if page_area > 0 else 0
+            
+            # Only merge small blocks (<5% of page) - preserve large blocks
+            if block1_area_ratio > 0.05:
+                merged.append(block1)
+                continue
+            
+            # Look for adjacent blocks of the same type (but only small ones)
+            for j, block2 in enumerate(sorted_blocks[i+1:], start=i+1):
+                if j in used or block2.type != block_type:
+                    continue
+                
+                # Calculate block2 area
+                block2_area = (block2.bbox[2] - block2.bbox[0]) * (block2.bbox[3] - block2.bbox[1])
+                block2_area_ratio = block2_area / page_area if page_area > 0 else 0
+                
+                # Skip if block2 is large
+                if block2_area_ratio > 0.05:
+                    continue
+                
+                # Calculate distance between blocks
+                x1_min, y1_min, x1_max, y1_max = block1.bbox
+                x2_min, y2_min, x2_max, y2_max = block2.bbox
+                
+                # Horizontal distance (for side-by-side blocks)
+                h_dist = max(x1_min - x2_max, x2_min - x1_max, 0)
+                # Vertical distance (for stacked blocks)
+                v_dist = max(y1_min - y2_max, y2_min - y1_max, 0)
+                
+                # Check if blocks are adjacent (close together) - MORE CONSERVATIVE
+                is_adjacent = False
+                
+                # For vertical stacking (most common in forms)
+                if v_dist < distance_threshold and h_dist < width * 0.1:  # Within 10% of page width
+                    # Check if they overlap or are very close horizontally
+                    if (x1_min <= x2_max + distance_threshold and x2_min <= x1_max + distance_threshold):
+                        is_adjacent = True
+                # For horizontal side-by-side (less common)
+                elif h_dist < distance_threshold and v_dist < height * 0.05:  # Within 5% of page height
+                    # Check if they overlap or are very close vertically
+                    if (y1_min <= y2_max + distance_threshold and y2_min <= y1_max + distance_threshold):
+                        is_adjacent = True
+                
+                if is_adjacent:
+                    # Check merged size - don't merge if result would be too large
+                    merged_x0 = min(current_bbox[0], block2.bbox[0])
+                    merged_y0 = min(current_bbox[1], block2.bbox[1])
+                    merged_x1 = max(current_bbox[2], block2.bbox[2])
+                    merged_y1 = max(current_bbox[3], block2.bbox[3])
+                    merged_area = (merged_x1 - merged_x0) * (merged_y1 - merged_y0)
+                    merged_area_ratio = merged_area / page_area if page_area > 0 else 0
+                    
+                    # Only merge if result is still small (<8% of page)
+                    if merged_area_ratio < 0.08:
+                        current_blocks.append(block2)
+                        used.add(j)
+                        current_bbox = [merged_x0, merged_y0, merged_x1, merged_y1]
+            
+            # Create merged block
+            if len(current_blocks) > 1:
+                # Use the block with highest confidence
+                main_block = max(current_blocks, key=lambda b: b.confidence)
+                merged_block = Block(
+                    id=main_block.id,
+                    type=main_block.type,
+                    bbox=tuple(current_bbox),
+                    page_id=main_block.page_id,
+                    confidence=main_block.confidence,
+                    metadata={**main_block.metadata, "merged_from": [b.id for b in current_blocks]}
+                )
+                merged.append(merged_block)
+            else:
+                merged.append(block1)
+        
+        return merged
+    
     def merge_overlapping_boxes(self, blocks: List[Block], iou_threshold: float = 0.5) -> List[Block]:
         """
         Merge overlapping boxes.
@@ -1675,7 +2252,8 @@ class LayoutSegmenter:
         image: np.ndarray,
         page_id: int,
         merge_boxes: bool = True,
-        resolve_order: bool = True
+        resolve_order: bool = True,
+        digital_words: Optional[List[WordBox]] = None
     ) -> List[Block]:
         """
         Segment a single page.
@@ -1685,46 +2263,76 @@ class LayoutSegmenter:
             page_id: Page ID
             merge_boxes: Whether to merge overlapping boxes
             resolve_order: Whether to resolve reading order
+            digital_words: Optional digital text word boxes for this page
             
         Returns:
             List of blocks
         """
-        # Detect layout
+        # Detect layout with proper threshold (0.3) for quality detection using PubLayNet
         blocks = self.detect_layout(image, page_id)
         
         # Set page IDs
         for block in blocks:
             block.page_id = page_id
         
-        # Add auxiliary table detections (model based)
+        # Print detection summary
+        if blocks:
+            type_counts = Counter(b.type for b in blocks)
+            print(f"  📊 Initial detection: {len(blocks)} blocks - {dict(type_counts)}")
+        
+        # Add auxiliary table detections (model based) - but don't override existing detections
         if self.table_model:
             table_blocks = self._detect_tables_with_model(image, page_id)
             if table_blocks:
-                blocks.extend(self._filter_new_blocks(blocks, table_blocks))
+                # Only add tables that don't overlap significantly with existing blocks
+                new_tables = self._filter_new_blocks(blocks, table_blocks, iou_threshold=0.4)
+                if new_tables:
+                    blocks.extend(new_tables)
+                    print(f"  ➕ Added {len(new_tables)} table blocks from TableBank model")
         
-        # Heuristic table enhancement (line density)
-        blocks = self._apply_table_enhancement(image, blocks, page_id)
+        # Light text augmentation ONLY if model missed significant text regions
+        heuristic_strictness = getattr(self, 'heuristic_strictness', 0.7)
+        blocks = self._augment_text_with_heuristic(image, blocks, page_id, heuristic_strictness)
         
-        # Heuristic text/list augmentation if needed
-        blocks = self._augment_text_with_heuristic(image, blocks, page_id)
+        # Reclassify ambiguous blocks using texture cues (before merging)
+        heuristic_strictness = getattr(self, 'heuristic_strictness', 0.7)
+        blocks = self._reclassify_blocks_by_texture(image, blocks, page_id, heuristic_strictness)
         
-        # Reclassify ambiguous figure blocks using texture cues
-        blocks = self._reclassify_blocks_by_texture(image, blocks, page_id)
+        # Merge overlapping boxes first (conservative - only truly overlapping)
+        if merge_boxes:
+            blocks = self.merge_overlapping_boxes(blocks, iou_threshold=0.5)  # Only merge if >50% overlap
         
-        # Split large blocks into smaller components for better granularity
+        # Merge ONLY small adjacent blocks (form fields, key-value pairs)
+        # This preserves large distinct blocks while grouping small related ones
+        blocks = self._merge_adjacent_blocks(blocks, image, distance_threshold=15.0)
+        
+        # Heuristic form detection - only add if not already detected
+        blocks = self._apply_form_enhancement(image, blocks, page_id)
+        
+        # Heuristic figure detection - only add if not already detected
+        blocks = self._detect_figures_heuristic(image, blocks, page_id)
+        
+        # Split large blocks ONLY if they're clearly misclassified (disabled by default)
         if self.split_large_blocks:
             blocks = self._split_large_blocks(image, blocks, page_id)
         
-        # Merge overlapping boxes (less aggressive for granularity)
-        if merge_boxes:
-            blocks = self.merge_overlapping_boxes(blocks, iou_threshold=0.6)  # Higher threshold = less merging
+        # Attach digital text word boxes when available to avoid redundant OCR
+        if digital_words:
+            blocks = self._attach_digital_text(blocks, digital_words)
         
-        # Detect and label form regions (after reclassification & splitting)
-        blocks = self._apply_form_enhancement(image, blocks, page_id)
+        # Tighten bounding boxes to remove blank space (but preserve block integrity)
+        for block in blocks:
+            tight_bbox = self._tighten_bbox(image, block.bbox, margin=5)  # Larger margin to preserve block structure
+            block.bbox = tight_bbox
         
         # Resolve reading order
         if resolve_order:
             blocks = self.resolve_reading_order(blocks)
+        
+        # Final summary
+        if blocks:
+            type_counts = Counter(b.type for b in blocks)
+            print(f"  ✅ Final segmentation: {len(blocks)} blocks - {dict(type_counts)}")
         
         # Update block IDs with page prefix (maintain order)
         for i, block in enumerate(blocks):

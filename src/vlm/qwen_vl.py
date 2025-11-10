@@ -1,6 +1,5 @@
 """
-Qwen-VL integration for figure/table processing - STUBBED.
-VLM integration will be added when GPU stack is available.
+Qwen-VL integration for figure/table processing via Ollama.
 """
 import base64
 import json
@@ -14,21 +13,20 @@ from utils.config import Config
 
 class QwenVLProcessor:
     """
-    Qwen-VL processor for vision-language tasks - STUBBED.
+    Qwen-VL processor for vision-language tasks via Ollama.
     
-    This is a no-op implementation that skips VLM calls.
     Returns default/empty results when disabled.
     To enable: Set ENABLE_VLM=true in .env and ensure Ollama is running.
     """
     
-    def __init__(self, enabled: bool = False):
+    def __init__(self, enabled: Optional[bool] = None):
         """
         Initialize Qwen-VL processor.
         
         Args:
-            enabled: Whether to enable VLM processing (default: False for local testing)
+            enabled: Whether to enable VLM processing (default: from Config.ENABLE_VLM)
         """
-        self.enabled = enabled
+        self.enabled = enabled if enabled is not None else Config.ENABLE_VLM
         self.client = None
         self.model = None
         

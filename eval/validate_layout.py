@@ -29,7 +29,11 @@ def validate_layout_segmentation(pdf_path: str):
     all_blocks = []
     
     for page in pages:
-        blocks = segmenter.segment_page(page.image, page.page_id)
+        blocks = segmenter.segment_page(
+            page.image,
+            page.page_id,
+            digital_words=getattr(page, "digital_words", None)
+        )
         all_blocks.extend(blocks)
         print(f"Page {page.page_id}: {len(blocks)} blocks")
     
@@ -46,4 +50,3 @@ if __name__ == "__main__":
         validate_layout_segmentation(sys.argv[1])
     else:
         print("Usage: python validate_layout.py <pdf_path>")
-

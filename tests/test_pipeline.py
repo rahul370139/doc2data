@@ -12,6 +12,12 @@ from collections import Counter
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from utils.models import Document, BlockType
+from utils.config import Config
+from src.pipelines.ocr import OCRPipeline
+from src.pipelines.assemble import DocumentAssembler
+from src.pipelines.slm_label import SLMLabeler
+
 print("=" * 70)
 print("Document-to-Data Pipeline - Integration Test")
 print("Testing: Steps 1 & 2 (Ingest & Layout Segmentation)")
@@ -132,7 +138,8 @@ try:
                 page.image,
                 page.page_id,
                 merge_boxes=True,
-                resolve_order=True
+                resolve_order=True,
+                digital_words=getattr(page, "digital_words", None)
             )
             page_time = time.time() - page_start
             print(f"  ⏱ Processed in {page_time:.1f}s")
@@ -211,69 +218,140 @@ try:
     
     # Evaluation
     print("\n" + "=" * 70)
-    print("EVALUATION")
+    print("Step 2 Evaluation")
     print("=" * 70)
     
-    score = 0
-    max_score = 6
+    step2_score = 0
+    step2_max = 6
     
     if total_blocks > 0:
         print("✓ Block detection: PASS")
-        score += 1
+        step2_score += 1
     else:
         print("✗ Block detection: FAIL")
     
     if 'text' in type_counts or 'title' in type_counts:
         print("✓ Text blocks detected: PASS")
-        score += 1
+        step2_score += 1
     else:
         print("✗ Text blocks: FAIL")
     
     if type_counts.get('table', 0) > 0:
         print(f"✓ Table regions: PASS ({type_counts['table']} found)")
-        score += 1
+        step2_score += 1
     else:
         print("⚠ Table regions: NONE (may not be in sample docs)")
     
     if type_counts.get('figure', 0) > 0:
         print(f"✓ Figure regions: PASS ({type_counts['figure']} found)")
-        score += 1
+        step2_score += 1
     else:
         print("⚠ Figure regions: NONE (may not be in sample docs)")
     
-    if type_counts.get('form', 0) > 0:
-        print(f"✓ Form regions: PASS ({type_counts['form']} found)")
-    else:
-        print("⚠ Form regions: NONE (check heuristic or sample documents)")
-    
     if total_blocks >= len(all_pages) * 2:  # At least 2 blocks per page
         print("✓ Block count reasonable: PASS")
-        score += 1
+        step2_score += 1
     else:
         print("⚠ Block count low: REVIEW NEEDED")
     
     if not segmenter.use_heuristic:
         print("✓ Using ML model (not heuristic): PASS")
-        score += 1
+        step2_score += 1
     else:
         print("⚠ Using heuristic fallback: NEEDS ML MODEL")
     
-    print(f"\nScore: {score}/{max_score}")
+    print(f"\nStep 2 Score: {step2_score}/{step2_max}")
     
-    if score >= 4:
-        print("\n✓✓✓ STEP 2: PASSING ✓✓✓")
-    else:
-        print("\n⚠⚠⚠ STEP 2: NEEDS IMPROVEMENT ⚠⚠⚠")
-    
+    # ============================================================================
+    # Step 3: OCR (per block)
+    # ============================================================================
+    print("\n" + "=" * 70)
+    print("Step 3: OCR (per-block)")
     print("=" * 70)
+    
+    ocr_pipeline = OCRPipeline(max_workers=2)
+    ocr_start = time.time()
+    all_blocks = ocr_pipeline.process_blocks(
+        all_blocks,
+        all_pages,
+        skip_ocr_for_digital=True,
+        parallel=False
+    )
+    ocr_time = time.time() - ocr_start
+    
+    text_blocks = [b for b in all_blocks if b.text and len(b.text.strip()) > 0]
+    textual_targets = sum(1 for b in all_blocks if b.type in [BlockType.TEXT, BlockType.TITLE, BlockType.LIST])
+    coverage = (len(text_blocks) / textual_targets) if textual_targets else 1.0
+    
+    print(f"  ✓ OCR completed in {ocr_time:.1f}s")
+    print(f"  ✓ Blocks with text: {len(text_blocks)} / {max(textual_targets, 1)} ({coverage*100:.1f}%)")
+    
+    step3_score = 0
+    step3_max = 2
+    if len(text_blocks) > 0:
+        step3_score += 1
+    if coverage >= 0.5:
+        step3_score += 1
+    
+    # ============================================================================
+    # Step 4: Semantic Labeling (SLM)
+    # ============================================================================
+    print("\n" + "=" * 70)
+    print("Step 4: Semantic Labeling (SLM)")
+    print("=" * 70)
+    
+    slm_enabled = Config.ENABLE_SLM
+    slm_labeler = SLMLabeler(enabled=slm_enabled)
+    label_start = time.time()
+    all_blocks = slm_labeler.label_blocks(all_blocks, [page.image for page in all_pages])
+    label_time = time.time() - label_start
+    labeled_blocks = sum(1 for b in all_blocks if b.role)
+    
+    if slm_enabled:
+        print(f"  ✓ SLM labeling completed in {label_time:.1f}s ({labeled_blocks} blocks labeled)")
+    else:
+        print("  ⚠ SLM disabled (set ENABLE_SLM=true to enable Ollama labeling)")
+    
+    step4_max = 1
+    step4_score = 1 if slm_enabled else 0
+    
+    # ============================================================================
+    # Step 5: Assembly (JSON + Markdown)
+    # ============================================================================
+    print("\n" + "=" * 70)
+    print("Step 5: Assembly (JSON + Markdown)")
+    print("=" * 70)
+    
+    assembler = DocumentAssembler(process_tables=True, process_figures=True, use_vlm=False)
+    document = Document(doc_id="integration_test", pages=all_pages, blocks=all_blocks)
+    assembled_json = assembler.assemble_json(document)
+    assembled_markdown = assembler.assemble_markdown(document)
+    
+    json_pages = len(assembled_json.get("pages", []))
+    markdown_chars = len(assembled_markdown or "")
+    print(f"  ✓ JSON pages: {json_pages}")
+    print(f"  ✓ Markdown length: {markdown_chars} chars")
+    
+    step5_score = 0
+    step5_max = 2
+    if json_pages == len(all_pages):
+        step5_score += 1
+    if markdown_chars > 0:
+        step5_score += 1
     
     # Final status
     print("\n" + "=" * 70)
     print("OVERALL STATUS")
     print("=" * 70)
     total_time = time.time() - test_start_time
-    print(f"Step 1: {step1_score}/{step1_max} ({'PASS' if step1_score >= 4 else 'NEEDS REVIEW'})")
-    print(f"Step 2: {score}/{max_score} ({'PASS' if score >= 4 else 'NEEDS REVIEW'})")
+    print(f"Step 1: {step1_score}/{step1_max} ({'PASS' if step1_score >= 4 else 'REVIEW'})")
+    print(f"Step 2: {step2_score}/{step2_max} ({'PASS' if step2_score >= 4 else 'REVIEW'})")
+    print(f"Step 3: {step3_score}/{step3_max} ({'PASS' if step3_score >= 1 else 'REVIEW'})")
+    if slm_enabled:
+        print(f"Step 4: {step4_score}/{step4_max} (PASS)")
+    else:
+        print("Step 4: 0/1 (SKIPPED - ENABLE_SLM=false)")
+    print(f"Step 5: {step5_score}/{step5_max} ({'PASS' if step5_score >= 1 else 'REVIEW'})")
     print(f"\n⏱ Total test time: {total_time:.1f}s")
     print("=" * 70)
 

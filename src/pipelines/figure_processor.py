@@ -7,6 +7,7 @@ from pathlib import Path
 import cv2
 
 from utils.models import Block, FigureBlock, BlockType
+from utils.config import Config
 from src.vlm.qwen_vl import QwenVLProcessor
 from src.ocr.paddle_ocr import PaddleOCRWrapper
 
@@ -14,10 +15,10 @@ from src.ocr.paddle_ocr import PaddleOCRWrapper
 class FigureProcessor:
     """Figure processing with Qwen-VL."""
     
-    def __init__(self):
+    def __init__(self, enable_vlm: Optional[bool] = None):
         """Initialize figure processor."""
-        # Stubbed: VLM disabled by default for local testing
-        self.qwen_vl = QwenVLProcessor(enabled=False)
+        vlm_enabled = Config.ENABLE_VLM if enable_vlm is None else enable_vlm
+        self.qwen_vl = QwenVLProcessor(enabled=vlm_enabled)
         self.paddle_ocr = None
         try:
             self.paddle_ocr = PaddleOCRWrapper()
@@ -175,4 +176,3 @@ class FigureProcessor:
                     return text_block.text
         
         return None
-

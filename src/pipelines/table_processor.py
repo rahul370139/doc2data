@@ -6,6 +6,7 @@ from typing import List, Tuple, Optional, Dict, Any
 import cv2
 
 from utils.models import Block, TableBlock, BlockType
+from utils.config import Config
 from src.vlm.qwen_vl import QwenVLProcessor
 from src.ocr.paddle_ocr import PaddleOCRWrapper
 from src.ocr.tesseract_ocr import TesseractOCRWrapper
@@ -14,15 +15,15 @@ from src.ocr.tesseract_ocr import TesseractOCRWrapper
 class TableProcessor:
     """Table extraction with Path A (deterministic) and Path B (VLM)."""
     
-    def __init__(self, use_paddle: bool = True):
+    def __init__(self, use_paddle: bool = True, enable_vlm: Optional[bool] = None):
         """
         Initialize table processor.
         
         Args:
             use_paddle: Use PaddleOCR (True) or Tesseract (False)
         """
-        # Stubbed: VLM disabled by default for local testing
-        self.qwen_vl = QwenVLProcessor(enabled=False)
+        vlm_enabled = Config.ENABLE_VLM if enable_vlm is None else enable_vlm
+        self.qwen_vl = QwenVLProcessor(enabled=vlm_enabled)
         self.use_paddle = use_paddle
         self.paddle_ocr = None
         self.tesseract_ocr = None
@@ -214,4 +215,3 @@ class TableProcessor:
         table_block.add_citation(block.page_id, block.bbox)
         
         return table_block
-

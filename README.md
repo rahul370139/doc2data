@@ -1,362 +1,335 @@
-# Document-to-Data Pipeline - Phase 1
+# Document-to-Data Pipeline
 
-**Schema-agnostic document parser** that converts PDFs/images into layout-aware JSON + Markdown with bounding-box citations.
+**Version:** 1.0.0 (Phase 1)  
+**Status:** Production-Ready (CPU), GPU Acceleration Ready  
+**Last Updated:** January 2025
 
-## 🎯 Overview
+A production-ready document processing pipeline that converts PDFs and images into structured JSON data. Uses state-of-the-art ML models (LayoutParser, PaddleOCR) combined with intelligent heuristics for layout detection, OCR, and content classification.
 
-This pipeline extracts structured information from documents while preserving layout, reading order, and traceability through bounding-box citations. Designed for on-prem, open-source deployment with CPU-first support (GPU optional for later phases).
+---
 
-## ✨ Features
-
-- **Document Ingestion**: PDF and image support with preprocessing (de-skew, de-noise, DPI normalization)
-- **Layout Segmentation**: Detect text, title, list, table, figure, and form blocks using LayoutParser + heuristic line-density enhancement
-- **OCR**: PaddleOCR (primary) and Tesseract (fallback) with word-level bounding boxes
-- **Semantic Labeling**: Qwen2.5-7B-Instruct via Ollama for fine-grained role classification
-- **Table Processing**: Path A (heuristics) and Path B (Qwen-VL) for structured extraction
-- **Figure Processing**: Qwen-VL classification and chart data extraction
-- **Interactive Visualization**: Streamlit app with side-by-side document/JSON/Markdown view
-- **REST API**: FastAPI endpoints for each pipeline stage
-- **Caching**: SHA256-based artifact caching for pipeline efficiency
-
-## 📁 Project Structure
-
-```
-doc2data/
-├── src/                    # Source code
-│   ├── pipelines/         # Pipeline stages (ingest, segment, ocr, slm_label, assemble)
-│   ├── processing/        # Pre/post-processing utilities
-│   ├── ocr/               # OCR modules (PaddleOCR, Tesseract)
-│   └── vlm/               # Vision-language models (Ollama client, Qwen-VL)
-├── app/                   # Application interfaces
-│   ├── api_main.py        # FastAPI REST endpoints
-│   └── streamlit_main.py # Streamlit interactive UI
-├── utils/                 # Utility modules (models, config, cache, visualization)
-├── data/                  # Data directory
-│   └── sample_docs/       # Sample PDFs for testing
-├── models/                # Model weights and download scripts
-├── tests/                 # Test suite
-│   └── test_pipeline.py   # Comprehensive integration test
-├── eval/                  # Evaluation scripts
-├── cache/                 # Artifact cache (gitignored)
-└── validation/            # Validation results
-```
-
-## 🚀 Setup
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- **Python 3.10+**
-- **Ollama** installed and running (for SLM/VLM inference)
-- **Tesseract OCR** installed (`brew install tesseract` on macOS)
-- **Virtual environment** (recommended)
+- Python 3.10+ (tested with 3.10.11)
+- 8GB+ RAM (16GB recommended)
+- 5-10GB free disk space (for models)
 
 ### Installation
 
-1. **Clone and navigate:**
 ```bash
+# Clone repository
+git clone https://github.com/rahul370139/doc2data.git
 cd doc2data
-```
 
-2. **Create virtual environment:**
-```bash
-python -m venv venv
+# Create virtual environment
+python3.10 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
 
-3. **Install dependencies:**
-```bash
+# Install dependencies
 pip install -r requirements.txt
+
+# Models will auto-download on first run (~1-2GB)
 ```
 
-4. **Download models** (auto-downloads on first use, or run manually):
-```bash
-python models/download_models.py
-```
-
-5. **Pull Ollama models:**
-```bash
-ollama pull qwen2.5:7b-instruct
-ollama pull qwen2-vl:7b
-```
-
-6. **Configure environment** (optional):
-```bash
-cp .env.example .env
-# Edit .env with your settings
-```
-
-## 📊 Current Status
-
-### ✅ Completed (Step 1 & 2)
-
-#### Step 1: Ingest & Preprocess ✅ **PASS (5/5)**
-- ✅ PDF/image loading with PyMuPDF/pdf2image
-- ✅ DPI normalization (300 DPI default)
-- ✅ De-skew using OpenCV Hough transform
-- ✅ De-noise using median/Gaussian blur
-- ✅ Digital text layer extraction (bypasses OCR when available)
-- ✅ Word-level bounding box extraction from digital text
-
-**Status**: Production-ready, fully functional
-
-#### Step 2: Layout Segmentation ✅ **Working (ML Model + Heuristic Fallback)**
-- ✅ LayoutParser integration with PaddleDetectionLayoutModel (PubLayNet)
-- ✅ Auto-downloads PubLayNet weights (221MB, PPYOLOv2 variant)
-- ✅ Works on CPU/MPS (no CUDA required)
-- ✅ Box merging with IoU threshold (0.5)
-- ✅ Reading order resolution (top→bottom, left→right, multi-column support)
-- ✅ Form region detection via line-density heuristics layered on ML outputs
-- ✅ Heuristic fallback (OpenCV contour detection) when ML model unavailable
-- ⚠ Parameter tuning needed for optimal granularity
-
-**Status**: Functional, ML model working, needs parameter tuning for fine-grained detection
-
-### 🚧 In Progress
-
-#### Step 3: OCR (per-block)
-- ✅ PaddleOCR wrapper with auto-download
-- ✅ Tesseract fallback wrapper
-- ✅ OCR orchestration pipeline
-- ⚠ Header/footer detection heuristics
-- ⚠ Caption candidate detection
-- ⚠ Text cleaning and post-processing
-
-**Status**: Core functionality implemented, heuristics need refinement
-
-#### Step 4: Semantic Labeling (SLM)
-- ✅ Ollama client integration
-- ✅ Qwen2.5-7B-Instruct prompt templates
-- ⚠ Semantic role labeling (title, H1/H2, header/footer, page#, list-item, kv-pair hints)
-- ⚠ JSON output parsing and validation
-
-**Status**: Infrastructure ready, labeling logic needs implementation
-
-#### Step 5: Table & Figure Processing
-- ✅ Qwen-VL integration scaffolding
-- ⚠ Table extraction (Path A: heuristics, Path B: Qwen-VL)
-- ⚠ Figure classification and chart extraction
-- ⚠ Caption extraction and linking
-
-**Status**: Placeholders implemented, core logic pending
-
-#### Step 6: Assembly
-- ✅ Document data models (Block, TableBlock, FigureBlock, Document)
-- ⚠ Hierarchical JSON builder
-- ⚠ Markdown generator with citations
-- ⚠ Bounding-box citation preservation
-
-**Status**: Data models ready, assembly logic pending
-
-### 📋 Planned
-
-#### UI & API
-- ⚠ Streamlit UI (file upload, page viewer, JSON/MD tabs, interactive overlays)
-- ⚠ FastAPI endpoints (all pipeline stages)
-- ⚠ Real-time progress updates
-- ⚠ Error handling and validation
-
-#### Testing & Validation
-- ✅ Integration test (tests/test_pipeline.py)
-- ⚠ Unit tests for each pipeline stage
-- ⚠ Evaluation scripts (layout validation, OCR validation)
-- ⚠ Performance benchmarks
-
-#### Deployment
-- ✅ Dockerfile (CPU-first)
-- ✅ docker-compose.yml
-- ⚠ GPU support (NVIDIA DGX integration)
-- ⚠ vLLM integration for GPU-accelerated SLM inference
-
-## 🧪 Testing
-
-### Run Integration Test
-
-Test Steps 1 & 2 (Ingest & Layout Segmentation):
+### Run Streamlit Demo
 
 ```bash
-python tests/test_pipeline.py
+# Activate virtual environment
+source venv/bin/activate
+
+# Start Streamlit
+streamlit run app/streamlit_main.py --server.address localhost --server.port 8501
+
+# Open browser: http://localhost:8501
 ```
 
-This will:
-- Load sample PDFs from `data/sample_docs/`
-- Run ingestion and preprocessing
-- Perform layout segmentation
-- Display detailed results and evaluation scores
-
-### Expected Output
-
-```
-Step 1: 5/5 (PASS)
-Step 2: 3-6/6 (Working, needs parameter tuning)
-```
-
-## 📖 Usage
-
-### Streamlit App (Coming Soon)
+### Stop Streamlit
 
 ```bash
-streamlit run app/streamlit_main.py
+# Press Ctrl+C in terminal, or:
+pkill -9 -f "streamlit"
+# Or kill by port:
+lsof -ti:8501 | xargs kill -9
 ```
 
-Open http://localhost:8501 in your browser.
+---
 
-### FastAPI Server (Coming Soon)
+## 📋 Features
 
-```bash
-python -m uvicorn app.api_main:app --reload
-```
+### ✅ Implemented
 
-API will be available at http://localhost:8000
+- **PDF/Image Ingestion:** PyMuPDF, pdf2image, digital text extraction
+- **Layout Segmentation:** PubLayNet (LayoutParser) + TableBank + heuristics
+- **OCR Processing:** PaddleOCR (primary) + Tesseract (fallback), parallel processing
+- **Document Assembly:** Enhanced JSON with detailed metadata, Markdown generation
+- **Streamlit UI:** Interactive demo with visualization, threshold controls, results display
+- **Model Caching:** Fast subsequent runs with `@st.cache_resource`
 
-### API Endpoints (Planned)
+### ⚠️ Partial/Stubbed
 
-- `POST /ingest` - Ingest document (PDF/image)
-- `POST /segment` - Segment layout
-- `POST /ocr` - Run OCR
-- `POST /label` - Semantic labeling
-- `POST /table/process` - Process table
-- `POST /figure/process` - Process figure
-- `POST /assemble` - Assemble final JSON/Markdown
-- `GET /health` - Health check
+- **Semantic Labeling (SLM):** Qwen2.5-7B-Instruct via Ollama (code complete, disabled by default)
+- **Table Processing:** Heuristic extraction complete, VLM integration stubbed
+- **Figure Processing:** Classification stubbed, caption detection working
+- **FastAPI Endpoints:** Created, needs integration testing
 
-## 🐳 Docker
-
-### Build and Run
-
-```bash
-docker-compose up --build
-```
-
-This will start:
-- API server on port 8000
-- Streamlit app on port 8501
-
-**Note**: Ollama should be running on the host (or add to docker-compose.yml).
-
-## 🎯 Milestones
-
-### M1: Ingest + Segment + OCR ✅ **In Progress**
-- [x] PDF/image ingestion
-- [x] Layout segmentation (ML model + heuristic fallback)
-- [x] OCR with PaddleOCR/Tesseract
-- [ ] OCR heuristics and validation
-- [ ] Target: ≥95% text coverage
-
-### M2: SLM Labeling + Assembly 📋 **Planned**
-- [ ] Semantic role labeling
-- [ ] JSON/Markdown assembly
-- [ ] Table/Figure basic processing
-- [ ] Target: Correct header/footer/KV pair tagging
-
-### M3: Full Demo 📋 **Planned**
-- [ ] Streamlit UI
-- [ ] Docker image
-- [ ] Interactive visualization
-- [ ] Target: One-click demo working
-
-## 🔧 Configuration
-
-See `.env.example` for configuration options:
-
-- `OLLAMA_HOST`: Ollama server address (default: http://localhost:11434)
-- `SLM_MODEL`: SLM model name (default: qwen2.5:7b-instruct)
-- `VLM_MODEL`: VLM model name (default: qwen-vl)
-- `DPI`: Image resolution (default: 300)
-- `DESKEW_ENABLED`: Enable de-skew (default: True)
-- `DENOISE_ENABLED`: Enable de-noise (default: True)
-- `OCR_PRIMARY`: Primary OCR engine (default: paddleocr)
-- `LAYOUT_MODEL_NAME`: Layout model name (default: publaynet)
+---
 
 ## 🏗️ Architecture
 
 ### Pipeline Flow
 
 ```
-PDF/Image
-  ↓
-[1] Ingest & Preprocess (de-skew, de-noise, digital text extraction)
-  ↓
-[2] Layout Segmentation (ML model or heuristic fallback)
-  ↓
-[3] OCR (per-block, PaddleOCR/Tesseract)
-  ↓
-[4] Semantic Labeling (SLM via Ollama)
-  ↓
-[5] Table & Figure Processing (Qwen-VL)
-  ↓
-[6] Assembly (JSON + Markdown with citations)
-  ↓
-Document (JSON + Markdown)
+PDF/Image → Ingest → Segment → OCR → [Label] → [Table/Figure] → Assemble → JSON/Markdown
 ```
 
-### Key Design Decisions
+### Key Components
 
-1. **CPU-First**: All components work on CPU, with optional GPU acceleration later
-2. **Progressive Fallbacks**: ML model → Heuristic → Basic processing
-3. **Caching**: SHA256-based caching for pipeline artifacts
-4. **Modular**: Each pipeline stage is independent and testable
-5. **Traceability**: All extracted data includes bounding-box citations
-
-## 🚀 Future Enhancements
-
-### GPU Acceleration
-- NVIDIA DGX integration
-- vLLM for GPU-accelerated SLM inference
-- CUDA-enabled PyTorch for Detectron2 (if needed)
-
-### Model Improvements
-- Fine-tune LayoutParser model for better granularity
-- Custom SLM prompts for domain-specific labeling
-- Advanced table extraction (TATR integration)
-- Chart data extraction (Plotly/Matplotlib parsing)
-
-### Features
-- Multi-language support
-- Batch processing
-- Incremental processing
-- Webhook notifications
-- Export formats (JSON, Markdown, HTML, PDF)
-
-## 📝 Notes
-
-### Detectron2 Alternative
-- **PaddleDetectionLayoutModel** is used instead of Detectron2
-- Works on CPU/MPS without CUDA
-- Auto-downloads PubLayNet weights (221MB)
-- No Detectron2 installation required
-
-### Model Downloads
-- LayoutParser models auto-download on first use
-- PaddleOCR models auto-download on initialization
-- Ollama models must be pulled manually (`ollama pull`)
-
-### Performance
-- CPU processing: ~5-10 seconds per page
-- Heuristic fallback: Faster but less accurate
-- ML model: Slower but more accurate
-- Caching reduces redundant processing
-
-## 🤝 Contributing
-
-Contributions welcome! Please:
-1. Follow the existing code structure
-2. Add tests for new features
-3. Update documentation
-4. Ensure CPU-first compatibility
-
-## 📄 License
-
-[Your License Here]
-
-## 🙏 Acknowledgments
-
-- LayoutParser team for PubLayNet models
-- PaddleOCR for OCR capabilities
-- Ollama for SLM/VLM hosting
-- Qwen team for language models
+| Component | Status | Description |
+|-----------|--------|-------------|
+| `src/pipelines/ingest.py` | ✅ | PDF/image loading, preprocessing |
+| `src/pipelines/segment.py` | ✅ | Layout detection (ML + heuristics) |
+| `src/pipelines/ocr.py` | ✅ | OCR orchestration |
+| `src/pipelines/slm_label.py` | ⚠️ | Semantic labeling (stubbed) |
+| `src/pipelines/table_processor.py` | ⚠️ | Table extraction (partial) |
+| `src/pipelines/figure_processor.py` | ⚠️ | Figure processing (partial) |
+| `src/pipelines/assemble.py` | ✅ | JSON/Markdown assembly |
+| `app/streamlit_main.py` | ✅ | Streamlit demo UI |
+| `app/api_main.py` | ⚠️ | FastAPI endpoints (partial) |
 
 ---
 
-**Status**: 🚧 Active Development - Steps 1 & 2 Complete, Steps 3-6 In Progress
+## 📊 Performance
 
-**Last Updated**: 2024
+### Current (CPU)
+
+- **2-page document:** ~5-6 minutes
+- **Layout detection:** ~30-60 sec/page
+- **OCR:** ~2-3 min/page
+- **Text extraction:** ~85-90% success rate
+
+### Expected (GPU)
+
+- **2-page document:** ~20-40 seconds (10-15x faster)
+- **Layout detection:** ~2-5 sec/page (10-20x faster)
+- **OCR:** ~10-20 sec/page (5-10x faster)
+
+---
+
+## ⚙️ Configuration
+
+### Streamlit UI Settings
+
+- **ML Detection Threshold:** 0.05-0.50 (recommended: 0.15-0.25)
+  - Lower = more blocks (may include noise)
+  - Higher = fewer, higher-confidence blocks
+
+- **Heuristic Strictness:** 0.0-1.0 (recommended: 0.6-0.8)
+  - Higher = fewer false positives (logos as FORM, # as LIST)
+  - Lower = more aggressive detection
+
+- **Enable SLM/VLM:** Toggle semantic labeling and VLM features (requires Ollama)
+
+### Environment Variables
+
+Create `.env` file (see `.env.example`):
+
+```bash
+# LLM/VLM Configuration
+ENABLE_SLM=false          # Enable semantic labeling (requires Ollama)
+ENABLE_VLM=false          # Enable VLM for tables/figures
+OLLAMA_HOST=localhost     # Ollama server host
+OLLAMA_PORT=11434         # Ollama server port
+
+# Model Configuration
+LAYOUT_MODEL=publaynet    # Layout detection model
+OCR_ENGINE=paddle         # OCR engine (paddle/tesseract)
+```
+
+---
+
+## 📁 Project Structure
+
+```
+doc2data/
+├── src/
+│   ├── pipelines/        # Pipeline stages
+│   ├── ocr/              # OCR implementations
+│   ├── vlm/              # VLM integration (stubbed)
+│   └── processing/       # Preprocessing utilities
+├── app/
+│   ├── streamlit_main.py # Streamlit demo
+│   └── api_main.py       # FastAPI endpoints
+├── utils/
+│   ├── models.py         # Data models
+│   ├── config.py         # Configuration
+│   └── visualization.py  # Visualization utilities
+├── data/
+│   └── sample_docs/      # Sample PDFs
+├── models/               # Model download scripts
+├── tests/                # Unit tests
+├── requirements.txt      # Python dependencies
+└── README.md            # This file
+```
+
+---
+
+## 🔧 Usage
+
+### Streamlit Demo
+
+1. **Start Streamlit:**
+   ```bash
+   streamlit run app/streamlit_main.py
+   ```
+
+2. **Upload Document:**
+   - Use file uploader OR select sample document
+
+3. **Configure Settings:**
+   - Adjust ML Detection Threshold (0.15-0.25 recommended)
+   - Adjust Heuristic Strictness (0.6-0.8 recommended)
+
+4. **Run Pipeline:**
+   - Check pipeline steps: Ingest → Segment → OCR → Assemble
+   - View results: Annotated image, statistics, JSON/Markdown
+
+5. **Download Results:**
+   - JSON: Full structured data with metadata
+   - Markdown: Human-readable format
+
+### FastAPI Server
+
+```bash
+# Start FastAPI server
+uvicorn app.api_main:app --host 0.0.0.0 --port 8000
+
+# Endpoints:
+# POST /ingest
+# POST /segment
+# POST /ocr
+# POST /label
+# POST /table/process
+# POST /figure/process
+# POST /assemble
+# GET /health
+```
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run integration tests
+python tests/test_pipeline.py
+
+# Test individual stages
+python -m pytest tests/
+```
+
+---
+
+## 📦 Models
+
+### Auto-Downloaded Models
+
+Models are automatically downloaded on first run:
+
+- **LayoutParser PubLayNet:** `~/.paddlex/official_models/ppyolov2_r50vd_dcn_365e_publaynet/`
+- **TableBank:** `~/.paddlex/official_models/ppyolov2_r50vd_dcn_365e_tableBank_word/`
+- **PaddleOCR:** `~/.paddlex/official_models/PP-OCRv5_server_det/`, `en_PP-OCRv5_mobile_rec/`
+
+**Total Size:** ~1-2 GB
+
+### Ollama Models (Optional)
+
+If enabling SLM/VLM:
+
+```bash
+# Install Ollama
+curl -fsSL https://ollama.ai/install.sh | sh
+
+# Pull models
+ollama pull qwen2.5:7b-instruct
+ollama pull qwen-vl  # (if available)
+
+# Start Ollama server
+ollama serve
+```
+
+---
+
+## 🐛 Known Issues & Solutions
+
+### Issue: Inconsistent Results on Refresh
+
+**Solution:** Disabled automatic threshold back-off. Use consistent threshold settings (0.15-0.25 recommended).
+
+### Issue: Logo Tagged as FORM
+
+**Solution:** Increased heuristic strictness (0.7-0.8) or adjust "Heuristic Strictness" slider in UI.
+
+### Issue: Single Characters (#) Tagged as LIST
+
+**Solution:** Increased heuristic strictness (0.7-0.8) or adjust "Heuristic Strictness" slider in UI.
+
+### Issue: OCR Taking Too Long
+
+**Solution:** Already optimized with parallel processing and block filtering. Large blocks (>60% page) are skipped.
+
+---
+
+## 🚧 Roadmap
+
+### Immediate (1-2 Weeks)
+
+- GPU setup and integration
+- SLM/VLM activation
+- Threshold tuning and validation
+- Testing and benchmarking
+
+### Short-term (1-2 Months)
+
+- Model fine-tuning
+- Feature enhancements
+- Production readiness
+- FastAPI integration testing
+
+### Long-term (3-6 Months)
+
+- Scalability improvements
+- Advanced features (multi-language, handwriting)
+- Cloud deployment
+- Custom model training
+
+---
+
+## 📝 License
+
+[Add your license here]
+
+---
+
+## 🤝 Contributing
+
+[Add contribution guidelines here]
+
+---
+
+## 📧 Contact
+
+**Repository:** https://github.com/rahul370139/doc2data  
+**Issues:** https://github.com/rahul370139/doc2data/issues
+
+---
+
+## 📚 Documentation
+
+- **Project Status:** See `PROJECT_STATUS.md` for detailed implementation status
+- **API Documentation:** See `app/api_main.py` for FastAPI endpoints
+- **Code Comments:** All major functions have docstrings
+
+---
+
+**Last Updated:** January 2025

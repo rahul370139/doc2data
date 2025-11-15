@@ -2,7 +2,7 @@
 
 **Version:** 1.0.0 (Phase 1)  
 **Status:** Production-Ready (CPU), GPU Acceleration Ready  
-**Last Updated:** January 2025
+**Last Updated:** 15th Nov 2025
 
 A production-ready document processing pipeline that converts PDFs and images into structured JSON data. Uses state-of-the-art ML models (LayoutParser, PaddleOCR) combined with intelligent heuristics for layout detection, OCR, and content classification.
 
@@ -387,5 +387,3 @@ ollama serve
 - **Code Comments:** All major functions have docstrings
 
 ---
-
-**Last Updated:** January 2025

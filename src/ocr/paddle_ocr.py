@@ -35,12 +35,9 @@ class PaddleOCRWrapper:
         
         try:
             # Use minimal parameters compatible with PaddleOCR 3.x
-            # Disable angle classifier and GPU to avoid tensor memory issues
             self.ocr = PaddleOCR(
-                use_angle_cls=False,  # Disable to avoid tensor memory issues
-                lang=self.lang,
-                use_gpu=False,  # Explicitly disable GPU to avoid tensor issues on CPU
-                enable_mkldnn=False  # Disable MKLDNN to avoid tensor memory issues
+                use_angle_cls=self.use_angle_cls,
+                lang=self.lang
             )
             init_time = time.time() - start_time
             print(f"✅ PaddleOCR initialized in {init_time:.2f}s")
@@ -94,14 +91,9 @@ class PaddleOCRWrapper:
                 print(f"⚠️ Image too small for OCR: {image.shape}")
                 return word_boxes
             
-            # CRITICAL: Make image contiguous in memory to avoid tensor memory errors
-            # PaddleOCR requires contiguous arrays, especially in parallel processing
+            # Make image contiguous in memory (helps with PaddleOCR)
             if not image.flags['C_CONTIGUOUS']:
                 image = np.ascontiguousarray(image)
-            
-            # Ensure image is writable (some views are read-only)
-            if not image.flags['WRITEABLE']:
-                image = image.copy()
                 
             # Run OCR (new API doesn't use cls parameter)
             result = self.ocr.ocr(image)

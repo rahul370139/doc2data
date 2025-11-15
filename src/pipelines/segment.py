@@ -62,6 +62,10 @@ class LayoutSegmenter:
         self.table_model = None
         self.split_large_blocks = split_large_blocks
         self.max_block_area_ratio = max_block_area_ratio
+        self.form_geometry_cache: Dict[int, Dict[str, Any]] = {}
+        # Geometry controls
+        self.enable_form_geometry: bool = True
+        self.geometry_strictness: float = 0.7  # 0..1, higher = stricter
         self._initialize()
     
     def _layout_to_blocks(self, layout, page_id: int) -> List[Block]:
@@ -1069,6 +1073,270 @@ class LayoutSegmenter:
             existing_tables.append(table_block)
         
         return blocks
+
+    def _detect_form_geometry(
+        self,
+        analysis_layers: Optional[Dict[str, Any]],
+        image_shape: Tuple[int, int],
+        page_id: int,
+        existing_blocks: List[Block],
+        orientation: Optional[float] = None
+    ) -> List[Block]:
+        """
+        Detect form fields (text rectangles, checkboxes) using analysis masks.
+        """
+        if not analysis_layers:
+            return []
+        try:
+            import cv2
+        except ImportError:
+            return []
+        
+        box_mask = analysis_layers.get("box_mask")
+        binary_image = analysis_layers.get("binary_image")
+        line_mask = analysis_layers.get("line_mask")
+        if box_mask is None or not hasattr(box_mask, "shape") or binary_image is None:
+            return []
+        
+        mask = box_mask.copy()
+        if mask.dtype != np.uint8:
+            mask = cv2.normalize(mask, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return []
+        
+        height, width = image_shape[:2]
+        page_area = float(max(height * width, 1))
+        new_blocks: List[Block] = []
+
+        # Strictness scaling
+        strict = float(getattr(self, "geometry_strictness", 0.7) or 0.7)
+        strict = min(max(strict, 0.0), 1.0)
+        min_area_ratio_global = 0.0002 - 0.00012 * strict  # 0.0002..0.00008
+        min_dimension = int(12 + 10 * strict)  # 12..22 px minimum side
+        base_line_density = 0.008 + 0.01 * strict  # baseline requirement for any candidate
+        # Interpolate thresholds between permissive and strict
+        # Checkbox constraints
+        chk_min_aspect = 0.85 + 0.05 * strict   # 0.85..0.90
+        chk_max_aspect = 1.35 - 0.10 * strict   # 1.35..1.25
+        chk_max_area_ratio = 0.004 - 0.0025 * strict  # 0.004..0.0015
+        chk_max_side_ratio = 0.08 - 0.03 * strict     # relative max side to min(page_w,h)
+        chk_min_line_density = 0.015 + 0.01 * strict  # 0.015..0.025
+        chk_max_text_density = 0.30 - 0.08 * strict   # 0.30..0.22
+        chk_min_side = int(16 + 8 * strict)  # 16..24 px
+
+        # Text field constraints
+        tf_min_aspect = 3.5 + 2.5 * strict       # 3.5..6.0
+        tf_min_w = 40 + int(40 * strict)         # 40..80 px
+        tf_min_h = 10 + int(10 * strict)         # 10..20 px
+        tf_min_line_density = 0.005 + 0.01 * strict  # 0.005..0.015
+        tf_max_text_density = 0.28 - 0.06 * strict   # 0.28..0.22
+        tf_max_area_ratio = 0.06 - 0.03 * strict     # 0.06..0.03
+
+        # Vertical field constraints
+        vf_max_aspect = 0.5 - 0.1 * strict       # 0.5..0.4
+        vf_min_h = 40 + int(30 * strict)         # 40..70 px
+        vf_min_line_density = 0.005 + 0.01 * strict
+        vf_max_text_density = 0.28 - 0.06 * strict
+        
+        def overlaps_existing(bbox: Tuple[float, float, float, float]) -> bool:
+            # Stricter overlap check - higher strictness = lower IOU threshold (more restrictive)
+            iou_threshold = 0.5 - 0.2 * strict  # 0.5..0.3 (stricter = lower threshold)
+            for blk in existing_blocks:
+                if self._calculate_iou(bbox, blk.bbox) > iou_threshold:
+                    return True
+            for blk in new_blocks:
+                if self._calculate_iou(bbox, blk.bbox) > iou_threshold:
+                    return True
+            return False
+        
+        # Pre-collect candidates for NMS/neighbor filtering
+        candidates: List[Dict[str, Any]] = []
+        max_candidates = 400
+        for contour in contours[:max_candidates]:
+            x, y, w, h = cv2.boundingRect(contour)
+            area = float(w * h)
+            if area <= 0:
+                continue
+            area_ratio = area / page_area
+            # Global sanity bounds
+            if area_ratio < min_area_ratio_global or area_ratio > 0.12:
+                continue
+            if min(w, h) < min_dimension:
+                continue
+            aspect = w / float(max(h, 1))
+            bbox = (float(x), float(y), float(x + w), float(y + h))
+            if overlaps_existing(bbox):
+                continue
+            line_density = 0.0
+            if line_mask is not None and hasattr(line_mask, "shape"):
+                region = line_mask[y:y+h, x:x+w]
+                if region.size > 0:
+                    line_density = float(cv2.countNonZero(region) / max(region.size, 1))
+            text_density = 0.0
+            region_binary = binary_image[y:y+h, x:x+w]
+            if region_binary.size > 0:
+                text_density = float(cv2.countNonZero(region_binary) / max(region_binary.size, 1))
+            # Stricter text density threshold - forms should have low text density
+            # Higher strictness = lower threshold (more restrictive)
+            max_text_density_threshold = 0.25 - 0.10 * strict  # 0.25..0.15 (stricter = lower threshold)
+            if text_density > max_text_density_threshold:
+                continue
+            if line_density < base_line_density:
+                continue
+            if line_density <= text_density * 0.6:
+                continue
+
+            field_kind = None
+            is_checkbox = False
+            # Orientation-aware preference for vertical fields when page is rotated
+            orient = float(orientation or 0.0)
+
+            if (
+                chk_min_aspect <= aspect <= chk_max_aspect
+                and area_ratio < chk_max_area_ratio
+                and max(w, h) < min(width, height) * chk_max_side_ratio
+                and line_density >= chk_min_line_density
+                and text_density <= chk_max_text_density
+                and min(w, h) >= chk_min_side
+            ):
+                field_kind = "checkbox"
+                is_checkbox = True
+            elif (
+                aspect >= tf_min_aspect
+                and w >= tf_min_w and h >= tf_min_h
+                and line_density >= tf_min_line_density
+                and text_density <= tf_max_text_density
+                and area_ratio <= tf_max_area_ratio
+            ):
+                field_kind = "text_field"
+            elif (
+                aspect <= vf_max_aspect
+                and h >= vf_min_h
+                and line_density >= vf_min_line_density
+                and text_density <= vf_max_text_density
+            ):
+                field_kind = "vertical_field"
+            else:
+                continue
+
+            candidates.append({
+                "bbox": bbox,
+                "x": x, "y": y, "w": w, "h": h,
+                "aspect": aspect,
+                "area_ratio": area_ratio,
+                "line_density": line_density,
+                "text_density": text_density,
+                "field_kind": field_kind,
+                "is_checkbox": is_checkbox
+            })
+
+        # Early exit
+        if not candidates:
+            return []
+
+        # Non-maximum suppression to reduce duplicates
+        def iou(a, b):
+            ax0, ay0, ax1, ay1 = a
+            bx0, by0, bx1, by1 = b
+            inter_x0 = max(ax0, bx0)
+            inter_y0 = max(ay0, by0)
+            inter_x1 = min(ax1, bx1)
+            inter_y1 = min(ay1, by1)
+            iw = max(0.0, inter_x1 - inter_x0)
+            ih = max(0.0, inter_y1 - inter_y0)
+            inter = iw * ih
+            a_area = (ax1 - ax0) * (ay1 - ay0)
+            b_area = (bx1 - bx0) * (by1 - by0)
+            union = a_area + b_area - inter
+            return (inter / union) if union > 0 else 0.0
+
+        # Score preference: higher line density, then smaller area
+        candidates.sort(key=lambda c: (c["line_density"], -c["area_ratio"]), reverse=True)
+        kept: List[Dict[str, Any]] = []
+        for cand in candidates:
+            suppressed = False
+            for prev in kept:
+                if iou(cand["bbox"], prev["bbox"]) >= 0.5:
+                    suppressed = True
+                    break
+            if not suppressed:
+                kept.append(cand)
+
+        # Neighbor rule for checkboxes: require at least one sibling nearby
+        # Stricter neighbor requirement - higher strictness = smaller neighbor distance (more restrictive)
+        filtered: List[Dict[str, Any]] = []
+        chk_coords = [(c["x"], c["y"], c["w"], c["h"]) for c in kept if c["is_checkbox"]]
+        neighbor_distance_multiplier = 2.0 - 0.5 * strict  # 2.0..1.5 (stricter = closer neighbors required)
+        for cand in kept:
+            if cand["is_checkbox"]:
+                x, y, w, h = cand["x"], cand["y"], cand["w"], cand["h"]
+                max_side = max(w, h)
+                neighbor_ok = False
+                for (ox, oy, ow, oh) in chk_coords:
+                    if (ox, oy, ow, oh) == (x, y, w, h):
+                        continue
+                    dx = (ox + ow/2) - (x + w/2)
+                    dy = (oy + oh/2) - (y + h/2)
+                    dist = (dx*dx + dy*dy) ** 0.5
+                    if dist <= neighbor_distance_multiplier * max_side:
+                        neighbor_ok = True
+                        break
+                if not neighbor_ok:
+                    continue
+            filtered.append(cand)
+
+        # Exclude overlaps with text/table blocks (avoid treating text glyphs as checkboxes)
+        # Stricter overlap check - higher strictness = higher IOU threshold (more restrictive)
+        def overlaps_text_or_table(bb: Tuple[float, float, float, float]) -> bool:
+            iou_threshold = 0.15 + 0.15 * strict  # 0.15..0.30 (stricter = higher threshold, more exclusion)
+            for blk in existing_blocks:
+                if blk.type in {BlockType.TEXT, BlockType.TITLE, BlockType.LIST, BlockType.TABLE}:
+                    if self._calculate_iou(bb, blk.bbox) > iou_threshold:
+                        return True
+            return False
+
+        final_cands = [c for c in filtered if not overlaps_text_or_table(c["bbox"])]
+
+        # Cap total candidates per page - stricter cap with higher strictness
+        max_outputs = int(90 - 30 * strict)  # 90..60 (stricter = fewer candidates)
+        final_cands = final_cands[:max_outputs]
+
+        # Materialize blocks
+        for cand in final_cands:
+            bbox = cand["bbox"]
+            md: Dict[str, Any] = {
+                "detected_by": "form_geometry",
+                "orientation_hint": orientation or 0.0,
+                "field_kind": cand["field_kind"],
+            }
+            if cand["is_checkbox"] and binary_image is not None:
+                x0, y0, x1, y1 = map(int, bbox)
+                region = binary_image[y0:y1, x0:x1]
+                if region.size > 0:
+                    fill_ratio = float(cv2.countNonZero(region) / region.size)
+                else:
+                    fill_ratio = 0.0
+                md["checkbox"] = True
+                md["filled_ratio_estimate"] = fill_ratio
+
+            new_blocks.append(
+                Block(
+                    id=f"form_candidate_{page_id}_{len(new_blocks)}",
+                    type=BlockType.FORM,
+                    bbox=bbox,
+                    page_id=page_id,
+                    confidence=0.55,
+                    metadata=md,
+                )
+            )
+        
+        if new_blocks:
+            self.form_geometry_cache[page_id] = {
+                "fields": [blk.to_dict() for blk in new_blocks if not blk.metadata.get("checkbox")],
+                "checkboxes": [blk.to_dict() for blk in new_blocks if blk.metadata.get("checkbox")]
+            }
+        return new_blocks
     
     def _augment_text_with_heuristic(
         self,
@@ -2242,7 +2510,9 @@ class LayoutSegmenter:
         page_id: int,
         merge_boxes: bool = True,
         resolve_order: bool = True,
-        digital_words: Optional[List[WordBox]] = None
+        digital_words: Optional[List[WordBox]] = None,
+        analysis_layers: Optional[Dict[str, Any]] = None,
+        orientation: Optional[float] = None
     ) -> List[Block]:
         """
         Segment a single page.
@@ -2259,6 +2529,7 @@ class LayoutSegmenter:
         """
         # Detect layout with proper threshold (0.3) for quality detection using PubLayNet
         blocks = self.detect_layout(image, page_id)
+        analysis_layers = analysis_layers or {}
         
         # Set page IDs
         for block in blocks:
@@ -2286,6 +2557,20 @@ class LayoutSegmenter:
         # Reclassify ambiguous blocks using texture cues (before merging)
         blocks = self._reclassify_blocks_by_texture(image, blocks, page_id, heuristic_strictness)
         
+        orientation_hint = orientation
+        if orientation_hint is None and analysis_layers:
+            orientation_hint = analysis_layers.get("orientation")
+        if getattr(self, "enable_form_geometry", True):
+            form_blocks = self._detect_form_geometry(
+                analysis_layers,
+                image.shape,
+                page_id,
+                blocks,
+                orientation_hint
+            )
+            if form_blocks:
+                blocks.extend(form_blocks)
+        
         # Merge overlapping boxes first (conservative - only truly overlapping)
         if merge_boxes:
             blocks = self.merge_overlapping_boxes(blocks, iou_threshold=0.5)  # Only merge if >50% overlap
@@ -2294,8 +2579,10 @@ class LayoutSegmenter:
         # This preserves large distinct blocks while grouping small related ones
         blocks = self._merge_adjacent_blocks(blocks, image, distance_threshold=15.0)
         
-        # Heuristic form detection - only add if not already detected
-        blocks = self._apply_form_enhancement(image, blocks, page_id)
+        # Heuristic form detection - only add if form geometry detection is disabled
+        # This prevents double detection when form geometry is enabled
+        if not getattr(self, "enable_form_geometry", True):
+            blocks = self._apply_form_enhancement(image, blocks, page_id)
         
         # Heuristic figure detection - only add if not already detected
         blocks = self._detect_figures_heuristic(image, blocks, page_id)

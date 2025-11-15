@@ -1,7 +1,7 @@
 """
 Assembly pipeline: JSON hierarchy builder and Markdown generator.
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from utils.models import Document, Block, BlockRole, BlockType, TableBlock, FigureBlock, PageImage
 from utils.config import Config
 from src.pipelines.table_processor import TableProcessor
@@ -193,8 +193,45 @@ class DocumentAssembler:
                 "text_coverage": doc_statistics.get("text_coverage", 0.0)
             }
         }
-        
+        form_fields, checkboxes = self._collect_form_outputs(document.blocks)
+        enhanced_json["form_fields"] = form_fields
+        enhanced_json["checkboxes"] = checkboxes
         return enhanced_json
+
+    def _collect_form_outputs(self, blocks: List[Block]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        form_fields: List[Dict[str, Any]] = []
+        checkboxes: List[Dict[str, Any]] = []
+        for block in blocks:
+            meta = getattr(block, "metadata", {}) or {}
+            if meta.get("checkbox_state"):
+                checkboxes.append({
+                    "id": block.id,
+                    "page": block.page_id,
+                    "bbox": list(block.bbox),
+                    "state": meta.get("checkbox_state"),
+                    "confidence": meta.get("checkbox_confidence", 0.0),
+                    "label_id": meta.get("label_id"),
+                    "label_text": meta.get("label_text"),
+                    "ocr_confidence": meta.get("ocr_confidence", 0.0),
+                    "engine": meta.get("ocr_engine")
+                })
+                continue
+            form_meta = meta.get("form_field")
+            if form_meta:
+                form_fields.append({
+                    "id": block.id,
+                    "page": block.page_id,
+                    "bbox": list(block.bbox),
+                    "label_id": form_meta.get("label_id"),
+                    "label_text": form_meta.get("label_text"),
+                    "field_type": form_meta.get("field_type"),
+                    "value": form_meta.get("value_text"),
+                    "validator_passed": form_meta.get("validator_passed", False),
+                    "validator_info": form_meta.get("validator_info", {}),
+                    "ocr_confidence": meta.get("ocr_confidence", 0.0),
+                    "engine": meta.get("ocr_engine")
+                })
+        return form_fields, checkboxes
     
     def _extract_document_metadata(self, document: Document) -> Dict[str, Any]:
         """

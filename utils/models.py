@@ -50,7 +50,7 @@ class WordBox:
 
 @dataclass
 class PageImage:
-    """Page image with metadata."""
+    """Page image with metadata and analysis layers."""
     image: Any  # numpy array or PIL Image
     page_id: int
     width: int
@@ -59,6 +59,12 @@ class PageImage:
     digital_text: bool = False  # True if PDF has digital text layer
     digital_words: List[WordBox] = field(default_factory=list)
     preprocess_metadata: Dict[str, Any] = field(default_factory=dict)
+    analysis_image: Optional[Any] = None  # High-contrast grayscale image
+    binary_image: Optional[Any] = None  # Adaptive-thresholded image
+    line_mask: Optional[Any] = None  # Highlighted horizontal/vertical lines
+    box_mask: Optional[Any] = None  # Regions with dense boxes/grids
+    orientation: float = 0.0  # Estimated orientation in degrees (0/90)
+    orientation_confidence: float = 0.0
     
     def __post_init__(self):
         """Initialize metadata if not provided."""
@@ -68,6 +74,27 @@ class PageImage:
                 "denoised": False,
                 "digital_text_extracted": False
             }
+
+    @property
+    def shape(self):
+        """Compat helper so code that expects numpy-like `.shape` doesn't crash.
+
+        Returns a tuple (H, W[, C]) taking from the backing image when possible,
+        otherwise synthesized from height/width fields. The optional channel
+        dimension is included as 3 to mimic RGB when unknown.
+        """
+        try:
+            img = getattr(self, "image", None)
+            if img is not None and hasattr(img, "shape"):
+                return img.shape
+        except Exception:
+            pass
+        # Fallback to height/width
+        h = int(getattr(self, "height", 0) or 0)
+        w = int(getattr(self, "width", 0) or 0)
+        if h > 0 and w > 0:
+            return (h, w, 3)
+        return (0, 0, 3)
 
 
 @dataclass
@@ -168,6 +195,29 @@ class FigureBlock(Block):
             "series": self.series
         })
         return base_dict
+
+
+@dataclass
+class FormFieldCandidate:
+    """Candidate form field detected during geometry analysis."""
+    id: str
+    page_id: int
+    bbox: Tuple[float, float, float, float]
+    field_type: str = "text_field"  # text_field, checkbox_group, grid_cell, etc.
+    rotation: float = 0.0
+    confidence: float = 1.0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class CheckboxCandidate:
+    """Checkbox candidate with optional state metadata."""
+    id: str
+    page_id: int
+    bbox: Tuple[float, float, float, float]
+    state: Optional[str] = None  # checked / unchecked / ambiguous
+    confidence: float = 0.0
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

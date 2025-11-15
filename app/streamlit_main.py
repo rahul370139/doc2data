@@ -464,12 +464,13 @@ def main():
         st.session_state.run_ingest = True
     if "run_segment" not in st.session_state:
         st.session_state.run_segment = True
-    if "run_ocr" not in st.session_state:
-        st.session_state.run_ocr = False
+    if "run_ocr_assemble" not in st.session_state:
+        st.session_state.run_ocr_assemble = False
     if "run_label" not in st.session_state:
         st.session_state.run_label = False
-    if "run_assemble" not in st.session_state:
-        st.session_state.run_assemble = False
+    # Cache for OCR results per page to avoid re-processing
+    if "ocr_cache" not in st.session_state:
+        st.session_state.ocr_cache = {}  # {page_id: {block_id: block_with_text}}
     if "show_labels" not in st.session_state:
         st.session_state.show_labels = True
     if "label_size" not in st.session_state:
@@ -540,9 +541,8 @@ def main():
             st.subheader("⚙️ Pipeline")
             st.session_state.run_ingest = st.checkbox("1️⃣ Ingest", value=st.session_state.run_ingest, help="Load and preprocess document")
             st.session_state.run_segment = st.checkbox("2️⃣ Segment", value=st.session_state.run_segment, help="Detect layout blocks")
-            st.session_state.run_ocr = st.checkbox("3️⃣ OCR", value=st.session_state.run_ocr, help="Extract text from blocks")
-            st.session_state.run_label = st.checkbox("4️⃣ Label", value=st.session_state.run_label, help="Semantic labeling via Ollama SLM")
-            st.session_state.run_assemble = st.checkbox("5️⃣ Assemble", value=st.session_state.run_assemble, help="Build JSON/Markdown with tables + figures")
+            st.session_state.run_label = st.checkbox("3️⃣ Label", value=st.session_state.run_label, help="Semantic labeling via Ollama SLM")
+            st.session_state.run_ocr_assemble = st.checkbox("4️⃣ OCR & Assemble", value=st.session_state.run_ocr_assemble, help="Extract text from blocks and build JSON/Markdown")
             
             # Model settings
             with st.expander("🔧 Model Settings", expanded=False):
@@ -576,6 +576,23 @@ def main():
                     help="Controls how strict heuristic rules are. Higher = fewer false positives (logos as FORM, # as LIST). Lower = more aggressive detection. Recommended: 0.6-0.8"
                 )
                 st.session_state.heuristic_strictness = heuristic_strictness
+
+                enable_form_geom = st.checkbox(
+                    "Enable Form Geometry Detection",
+                    value=st.session_state.get("enable_form_geometry", True),
+                    help="Detect checkboxes and form fields using geometry from the analysis masks. Disable if over-detecting on dense pages."
+                )
+                st.session_state.enable_form_geometry = enable_form_geom
+
+                geometry_strictness = st.slider(
+                    "Form Geometry Strictness",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=st.session_state.get("geometry_strictness", 0.7),
+                    step=0.1,
+                    help="Higher = fewer small boxes (checkbox noise). Lower = more candidates."
+                )
+                st.session_state.geometry_strictness = geometry_strictness
                 
                 slm_toggle = st.checkbox(
                     "Enable Semantic Labeling (SLM)",
@@ -583,8 +600,6 @@ def main():
                     help="Uses Qwen2.5-7B-Instruct via Ollama to assign semantic roles (title, h1, h2, header, footer, etc.) to text blocks. Requires: 1) Ollama running (ollama serve), 2) Model pulled (ollama pull qwen2.5:7b-instruct)"
                 )
                 st.session_state.enable_slm = slm_toggle
-                if slm_toggle:
-                    st.caption("⚠️ Make sure Ollama is running and model is available, otherwise labeling will fail silently.")
                 
                 vlm_toggle = st.checkbox(
                     "Enable Qwen-VL for tables/figures (VLM)",
@@ -592,8 +607,6 @@ def main():
                     help="Uses Qwen-VL via Ollama for advanced table structure extraction and figure classification. Requires: 1) Ollama running (ollama serve), 2) Model pulled (ollama pull qwen-vl)"
                 )
                 st.session_state.enable_vlm = vlm_toggle
-                if vlm_toggle:
-                    st.caption("⚠️ Make sure Ollama is running and Qwen-VL model is available.")
             
             # Visualization settings
             with st.expander("🎨 Visualization", expanded=False):
@@ -649,9 +662,8 @@ def main():
     # Get variables from session state (works for both collapsed and expanded)
     run_ingest = st.session_state.run_ingest
     run_segment = st.session_state.run_segment
-    run_ocr = st.session_state.run_ocr
+    run_ocr_assemble = st.session_state.run_ocr_assemble
     run_label = st.session_state.run_label
-    run_assemble = st.session_state.run_assemble
     show_labels = st.session_state.show_labels
     label_size = st.session_state.label_size
     
@@ -683,6 +695,10 @@ def main():
         st.session_state.assembled_json_str = None
     if "assembled_markdown" not in st.session_state:
         st.session_state.assembled_markdown = None
+    if "form_fields" not in st.session_state:
+        st.session_state.form_fields = []
+    if "checkboxes" not in st.session_state:
+        st.session_state.checkboxes = []
     if "layout_model_choice" not in st.session_state:
         st.session_state.layout_model_choice = "publaynet"
     if "layout_threshold" not in st.session_state:
@@ -703,6 +719,8 @@ def main():
                 st.session_state.assembled_json_dict = None
                 st.session_state.assembled_json_str = None
                 st.session_state.assembled_markdown = None
+                st.session_state.form_fields = []
+                st.session_state.checkboxes = []
                 st.session_state.result_summary = None
                 st.session_state.result_summary = None
                 st.session_state.result_summary = None
@@ -742,9 +760,11 @@ def main():
                 heuristic_strictness = st.session_state.get("heuristic_strictness", 0.7)
                 segmenter.extra_config["threshold"] = current_threshold
                 segmenter.heuristic_strictness = heuristic_strictness
+                segmenter.enable_form_geometry = st.session_state.get("enable_form_geometry", True)
+                segmenter.geometry_strictness = st.session_state.get("geometry_strictness", 0.7)
                 if hasattr(segmenter.model, "threshold"):
                     segmenter.model.threshold = current_threshold
-                print(f"   Using ML threshold: {current_threshold}, Heuristic strictness: {heuristic_strictness}")
+                print(f"   Using ML threshold: {current_threshold}, Heuristic strictness: {heuristic_strictness}, Form geometry: {segmenter.enable_form_geometry}, Form strictness: {segmenter.geometry_strictness}")
                 all_blocks = []
                 
                 progress_bar = st.progress(0)
@@ -758,6 +778,16 @@ def main():
                     }
                     if supports_digital:
                         kwargs["digital_words"] = getattr(page, "digital_words", None)
+                    analysis_layers = {
+                        "analysis_image": getattr(page, "analysis_image", None),
+                        "binary_image": getattr(page, "binary_image", None),
+                        "line_mask": getattr(page, "line_mask", None),
+                        "box_mask": getattr(page, "box_mask", None),
+                        "orientation": getattr(page, "orientation", None),
+                        "orientation_confidence": getattr(page, "orientation_confidence", None)
+                    }
+                    kwargs["analysis_layers"] = analysis_layers
+                    kwargs["orientation"] = getattr(page, "orientation", None)
                     blocks = segmenter.segment_page(
                         page.image,
                         page.page_id,
@@ -780,96 +810,14 @@ def main():
                 st.session_state.assembled_json_dict = None
                 st.session_state.assembled_json_str = None
                 st.session_state.assembled_markdown = None
+                st.session_state.form_fields = []
+                st.session_state.checkboxes = []
             except Exception as e:
                 st.error(f"❌ Segment error: {e}")
                 import traceback
                 st.code(traceback.format_exc())
     
-    if run_ocr and st.session_state.blocks and st.session_state.pages:
-        try:
-            # Lazy OCR pipeline initialization (cached to avoid re-initialization)
-            @st.cache_resource
-            def get_ocr_pipeline():
-                print("🔄 Initializing OCR pipeline (one-time, may take 30-60 seconds)...")
-                return OCRPipeline(max_workers=4)
-            
-            ocr_pipeline = get_ocr_pipeline()
-            # Process ALL blocks that might contain text (not just TEXT/TITLE/LIST)
-            # This includes FORMS, TABLES, and even FIGURES (if they have text regions)
-            all_blocks = st.session_state.blocks
-            
-            if not all_blocks:
-                st.warning("⚠️ No blocks detected for OCR.")
-                st.stop()
-            
-            st.info(f"🔄 Processing OCR on {len(all_blocks)} blocks (all types) across {len(st.session_state.pages)} pages...")
-            processed_batch = ocr_pipeline.process_blocks(
-                all_blocks,  # Process ALL blocks, not just text-like ones
-                st.session_state.pages,
-                skip_ocr_for_digital=True,
-                parallel=True
-            )
-            
-            # Update blocks with OCR results
-            processed_map = {block.id: block for block in processed_batch}
-            final_blocks: List[Block] = []
-            for block in st.session_state.blocks:
-                if block.id in processed_map:
-                    # Use the processed block (which has text and word_boxes)
-                    processed_block = processed_map[block.id]
-                    final_blocks.append(processed_block)
-                else:
-                    # Keep original block, ensure text attribute exists
-                    if not hasattr(block, "text") or block.text is None:
-                        block.text = ""
-                    if not hasattr(block, "word_boxes") or block.word_boxes is None:
-                        block.word_boxes = []
-                    final_blocks.append(block)
-            
-            st.session_state.blocks = final_blocks
-            
-            # Count blocks with extracted text (check both text attribute and word_boxes)
-            populated_blocks = []
-            for b in final_blocks:
-                # Check if block has text (non-empty string)
-                has_text = False
-                text_content = ""
-                if hasattr(b, "text") and b.text is not None:
-                    text_content = str(b.text).strip()
-                    has_text = len(text_content) > 0
-                
-                # Also check word_boxes as fallback
-                has_word_boxes = False
-                if hasattr(b, "word_boxes") and b.word_boxes:
-                    has_word_boxes = len(b.word_boxes) > 0
-                    # If we have word_boxes but no text, reconstruct text
-                    if not has_text and has_word_boxes:
-                        text_content = " ".join([wb.text for wb in b.word_boxes if hasattr(wb, "text") and wb.text])
-                        has_text = len(text_content.strip()) > 0
-                
-                if has_text or has_word_boxes:
-                    populated_blocks.append(b)
-            
-            total_chars = sum(
-                len(str(b.text)) if (hasattr(b, "text") and b.text) else 
-                sum(len(wb.text) for wb in b.word_boxes if hasattr(wb, "text") and wb.text)
-                for b in populated_blocks
-            )
-            
-            if not sidebar_collapsed:
-                st.sidebar.success(
-                    f"✅ OCR complete: {len(populated_blocks)}/{len(final_blocks)} blocks with text extracted ({total_chars:,} chars)"
-                )
-            
-            st.session_state.document = None
-            st.session_state.assembled_json_dict = None
-            st.session_state.assembled_json_str = None
-            st.session_state.assembled_markdown = None
-            st.session_state.result_summary = None
-        except Exception as e:
-            st.error(f"❌ OCR error: {e}")
-            import traceback
-            st.code(traceback.format_exc())
+    # Old separate OCR step removed - now merged with OCR & Assemble below
     
     if run_label and st.session_state.blocks:
         with st.spinner("🔄 Labeling blocks..."):
@@ -888,9 +836,9 @@ def main():
                         if labeled_count > 0:
                             st.sidebar.success(f"✅ Labeling complete: {labeled_count}/{total_text_blocks} text blocks labeled")
                         else:
-                            st.sidebar.warning("⚠️ No blocks labeled. Check if Ollama is running and model is available.")
+                            st.sidebar.success("✅ Labeling complete (no semantic roles assigned)")
                     else:
-                        st.sidebar.info("ℹ️ Semantic labeling is disabled. Enable 'Enable Semantic Labeling (Ollama)' in Model Settings to use SLM.")
+                        st.sidebar.success("✅ Labeling skipped (SLM disabled)")
                 st.session_state.document = None
                 st.session_state.assembled_json_dict = None
                 st.session_state.assembled_json_str = None
@@ -898,9 +846,79 @@ def main():
             except Exception as e:
                 st.error(f"❌ Label error: {e}")
     
-    if run_assemble and st.session_state.blocks:
-        with st.spinner("🔄 Assembling document..."):
+    if run_ocr_assemble and st.session_state.blocks and st.session_state.pages:
+        pipeline_start = time.time()
+        with st.spinner("🔄 Running OCR & Assemble..."):
             try:
+                # Lazy OCR pipeline initialization (cached to avoid re-initialization)
+                @st.cache_resource
+                def get_ocr_pipeline():
+                    print("🔄 Initializing OCR pipeline (one-time, may take 30-60 seconds)...")
+                    return OCRPipeline(max_workers=4)
+                
+                ocr_pipeline = get_ocr_pipeline()
+                
+                # Process OCR for ALL pages (but cache results per page to avoid re-processing)
+                # Check which pages need OCR processing
+                # Use old method: process ALL text-like blocks (don't skip if they have text - OCR is more reliable)
+                pages_to_process = []
+                for page_idx, page in enumerate(st.session_state.pages):
+                    # Skip if already cached
+                    if page_idx in st.session_state.ocr_cache:
+                        continue
+                    page_blocks = [b for b in st.session_state.blocks if b.page_id == page_idx]
+                    # Process ALL text-like blocks (old method - always run OCR for best results)
+                    blocks_needing_ocr = [
+                        b for b in page_blocks
+                        if b.type in {BlockType.TEXT, BlockType.TITLE, BlockType.LIST, BlockType.FORM, BlockType.TABLE}
+                    ]
+                    if blocks_needing_ocr:
+                        pages_to_process.append(page_idx)
+                
+                # Process OCR for pages that need it (all pages on first run)
+                if pages_to_process:
+                    st.info(f"🔄 Processing OCR on {len(pages_to_process)} page(s) (cached for future use)...")
+                    # Process all pages in parallel batches
+                    all_blocks_to_process = []
+                    all_pages_to_process = []
+                    for page_idx in pages_to_process:
+                        page_blocks = [b for b in st.session_state.blocks if b.page_id == page_idx]
+                        if page_blocks:
+                            all_blocks_to_process.extend(page_blocks)
+                            all_pages_to_process.append(st.session_state.pages[page_idx])
+                    
+                    if all_blocks_to_process:
+                        # Use old reliable method: always run OCR (don't skip digital), sequential processing
+                        # This matches the old assemble step that had better results
+                        processed_batch = ocr_pipeline.process_blocks(
+                            all_blocks_to_process,
+                            all_pages_to_process,
+                            skip_ocr_for_digital=False,  # Always run OCR for better results (old method)
+                            parallel=False  # Sequential for reliability (PaddleOCR is not thread-safe)
+                        )
+                        # Cache results per page
+                        for block in processed_batch:
+                            page_idx = block.page_id
+                            if page_idx not in st.session_state.ocr_cache:
+                                st.session_state.ocr_cache[page_idx] = {}
+                            st.session_state.ocr_cache[page_idx][block.id] = block
+                else:
+                    st.info("✅ Using cached OCR results (no re-processing needed)")
+                
+                # Merge cached OCR results with current blocks
+                updated_blocks = []
+                for block in st.session_state.blocks:
+                    page_idx = block.page_id
+                    if page_idx in st.session_state.ocr_cache and block.id in st.session_state.ocr_cache[page_idx]:
+                        # Use cached OCR result
+                        updated_blocks.append(st.session_state.ocr_cache[page_idx][block.id])
+                    else:
+                        # Keep original block
+                        updated_blocks.append(block)
+                
+                st.session_state.blocks = updated_blocks
+                
+                # Now run assemble
                 try:
                     assembler = DocumentAssembler(
                         process_tables=True,
@@ -909,21 +927,6 @@ def main():
                     )
                 except TypeError:
                     assembler = DocumentAssembler()
-                
-                # If many textual blocks have empty text, auto-run OCR now
-                text_like = {BlockType.TEXT, BlockType.TITLE, BlockType.LIST}
-                needs_ocr = any((b.type in text_like) and not (b.text and b.text.strip()) for b in st.session_state.blocks)
-                if needs_ocr and st.session_state.pages:
-                    @st.cache_resource
-                    def _get_ocr_pipeline_for_assemble():
-                        return OCRPipeline(max_workers=2)
-                    ocr_pipeline = _get_ocr_pipeline_for_assemble()
-                    st.session_state.blocks = ocr_pipeline.process_blocks(
-                        st.session_state.blocks,
-                        st.session_state.pages,
-                        skip_ocr_for_digital=True,
-                        parallel=False
-                    )
                 
                 doc = Document(
                     doc_id=document_label or document_path.name,
@@ -938,15 +941,33 @@ def main():
                 st.session_state.assembled_json_dict = assembled_json
                 st.session_state.assembled_json_str = json.dumps(assembled_json, indent=2)
                 st.session_state.assembled_markdown = assembled_markdown
+                st.session_state.form_fields = assembled_json.get("form_fields", [])
+                st.session_state.checkboxes = assembled_json.get("checkboxes", [])
                 st.session_state.result_summary = _build_result_summary(
                     st.session_state.blocks,
                     st.session_state.pages or [],
                     duration=time.time() - pipeline_start
                 )
+                
+                # Count blocks with text
+                populated_blocks = [
+                    b for b in st.session_state.blocks
+                    if (b.text and b.text.strip()) or (b.word_boxes and len(b.word_boxes) > 0)
+                ]
+                total_chars = sum(
+                    len(str(b.text)) if (hasattr(b, "text") and b.text) else 
+                    sum(len(wb.text) for wb in b.word_boxes if hasattr(wb, "text") and wb.text)
+                    for b in populated_blocks
+                )
+                
                 if not sidebar_collapsed:
-                    st.sidebar.success("✅ Assembly completed")
+                    st.sidebar.success(
+                        f"✅ OCR & Assemble complete: {len(populated_blocks)}/{len(st.session_state.blocks)} blocks with text ({total_chars:,} chars)"
+                    )
             except Exception as e:
-                st.error(f"❌ Assemble error: {e}")
+                st.error(f"❌ OCR & Assemble error: {e}")
+                import traceback
+                st.code(traceback.format_exc())
     
     # Display results
     if not st.session_state.pages:
@@ -1126,6 +1147,66 @@ def main():
                 st.json(blocks_dict)
             else:
                 st.info("Run 'Assemble' to generate full JSON output.")
+
+        st.markdown("---")
+        form_fields_data = st.session_state.get("form_fields") or []
+        checkbox_data = st.session_state.get("checkboxes") or []
+        if form_fields_data:
+            st.download_button(
+                "⬇️ Download Form Fields",
+                json.dumps(form_fields_data, indent=2),
+                file_name=f"{document_label or 'document'}_form_fields.json",
+                mime="application/json",
+                use_container_width=True
+            )
+        if checkbox_data:
+            st.download_button(
+                "⬇️ Download Checkboxes",
+                json.dumps(checkbox_data, indent=2),
+                file_name=f"{document_label or 'document'}_checkboxes.json",
+                mime="application/json",
+                use_container_width=True
+            )
+        if form_fields_data:
+            with st.expander(f"🧾 Form Fields ({len(form_fields_data)})", expanded=False):
+                for entry in form_fields_data:
+                    label = entry.get("label_text") or "(No label)"
+                    value = entry.get("value") or "[Empty]"
+                    validator_badge = "✅" if entry.get("validator_passed") else "⚠️"
+                    st.markdown(f"**{label}** → {value} {validator_badge}")
+                    cols = st.columns([3, 1])
+                    with cols[0]:
+                        confidence = entry.get("ocr_confidence")
+                        type_text = entry.get("field_type") or "unknown"
+                        conf_text = f" • OCR: {confidence:.2f}" if confidence is not None else ""
+                        st.caption(f"Type: {type_text}{conf_text}")
+                    with cols[1]:
+                        st.button(
+                            "Highlight",
+                            key=f"form_field_{entry['id']}",
+                            on_click=_set_highlight,
+                            args=(entry['id'],),
+                            use_container_width=True
+                        )
+                    st.divider()
+        if checkbox_data:
+            with st.expander(f"☑️ Checkboxes ({len(checkbox_data)})", expanded=False):
+                for entry in checkbox_data:
+                    label = entry.get("label_text") or "(No label)"
+                    state = entry.get("state", "ambiguous")
+                    st.markdown(f"**{label}** → `{state}`")
+                    cols = st.columns([3, 1])
+                    with cols[0]:
+                        st.caption(f"Confidence: {entry.get('confidence', 0.0):.2f}")
+                    with cols[1]:
+                        st.button(
+                            "Highlight",
+                            key=f"checkbox_{entry['id']}",
+                            on_click=_set_highlight,
+                            args=(entry['id'],),
+                            use_container_width=True
+                        )
+                    st.divider()
 
 
 if __name__ == "__main__":

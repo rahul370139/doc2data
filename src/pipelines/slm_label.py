@@ -96,6 +96,8 @@ Respond with ONLY a JSON object: {{"role": "<LABEL>"}}"""
             # Stub: return block unchanged
             return block
         
+        if block.metadata.get("role_locked"):
+            return block
         # Skip if not a text block
         if block.type not in [BlockType.TEXT, BlockType.TITLE, BlockType.LIST]:
             return block
@@ -180,4 +182,3 @@ Respond with ONLY a JSON object: {{"role": "<LABEL>"}}"""
             labeled_blocks.append(labeled_block)
         
         return labeled_blocks
-

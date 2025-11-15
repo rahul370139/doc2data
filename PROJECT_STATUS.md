@@ -93,7 +93,6 @@ We have successfully implemented a production-ready document processing pipeline
   - Bilateral filtering for denoising
   - Unsharp mask for text sharpness
 - **Post-processing:**
-  - Fixes common OCR errors ("I tlls" → "I am writing", "Snna munon" → "Signature")
   - Hyphenation fix, whitespace cleanup
   - Word-level confidence scores
 

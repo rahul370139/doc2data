@@ -199,6 +199,62 @@ doc2data/
    - JSON: Full structured data with metadata
    - Markdown: Human-readable format
 
+---
+
+## 🆕 Recent Improvements (Nov 2025)
+
+- Reliability: Added a `PageImage.shape` compatibility property so any legacy code that expects `.shape` works without crashing. This fixes the recurring `'PageImage' object has no attribute 'shape'` errors in OCR/Assemble.
+- Digital Text Layer: PDF word boxes are now scaled into pixel coordinates to match the rendered page, allowing reliable block-level extraction from the digital layer when present.
+- OCR Quality: Stronger crop preprocessing (upsampling to 100 px short side, CLAHE contrast, bilateral denoise, unsharp masking) plus automatic Tesseract fallback when Paddle returns low-confidence or empty results.
+- Form Geometry: New sidebar controls to enable/disable form geometry and tune strictness; detection now uses NMS, neighbor rules for checkboxes, orientation hints, and overlap suppression with text/table regions to reduce false positives.
+- Results JSON: Reducto-like summary plus per-page chunks and per-block details (normalized bboxes, confidence, content). Form associations exported in `form_fields[]` and `checkboxes[]` during assembly.
+
+---
+
+## Forms Pipeline Roadmap — Status
+
+- Foundation & Tooling
+  - [x] CPU-first config with future GPU hooks (Paddle/Detectron2/vLLM toggles in code)
+  - [x] Validators module (NPI/NDC/ICD/HCPCS/date/phone/member) and checkbox fill ratio
+  - [x] Linear assignment not required yet; geometry-first linker in place with nearest-neighbor scoring
+
+- Ingest Enhancements
+  - [x] Orientation estimate (0/90) + confidence stored on `PageImage`
+  - [x] Analysis layers: grayscale/CLAHE, binary, `line_mask`, `box_mask`
+  - [x] Digital text priors scaled to pixel coordinates on `PageImage`
+
+- Form Geometry Pass (Step 2)
+  - [x] Geometry detector over analysis layers for checkboxes/field rectangles
+  - [x] Tunable strictness with NMS, neighbor rules, text/line density checks, overlap suppression
+  - [x] UI toggle to enable/disable form geometry
+  - [ ] Column clusters/column-first order (planned)
+  - [ ] Template alignment hook (planned)
+
+- OCR Tiering & Association (Step 3)
+  - [x] Tier-1 PaddleOCR + preproc; Tier-2 Tesseract fallback
+  - [x] PDF digital layer extraction where available
+  - [x] Checkbox state via fill ratio
+  - [x] Label↔value linking with geometry + validators; stored in block.metadata
+  - [ ] Hungarian matching optional (planned; current greedy works well)
+
+- SLM & Validators (Step 4)
+  - [x] SLM integrates with `role_locked`; rules skip SLM when validator confident
+  - [x] Ollama toggle; batch-friendly labeler wired
+
+- Assembly & JSON Schema (Step 5)
+  - [x] Emits `form_fields[]`, `checkboxes[]`, tables with citations + confidences
+  - [x] Reducto-like chunks and normalized bboxes
+
+- Streamlit UX
+  - [x] Two-pane view (annotated image + Results/JSON)
+  - [x] Jump-to-block selector syncs highlighting
+  - [x] Geometry strictness + enable toggle; model threshold + heuristic strictness
+  - [ ] Overlays for link connectors + validator badges (planned)
+  
+- Testing & Docs
+  - [x] README updated with changes and troubleshooting
+  - [ ] Unit tests for geometry/validators/linking (planned)
+
 ### FastAPI Server
 
 ```bash

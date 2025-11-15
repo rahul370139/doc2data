@@ -5,7 +5,7 @@ import fitz  # PyMuPDF
 import numpy as np
 from PIL import Image
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 import pdf2image
 from io import BytesIO
 import re
@@ -13,6 +13,97 @@ import re
 from utils.models import PageImage, WordBox
 from utils.config import Config
 from src.processing.preprocessing import preprocess_image
+
+
+def _ensure_gray(image: np.ndarray) -> np.ndarray:
+    """Convert RGB image to grayscale."""
+    if image is None:
+        return image
+    if len(image.shape) == 3:
+        import cv2
+        return cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    return image
+
+
+def _estimate_orientation_from_masks(horizontal_mask: np.ndarray, vertical_mask: np.ndarray) -> Tuple[float, float]:
+    """
+    Estimate coarse page orientation (0 or 90 degrees) using horizontal vs vertical line energy.
+    
+    Returns orientation_degrees and confidence (0-1).
+    """
+    if horizontal_mask is None or vertical_mask is None:
+        return 0.0, 0.0
+    horiz_score = float(np.sum(horizontal_mask) / 255.0) if horizontal_mask.size else 0.0
+    vert_score = float(np.sum(vertical_mask) / 255.0) if vertical_mask.size else 0.0
+    total = horiz_score + vert_score
+    if total <= 0:
+        return 0.0, 0.0
+    if vert_score > horiz_score * 1.25:
+        orientation = 90.0
+    else:
+        orientation = 0.0
+    confidence = abs(vert_score - horiz_score) / total
+    return orientation, float(min(max(confidence, 0.0), 1.0))
+
+
+def _generate_analysis_layers(image: np.ndarray) -> Dict[str, Any]:
+    """
+    Generate analysis-friendly layers (high-contrast, binary, line masks, box masks).
+    """
+    result: Dict[str, Any] = {}
+    if image is None:
+        return result
+    try:
+        import cv2
+    except ImportError:
+        return result
+    
+    gray = _ensure_gray(image)
+    if gray is None:
+        return result
+    
+    # High-contrast grayscale via CLAHE
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    high_contrast = clahe.apply(gray)
+    
+    # Adaptive threshold for binary analysis image
+    binary = cv2.adaptiveThreshold(
+        high_contrast,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        31,
+        8
+    )
+    
+    height, width = binary.shape[:2]
+    horizontal_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (max(15, width // 80), 1)
+    )
+    vertical_kernel = cv2.getStructuringElement(
+        cv2.MORPH_RECT,
+        (1, max(15, height // 80))
+    )
+    
+    horizontal_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
+    vertical_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
+    line_mask = cv2.bitwise_or(horizontal_lines, vertical_lines)
+    
+    box_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+    box_mask = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, box_kernel, iterations=1)
+    
+    orientation, orientation_conf = _estimate_orientation_from_masks(horizontal_lines, vertical_lines)
+    
+    result.update({
+        "analysis_image": high_contrast,
+        "binary_image": binary,
+        "line_mask": line_mask,
+        "box_mask": box_mask,
+        "orientation": orientation,
+        "orientation_confidence": orientation_conf
+    })
+    return result
 
 
 def detect_and_correct_rotation(image: np.ndarray, page_id: int = 0) -> np.ndarray:
@@ -95,18 +186,23 @@ def extract_digital_text(pdf_path: str) -> List[dict]:
     
     for page_num in range(len(doc)):
         page = doc[page_num]
-        words = page.get_text("words")  # Get words with bboxes
-        
+        words = page.get_text("words")  # Get words with bboxes in PDF coordinate space (points)
+        rect = page.rect  # page rectangle in points
+        page_w_pts = float(rect.width)
+        page_h_pts = float(rect.height)
+
         words_data = []
         for word in words:
             words_data.append({
                 "text": word[4],  # Text content
-                "bbox": [word[0], word[1], word[2], word[3]],  # [x0, y0, x1, y1]
+                "bbox": [word[0], word[1], word[2], word[3]],  # [x0, y0, x1, y1] in points
                 "page": page_num
             })
-        
+
         pages_data.append({
             "page": page_num,
+            "page_width_pts": page_w_pts,
+            "page_height_pts": page_h_pts,
             "words": words_data,
             "has_digital_text": len(words_data) > 0
         })
@@ -249,14 +345,39 @@ def ingest_document(
             denoise=denoise
         )
         
+        analysis_layers = _generate_analysis_layers(processed_image)
+        orientation = analysis_layers.get("orientation", 0.0)
+        orientation_conf = analysis_layers.get("orientation_confidence", 0.0)
+        preprocess_meta["analysis_generated"] = bool(analysis_layers)
+        preprocess_meta["orientation_estimate"] = orientation
+        preprocess_meta["orientation_confidence"] = orientation_conf
+        
         # Check if page has digital text and store word boxes if available
         has_digital_text = False
         page_digital_words: List[WordBox] = []
         if digital_text_data and page_id < len(digital_text_data):
             page_info = digital_text_data[page_id]
-            has_digital_text = page_info["has_digital_text"]
-            page_digital_words = list(page_info.get("words", []))
-            preprocess_meta["digital_text_extracted"] = has_digital_text
+            has_digital_text = page_info.get("has_digital_text", False)
+            # Scale PDF point-space word boxes to pixel coordinates of rendered image
+            words_list = list(page_info.get("words", []))
+            pw = float(page_info.get("page_width_pts") or 0.0) or 0.0
+            ph = float(page_info.get("page_height_pts") or 0.0) or 0.0
+            scale_x = (processed_image.shape[1] / pw) if pw > 0 else 1.0
+            scale_y = (processed_image.shape[0] / ph) if ph > 0 else 1.0
+            scaled_words: List[WordBox] = []
+            for w in words_list:
+                bbox = w.get("bbox") if isinstance(w, dict) else None
+                text = w.get("text") if isinstance(w, dict) else None
+                if not bbox or len(bbox) < 4:
+                    continue
+                x0, y0, x1, y1 = bbox[:4]
+                sx0 = float(x0) * scale_x
+                sy0 = float(y0) * scale_y
+                sx1 = float(x1) * scale_x
+                sy1 = float(y1) * scale_y
+                scaled_words.append(WordBox(text=str(text or ""), bbox=(sx0, sy0, sx1, sy1), confidence=1.0))
+            page_digital_words = scaled_words
+            preprocess_meta["digital_text_extracted"] = has_digital_text and len(scaled_words) > 0
         
         # Create PageImage object
         height, width = processed_image.shape[:2]
@@ -268,7 +389,13 @@ def ingest_document(
             dpi=dpi,
             digital_text=has_digital_text,
             digital_words=page_digital_words,
-            preprocess_metadata=preprocess_meta
+            preprocess_metadata=preprocess_meta,
+            analysis_image=analysis_layers.get("analysis_image"),
+            binary_image=analysis_layers.get("binary_image"),
+            line_mask=analysis_layers.get("line_mask"),
+            box_mask=analysis_layers.get("box_mask"),
+            orientation=orientation,
+            orientation_confidence=orientation_conf
         )
         
         pages.append(page_image)

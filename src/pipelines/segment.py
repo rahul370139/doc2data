@@ -2551,11 +2551,18 @@ class LayoutSegmenter:
                     print(f"  ➕ Added {len(new_tables)} table blocks from TableBank model")
         
         # Light text augmentation ONLY if model missed significant text regions
+        # For form-heavy pages where geometric form detection is enabled, we keep
+        # the raw model layout as much as possible and avoid aggressive heuristics.
         heuristic_strictness = getattr(self, 'heuristic_strictness', 0.7)
-        blocks = self._augment_text_with_heuristic(image, blocks, page_id, heuristic_strictness)
-        
-        # Reclassify ambiguous blocks using texture cues (before merging)
-        blocks = self._reclassify_blocks_by_texture(image, blocks, page_id, heuristic_strictness)
+        if not getattr(self, "enable_form_geometry", True):
+            # General documents: allow heuristic text augmentation and texture-based relabeling
+            blocks = self._augment_text_with_heuristic(image, blocks, page_id, heuristic_strictness)
+            # Reclassify ambiguous blocks using texture cues (before merging)
+            blocks = self._reclassify_blocks_by_texture(image, blocks, page_id, heuristic_strictness)
+        else:
+            # Form mode: rely primarily on the ML model + dedicated form geometry detector.
+            # We keep heuristics minimal to avoid over-fragmenting forms into many titles/text blocks.
+            pass
         
         orientation_hint = orientation
         if orientation_hint is None and analysis_layers:
@@ -2596,7 +2603,12 @@ class LayoutSegmenter:
             blocks = self._attach_digital_text(blocks, digital_words)
         
         # Tighten bounding boxes to remove blank space (but preserve block integrity)
+        # Forms often have tight boxes and handwritten text; aggressively tightening can cut off content.
+        # Keep FORM blocks as-is and only gently tighten others.
         for block in blocks:
+            if block.type == BlockType.FORM:
+                # Preserve original bbox for form fields / checkboxes
+                continue
             tight_bbox = self._tighten_bbox(image, block.bbox, margin=5)  # Larger margin to preserve block structure
             block.bbox = tight_bbox
         

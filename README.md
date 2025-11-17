@@ -1,9 +1,10 @@
 # Document-to-Data Pipeline
 
 **Version:** 1.0.0 (Phase 1)  
-**Status:** Production-Ready (CPU), GPU Acceleration Ready  
-**Last Updated:** January 2025
+**Status:** In development (CPU), GPU Acceleration Configuration Ready  
+**Last Updated:** Nov 16th 2025
 
+Goal:
 A production-ready document processing pipeline that converts PDFs and images into structured JSON data. Uses state-of-the-art ML models (LayoutParser, PaddleOCR) combined with intelligent heuristics for layout detection, OCR, and content classification.
 
 ---
@@ -129,6 +130,15 @@ PDF/Image → Ingest → Segment → OCR → [Label] → [Table/Figure] → Asse
   - Higher = fewer false positives (logos as FORM, # as LIST)
   - Lower = more aggressive detection
 
+- **Enable Form Geometry Detection:** Toggle geometry-based form field and checkbox detection
+  - When enabled: Uses dedicated form geometry detector with analysis masks
+  - When disabled: Falls back to heuristic form detection
+
+- **Form Geometry Strictness:** 0.0-1.0 (recommended: 0.7-0.9 for forms)
+  - Higher = stricter detection (fewer, more confident form fields/checkboxes)
+  - Lower = more permissive detection (may include more candidates)
+  - Recommended: 0.7-0.9 for dense forms (CMS-1500, UB-04), 0.5-0.7 for simpler forms
+
 - **Enable SLM/VLM:** Toggle semantic labeling and VLM features (requires Ollama)
 
 ### Environment Variables
@@ -166,7 +176,9 @@ doc2data/
 │   ├── config.py         # Configuration
 │   └── visualization.py  # Visualization utilities
 ├── data/
-│   └── sample_docs/      # Sample PDFs
+│   ├── sample_docs/      # Sample PDFs (preprocessed)
+│   └── thumbnails/       # Page thumbnails for visualization
+├── preprocess_samples.py # Script to preprocess sample documents
 ├── models/               # Model download scripts
 ├── tests/                # Unit tests
 ├── requirements.txt      # Python dependencies
@@ -185,9 +197,12 @@ doc2data/
    ```
 
 2. **Upload Document:**
-   - Use file uploader OR select sample document
+   - Use file uploader OR select sample document from dropdown
+   - Available samples: CMS-1500, UB-04, UCF Form, Healthcare Document
 
 3. **Configure Settings:**
+   - **For Forms:** Enable "Form Geometry Detection", set Form Geometry Strictness to 0.7-0.9
+   - **For Plain Text:** Disable "Form Geometry Detection" for better text block detection
    - Adjust ML Detection Threshold (0.15-0.25 recommended)
    - Adjust Heuristic Strictness (0.6-0.8 recommended)
 
@@ -203,11 +218,26 @@ doc2data/
 
 ## 🆕 Recent Improvements (Nov 2025)
 
-- Reliability: Added a `PageImage.shape` compatibility property so any legacy code that expects `.shape` works without crashing. This fixes the recurring `'PageImage' object has no attribute 'shape'` errors in OCR/Assemble.
-- Digital Text Layer: PDF word boxes are now scaled into pixel coordinates to match the rendered page, allowing reliable block-level extraction from the digital layer when present.
-- OCR Quality: Stronger crop preprocessing (upsampling to 100 px short side, CLAHE contrast, bilateral denoise, unsharp masking) plus automatic Tesseract fallback when Paddle returns low-confidence or empty results.
-- Form Geometry: New sidebar controls to enable/disable form geometry and tune strictness; detection now uses NMS, neighbor rules for checkboxes, orientation hints, and overlap suppression with text/table regions to reduce false positives.
-- Results JSON: Reducto-like summary plus per-page chunks and per-block details (normalized bboxes, confidence, content). Form associations exported in `form_fields[]` and `checkboxes[]` during assembly.
+### Form Detection & Processing (Latest)
+- **Smart Form Detection:** Geometry-based form field and checkbox detection using analysis masks (box_mask, line_mask, binary_image) with configurable strictness
+- **Reduced Over-Detection:** Fixed issue where forms were being over-fragmented into many TITLE/TEXT blocks. Form pages now rely primarily on ML model + dedicated form geometry detector instead of aggressive heuristics
+- **Form Geometry Controls:** New UI controls for enabling/disabling form geometry detection and adjusting strictness (0.0-1.0) to fine-tune detection sensitivity
+- **Preserved Form Content:** Form blocks no longer have bounding boxes aggressively tightened, preserving full text coverage within form fields
+- **Sample Document Preprocessing:** Added preprocessing script to clean sample documents:
+  - `ub04_clean.pdf`: Extracts main form page without aggressive watermark removal
+  - `ucf_form_page1.pdf`: Extracts and crops first page of UCF form
+  - `form-cms1500.pdf`: Standard CMS-1500 form (ready to use)
+
+### UI & User Experience
+- **Enhanced Sample Selection:** Improved Streamlit UI with descriptive sample document names and showcase section
+- **Better Page Navigation:** Fixed single-page document slider error, now displays "Page: 1 of 1" for single-page docs
+- **Sample Showcase:** Added visual showcase of available sample documents with descriptions
+
+### Core Pipeline Improvements
+- **Reliability:** Added `PageImage.shape` compatibility property to fix `'PageImage' object has no attribute 'shape'` errors
+- **Digital Text Layer:** PDF word boxes scaled into pixel coordinates for reliable block-level extraction
+- **OCR Quality:** Enhanced preprocessing (upsampling, CLAHE contrast, denoising, unsharp masking) with automatic Tesseract fallback
+- **Results JSON:** Reducto-like summary with per-page chunks, normalized bboxes, confidence scores, and form associations (`form_fields[]`, `checkboxes[]`)
 
 ---
 
@@ -318,17 +348,13 @@ ollama serve
 
 ## 🐛 Known Issues & Solutions
 
-### Issue: Inconsistent Results on Refresh
+### Issue: Forms Over-Fragmented into Many Titles/Text Blocks
 
-**Solution:** Disabled automatic threshold back-off. Use consistent threshold settings (0.15-0.25 recommended).
+**Solution:** Enable "Form Geometry Detection" in Model Settings. This uses dedicated form geometry detector instead of aggressive heuristics, preserving form structure.
 
-### Issue: Logo Tagged as FORM
+### Issue: Form Fields Not Covering Full Text
 
-**Solution:** Increased heuristic strictness (0.7-0.8) or adjust "Heuristic Strictness" slider in UI.
-
-### Issue: Single Characters (#) Tagged as LIST
-
-**Solution:** Increased heuristic strictness (0.7-0.8) or adjust "Heuristic Strictness" slider in UI.
+**Solution:** Form blocks now preserve original bounding boxes without aggressive tightening. Ensure "Form Geometry Detection" is enabled for best results.
 
 ### Issue: OCR Taking Too Long
 
@@ -388,4 +414,4 @@ ollama serve
 
 ---
 
-**Last Updated:** January 2025
+**Last Updated:** November 16th 2025

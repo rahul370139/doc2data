@@ -496,17 +496,39 @@ def main():
             )
             st.session_state.sample_dir = sample_dir_input
             sample_dir = Path(sample_dir_input).expanduser()
+            
+            # Sample metadata with descriptions
+            sample_metadata = {
+                "form-cms1500.pdf": "📋 CMS-1500 Medical Claim Form (standard)",
+                "ub04_clean.pdf": "🏥 UB-04 Hospital Billing Form (cleaned)",
+                "ucf_form_page1.pdf": "📝 UCF Form (page 1 cropped)",
+                "healthcare.pdf": "🏥 Healthcare Document (original)",
+                "custom_flattened-svSzt1Bc.pdf": "📄 Custom Flattened Document"
+            }
+            
+            # Files to exclude from sample list (originals that have been preprocessed)
+            exclude_files = {"ub04_sample.pdf", "ucfforminstruct.pdf"}
+            
             sample_files = []
             if sample_dir.exists():
                 sample_files = sorted([
                     p for p in sample_dir.glob("*")
                     if p.suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg"}
-                ])
+                    and p.name not in exclude_files
+                ], key=lambda x: (x.name not in sample_metadata, x.name))  # Prioritize known samples
             else:
                 st.warning(f"Directory not found: {sample_dir}")
             
-            sample_options = ["<Upload new>"] + [p.name for p in sample_files]
-            sample_choice = st.selectbox("Choose sample", sample_options, key="sample_choice")
+            # Create display options with descriptions
+            sample_display = []
+            for p in sample_files:
+                if p.name in sample_metadata:
+                    sample_display.append(f"{sample_metadata[p.name]}")
+                else:
+                    sample_display.append(f"📄 {p.name}")
+            
+            sample_options = ["<Upload new file>"] + sample_display
+            sample_choice_display = st.selectbox("Choose sample", sample_options, key="sample_choice")
             
             uploaded_file = st.file_uploader(
                 "Or upload PDF/Image",
@@ -517,9 +539,14 @@ def main():
             document_path: Optional[Path] = None
             document_label: Optional[str] = None
             
-            if sample_choice != "<Upload new>":
-                document_path = (sample_dir / sample_choice).resolve()
-                document_label = sample_choice
+            # Map display choice back to filename
+            if sample_choice_display != "<Upload new file>":
+                # Find the actual filename from the display string
+                selected_index = sample_options.index(sample_choice_display) - 1  # -1 to account for "<Upload new>"
+                if 0 <= selected_index < len(sample_files):
+                    actual_file = sample_files[selected_index]
+                    document_path = actual_file.resolve()
+                    document_label = actual_file.name
             elif uploaded_file is not None:
                 temp_path = Path("cache") / uploaded_file.name
                 temp_path.parent.mkdir(parents=True, exist_ok=True)
@@ -529,7 +556,55 @@ def main():
                 document_label = uploaded_file.name
             
             if document_path is None:
-                st.info("👆 Select or upload a document to begin")
+                st.info("👆 Select a sample document or upload your own to begin")
+                
+                # Show sample showcase
+                st.markdown("---")
+                st.subheader("📚 Available Sample Documents")
+                st.markdown("Select a sample from the dropdown above to get started:")
+                
+                cols = st.columns(3)
+                sample_info = [
+                    {
+                        "name": "form-cms1500.pdf",
+                        "display": "CMS-1500 Medical Claim",
+                        "desc": "Standard medical claim form used by healthcare providers",
+                        "icon": "📋"
+                    },
+                    {
+                        "name": "ub04_clean.pdf",
+                        "display": "UB-04 Hospital Billing",
+                        "desc": "Hospital billing form with complex table structures",
+                        "icon": "🏥"
+                    },
+                    {
+                        "name": "ucf_form_page1.pdf",
+                        "display": "UCF Form",
+                        "desc": "University form with mixed layout elements",
+                        "icon": "📝"
+                    }
+                ]
+                
+                for idx, info in enumerate(sample_info):
+                    with cols[idx]:
+                        st.markdown(f"### {info['icon']} {info['display']}")
+                        st.caption(info['desc'])
+                        sample_path = sample_dir / info['name']
+                        if sample_path.exists():
+                            st.success(f"✓ Available")
+                        else:
+                            st.warning(f"⚠ Not found")
+                
+                st.markdown("---")
+                st.markdown("""
+                **Pipeline Features:**
+                - 🔍 **Layout Detection**: Detects text, tables, forms, figures
+                - 📝 **OCR**: Extracts text from images using PaddleOCR
+                - 🎯 **Form Detection**: Identifies checkboxes and form fields
+                - 📊 **Table Extraction**: Extracts structured table data
+                - 📑 **JSON/Markdown Export**: Structured output with bounding boxes
+                """)
+                
                 st.stop()
             
             # Store in session state
@@ -977,12 +1052,21 @@ def main():
     # Page navigation
     num_pages = len(st.session_state.pages)
     if not sidebar_collapsed:
-        page_idx = st.sidebar.slider("📄 Page", 0, num_pages - 1, st.session_state.get("page_slider", 0), key="page_slider")
+        # Handle single-page documents
+        if num_pages ==1:
+            page_idx = 0
+            st.sidebar.write("📄 Page: 1 of 1")
+        else:
+            page_idx = st.sidebar.slider("📄 Page", 0, num_pages - 1, st.session_state.get("page_slider", 0), key="page_slider")
     else:
         # Minimal page selector when sidebar collapsed
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            page_idx = st.selectbox("Page", range(num_pages), index=st.session_state.get("page_select", 0), key="page_select")
+            if num_pages == 1:
+                page_idx = 0
+                st.write("Page: 1 of 1")
+            else:
+                page_idx = st.selectbox("Page", range(num_pages), index=st.session_state.get("page_select", 0), key="page_select")
     
     # Store current page index for OCR (before OCR runs)
     st.session_state.current_page_idx = page_idx

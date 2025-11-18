@@ -2,10 +2,26 @@
 
 **Version:** 1.0.0 (Phase 1)  
 **Status:** In development (CPU), GPU Acceleration Configuration Ready  
-**Last Updated:** Nov 16th 2025
+**Last Updated:** Nov 17th 2025
 
 Goal:
-A production-ready document processing pipeline that converts PDFs and images into structured JSON data. Uses state-of-the-art ML models (LayoutParser, PaddleOCR) combined with intelligent heuristics for layout detection, OCR, and content classification.
+A production-ready document processing pipeline that converts PDFs and images into structured JSON data. Uses state-of-the-art ML models (LayoutParser, PaddleOCR) combined with intelligent heuristics, SLM/VLM enrichment, and GPU-aware preprocessing for layout detection, OCR, and content classification.
+
+## 🏛 Architecture Overview
+
+```mermaid
+flowchart LR
+    A[Ingest & Preprocess]
+    A -->|images @300 DPI, GPU CLAHE/binarize| B(Layout + Form Geometry)
+    B -->|blocks + columns + templates| C(OCR Tiering)
+    C -->|text + confidences| D(Validators & Hungarian Linking)
+    D -->|role_locked blocks| E(SLM Labeler)
+    B -->|tables/figures| F(Table/Figure Processors)
+    F -->|structure + chart metadata (VLM)| H
+    E -->|semantic roles| H(Assembly)
+    H -->|JSON + Markdown + citations| I(Streamlit UI / FastAPI)
+    I -->|highlights, validator badges| User
+```
 
 ---
 
@@ -139,6 +155,10 @@ PDF/Image → Ingest → Segment → OCR → [Label] → [Table/Figure] → Asse
   - Lower = more permissive detection (may include more candidates)
   - Recommended: 0.7-0.9 for dense forms (CMS-1500, UB-04), 0.5-0.7 for simpler forms
 
+- **Template Alignment:** Enable + pick CMS-1500 / NCPDP / UB-04 to snap column order for those templates (default: Auto)
+
+- **Label↔Value Linking:** Choose between Greedy (fast) and Hungarian (optimal) matching for label association
+
 - **Enable SLM/VLM:** Toggle semantic labeling and VLM features (requires Ollama)
 
 ### Environment Variables
@@ -152,10 +172,16 @@ ENABLE_VLM=false          # Enable VLM for tables/figures
 OLLAMA_HOST=localhost     # Ollama server host
 OLLAMA_PORT=11434         # Ollama server port
 
+# GPU / Vision Configuration
+USE_GPU=false             # true = enable OpenCV CUDA, Paddle GPU, Detectron CUDA if available
+CUDA_VISIBLE_DEVICES=0    # optional: restrict GPU id when USE_GPU=true
+
 # Model Configuration
 LAYOUT_MODEL=publaynet    # Layout detection model
 OCR_ENGINE=paddle         # OCR engine (paddle/tesseract)
 ```
+
+> Setting `USE_GPU=true` automatically enables OpenCV CUDA (for preprocessing masks), PaddleOCR GPU execution, and LayoutParser detectron/paddle models on CUDA if drivers are present. When the flag is on but CUDA is unavailable, the pipeline gracefully falls back to CPU with a warning.
 
 ---
 
@@ -238,6 +264,10 @@ doc2data/
 - **Digital Text Layer:** PDF word boxes scaled into pixel coordinates for reliable block-level extraction
 - **OCR Quality:** Enhanced preprocessing (upsampling, CLAHE contrast, denoising, unsharp masking) with automatic Tesseract fallback
 - **Results JSON:** Reducto-like summary with per-page chunks, normalized bboxes, confidence scores, and form associations (`form_fields[]`, `checkboxes[]`)
+- **Column-Aware Reading Order:** Blocks receive `column_id` metadata (auto or template-driven) to keep CMS-1500/NCPDP/UB-04 layouts in a stable left-to-right order.
+- **Template Alignment (Opt-in):** Sidebar toggle lets you anchor segmentation to CMS-1500, NCPDP, or UB-04 column guides.
+- **Optimal Label↔Value Linking:** Switch between Greedy and Hungarian assignment for dense forms; validators short-circuit SLM when confident.
+- **Link Overlays & Validator Badges:** Streamlit overlay draws connectors between labels and values and shows validator pass/fail dots plus a validator panel table.
 
 ---
 
@@ -257,15 +287,15 @@ doc2data/
   - [x] Geometry detector over analysis layers for checkboxes/field rectangles
   - [x] Tunable strictness with NMS, neighbor rules, text/line density checks, overlap suppression
   - [x] UI toggle to enable/disable form geometry
-  - [ ] Column clusters/column-first order (planned)
-  - [ ] Template alignment hook (planned)
+  - [x] Column clusters/column-first order
+  - [x] Template alignment hook (experimental, optional)
 
 - OCR Tiering & Association (Step 3)
   - [x] Tier-1 PaddleOCR + preproc; Tier-2 Tesseract fallback
   - [x] PDF digital layer extraction where available
   - [x] Checkbox state via fill ratio
   - [x] Label↔value linking with geometry + validators; stored in block.metadata
-  - [ ] Hungarian matching optional (planned; current greedy works well)
+  - [x] Hungarian matching optional (toggle between greedy/optimal)
 
 - SLM & Validators (Step 4)
   - [x] SLM integrates with `role_locked`; rules skip SLM when validator confident
@@ -279,11 +309,11 @@ doc2data/
   - [x] Two-pane view (annotated image + Results/JSON)
   - [x] Jump-to-block selector syncs highlighting
   - [x] Geometry strictness + enable toggle; model threshold + heuristic strictness
-  - [ ] Overlays for link connectors + validator badges (planned)
+  - [x] Overlays for link connectors + validator badges
   
 - Testing & Docs
   - [x] README updated with changes and troubleshooting
-  - [ ] Unit tests for geometry/validators/linking (planned)
+  - [x] Unit tests for geometry/validators/linking
 
 ### FastAPI Server
 
@@ -350,15 +380,15 @@ ollama serve
 
 ### Issue: Forms Over-Fragmented into Many Titles/Text Blocks
 
-**Solution:** Enable "Form Geometry Detection" in Model Settings. This uses dedicated form geometry detector instead of aggressive heuristics, preserving form structure.
+**Solution:** Enable "Form Geometry Detection" (now skips aggressive text heuristics) or disable heuristics entirely for form-heavy pages. LayoutParser detections + the dedicated geometry pass keep each field as a single block, and template alignment ensures column-aware order.
 
 ### Issue: Form Fields Not Covering Full Text
 
-**Solution:** Form blocks now preserve original bounding boxes without aggressive tightening. Ensure "Form Geometry Detection" is enabled for best results.
+**Solution:** Geometry-derived form blocks retain their original boxes and we now pad each field/checkbox by ~25% to capture surrounding handwriting. Avoid tightening on forms and rely on geometry detection for best coverage.
 
 ### Issue: OCR Taking Too Long
 
-**Solution:** Already optimized with parallel processing and block filtering. Large blocks (>60% page) are skipped.
+**Solution:** OCR now skips non-text/table blocks, caps block area at ~55% of the page, and reuses cached results between runs. This prevents re-OCRing giant backgrounds while keeping form/text blocks fast.
 
 ---
 
@@ -412,6 +442,3 @@ ollama serve
 - **API Documentation:** See `app/api_main.py` for FastAPI endpoints
 - **Code Comments:** All major functions have docstrings
 
----
-
-**Last Updated:** November 16th 2025

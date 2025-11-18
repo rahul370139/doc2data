@@ -58,6 +58,11 @@ class SLMLabeler:
         bbox = context.get("bbox", block.bbox)
         repeated_header = context.get("repeated_header", False)
         near_figure = context.get("near_figure", False)
+        is_form_field = context.get("is_form_field", False)
+        validator_status = context.get("validator_status")
+        column_id = context.get("column_id")
+        template_hint = context.get("template_hint")
+        linked_label = context.get("linked_label_id")
         
         prompt = f"""You are a document parser. Classify the following text block into one of these labels:
 
@@ -67,6 +72,11 @@ Input text: {text[:500]}
 Position: page={page}, bbox={bbox}
 Repeated header: {repeated_header}
 Near figure: {near_figure}
+Is form field: {is_form_field}
+Validator passed: {validator_status}
+Column id: {column_id}
+Template hint: {template_hint}
+Linked label id: {linked_label}
 
 Examples:
 - "Introduction" → {{"role": "h1"}}
@@ -174,7 +184,12 @@ Respond with ONLY a JSON object: {{"role": "<LABEL>"}}"""
                 "page": block.page_id,
                 "bbox": block.bbox,
                 "repeated_header": block.metadata.get("role_hint") == "header",
-                "near_figure": block.metadata.get("caption_candidate", False)
+                "near_figure": block.metadata.get("caption_candidate", False),
+                "is_form_field": bool(block.metadata.get("form_field")),
+                "validator_status": block.metadata.get("form_field", {}).get("validator_passed"),
+                "column_id": block.metadata.get("column_id"),
+                "template_hint": block.metadata.get("template_hint"),
+                "linked_label_id": block.metadata.get("form_field", {}).get("label_id") or block.metadata.get("label_id")
             }
             
             # Label block

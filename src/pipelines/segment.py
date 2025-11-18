@@ -10,6 +10,84 @@ from utils.models import Block, BlockType, TableBlock, FigureBlock, WordBox
 from utils.config import Config
 from src.processing.postprocessing import postprocess_text
 
+
+DEFAULT_TEMPLATE_LAYOUTS: Dict[str, Dict[str, Any]] = {
+    "cms-1500": {
+        "description": "CMS-1500 / DME claim form",
+        "columns": [0.17, 0.40, 0.63, 0.85],
+    },
+    "ncpdp": {
+        "description": "NCPDP Universal Claim form",
+        "columns": [0.22, 0.52, 0.78],
+    },
+    "ub-04": {
+        "description": "UB-04 inpatient/emergency claim",
+        "columns": [0.18, 0.46, 0.74],
+    },
+}
+
+
+def _normalized_bbox_to_absolute(bbox: Tuple[float, float, float, float], width: int, height: int) -> Tuple[float, float, float, float]:
+    """Convert normalized [0-1] bbox to absolute pixel coordinates."""
+    x0, y0, x1, y1 = bbox
+    return (x0 * width, y0 * height, x1 * width, y1 * height)
+
+
+def assign_columns_to_blocks(
+    blocks: List[Block],
+    page_width: float,
+    tolerance: float = 0.05,
+    template_centers: Optional[List[float]] = None
+) -> None:
+    """Assign column_id metadata to blocks using auto clustering or template centers."""
+    if not blocks or page_width <= 0:
+        return
+    by_page: Dict[int, List[Block]] = {}
+    for block in blocks:
+        by_page.setdefault(block.page_id, []).append(block)
+    for page_id, page_blocks in by_page.items():
+        centers: List[float] = []
+        if template_centers:
+            centers = [min(page_width, max(0.0, c)) for c in template_centers]
+        cluster_tol = max(10.0, page_width * tolerance)
+        sorted_blocks = sorted(page_blocks, key=lambda b: (b.bbox[0] + b.bbox[2]) / 2.0)
+        for block in sorted_blocks:
+            if block.metadata is None:
+                block.metadata = {}
+            center_x = (block.bbox[0] + block.bbox[2]) / 2.0
+            assigned_idx: Optional[int] = None
+            if centers:
+                distances = [abs(center_x - c) for c in centers]
+                idx = int(np.argmin(distances))
+                if distances[idx] <= cluster_tol * 1.5:
+                    assigned_idx = idx
+            if assigned_idx is None:
+                for idx, col_center in enumerate(centers):
+                    if abs(center_x - col_center) <= cluster_tol:
+                        assigned_idx = idx
+                        centers[idx] = (centers[idx] + center_x) / 2.0
+                        break
+            if assigned_idx is None:
+                centers.append(center_x)
+                assigned_idx = len(centers) - 1
+            block.metadata["column_id"] = assigned_idx
+            block.metadata["column_center"] = centers[assigned_idx]
+
+
+def compute_template_column_centers(
+    template_layouts: Dict[str, Dict[str, Any]],
+    template_hint: Optional[str],
+    page_width: int
+) -> Optional[List[float]]:
+    """Return absolute column centers for a template if available."""
+    if not template_hint or template_hint.lower() not in template_layouts:
+        return None
+    template = template_layouts[template_hint.lower()]
+    columns = template.get("columns")
+    if not columns:
+        return None
+    return [min(page_width, max(0.0, col * page_width)) for col in columns]
+
 try:
     from layoutparser.models.paddledetection.catalog import LABEL_MAP_CATALOG
 except Exception:  # pragma: no cover - layoutparser minimal install
@@ -66,6 +144,9 @@ class LayoutSegmenter:
         # Geometry controls
         self.enable_form_geometry: bool = True
         self.geometry_strictness: float = 0.7  # 0..1, higher = stricter
+        # Template alignment controls (disabled by default)
+        self.enable_template_alignment: bool = False
+        self.template_layouts: Dict[str, Dict[str, Any]] = dict(DEFAULT_TEMPLATE_LAYOUTS)
         self._initialize()
     
     def _layout_to_blocks(self, layout, page_id: int) -> List[Block]:
@@ -191,16 +272,19 @@ class LayoutSegmenter:
         self.model_backend = None
         self.model_config = None
         
-        # Check device availability
+        # Check device availability respecting Config.USE_GPU
+        requested_gpu = Config.USE_GPU
         device = "cpu"
         try:
             import torch
-            if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-                device = "mps"
-                print("ℹ MPS (Apple Silicon) detected, but LayoutParser will use CPU")
-            elif torch.cuda.is_available():
+            if requested_gpu and torch.cuda.is_available():
                 device = "cuda"
-                print(f"ℹ CUDA detected, using device: {device}")
+                print("ℹ CUDA detected, LayoutParser will request GPU backends")
+            elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                device = "mps"
+                print("ℹ MPS (Apple Silicon) detected; falling back to CPU backends")
+            elif requested_gpu:
+                print("⚠ USE_GPU=true but CUDA not available; continuing on CPU")
         except Exception:
             pass
         
@@ -210,16 +294,28 @@ class LayoutSegmenter:
             try:
                 if backend == "paddle":
                     print(f"Attempting PaddleDetection model: {config_uri}")
-                    model = lp.PaddleDetectionLayoutModel(
-                        config_uri,
-                        extra_config=self.extra_config
-                    )
+                    paddle_device = "gpu" if device == "cuda" else "cpu"
+                    try:
+                        model = lp.PaddleDetectionLayoutModel(
+                            config_uri,
+                            device=paddle_device,
+                            extra_config=self.extra_config
+                        )
+                    except TypeError:
+                        model = lp.PaddleDetectionLayoutModel(
+                            config_uri,
+                            extra_config=self.extra_config
+                        )
                 elif backend == "auto":
                     print(f"Attempting AutoLayoutModel: {config_uri}")
                     model = lp.AutoLayoutModel(config_uri)
                 elif backend == "detectron2":
                     print(f"Attempting Detectron2 model: {config_uri}")
-                    model = lp.Detectron2LayoutModel(config_uri)
+                    detectron_device = "cuda" if device == "cuda" else "cpu"
+                    try:
+                        model = lp.Detectron2LayoutModel(config_uri, device=detectron_device)
+                    except TypeError:
+                        model = lp.Detectron2LayoutModel(config_uri)
                 else:
                     continue
                 
@@ -228,8 +324,8 @@ class LayoutSegmenter:
                     self.model_backend = backend
                     self.model_config = config_uri
                     print(f"✓ Using {backend} backend with config: {config_uri}")
-                    if device != "cpu":
-                        print(f"  ℹ Layout models currently execute on CPU; detected device {device}")
+                    if device == "cuda":
+                        print("  ✓ GPU acceleration enabled for supported models")
                     break
             except Exception as load_err:
                 print(f"  {backend} loader failed ({config_uri}): {load_err}")
@@ -253,12 +349,22 @@ class LayoutSegmenter:
                 print("Attempting TableBank table detector...")
                 print("  (This may download 221MB model on first run - already cached if downloaded before)")
                 table_uri = "lp://TableBank/ppyolov2_r50vd_dcn_365e/config"
-                self.table_model = lp.PaddleDetectionLayoutModel(
-                    table_uri,
-                    extra_config={
-                        "threshold": self.table_threshold,
-                    }
-                )
+                paddle_device = "gpu" if device == "cuda" else "cpu"
+                try:
+                    self.table_model = lp.PaddleDetectionLayoutModel(
+                        table_uri,
+                        device=paddle_device,
+                        extra_config={
+                            "threshold": self.table_threshold,
+                        }
+                    )
+                except TypeError:
+                    self.table_model = lp.PaddleDetectionLayoutModel(
+                        table_uri,
+                        extra_config={
+                            "threshold": self.table_threshold,
+                        }
+                    )
                 print("✓ Loaded TableBank table detector")
             except Exception as table_err:
                 print(f"⚠ TableBank detector unavailable: {table_err}")
@@ -1320,11 +1426,13 @@ class LayoutSegmenter:
                 md["checkbox"] = True
                 md["filled_ratio_estimate"] = fill_ratio
 
+            pad = max(3, int(min(w, h) * 0.25))
+            expanded_bbox = self._expand_bbox(bbox, pad, width, height)
             new_blocks.append(
                 Block(
                     id=f"form_candidate_{page_id}_{len(new_blocks)}",
                     type=BlockType.FORM,
-                    bbox=bbox,
+                    bbox=expanded_bbox,
                     page_id=page_id,
                     confidence=0.55,
                     metadata=md,
@@ -1337,6 +1445,28 @@ class LayoutSegmenter:
                 "checkboxes": [blk.to_dict() for blk in new_blocks if blk.metadata.get("checkbox")]
             }
         return new_blocks
+
+    def _apply_template_alignment(
+        self,
+        blocks: List[Block],
+        image_shape: Tuple[int, int],
+        template_hint: Optional[str]
+    ) -> Optional[List[float]]:
+        """Apply template metadata and return absolute column centers if available."""
+        if not template_hint:
+            return None
+        page_width = image_shape[1] if len(image_shape) >= 2 else 0
+        template_columns = compute_template_column_centers(
+            self.template_layouts,
+            template_hint,
+            page_width
+        )
+        if not template_columns:
+            return None
+        for block in blocks:
+            block.metadata = dict(block.metadata or {})
+            block.metadata["template_hint"] = template_hint
+        return template_columns
     
     def _augment_text_with_heuristic(
         self,
@@ -1601,6 +1731,25 @@ class LayoutSegmenter:
             return bbox
         
         return (float(new_x0), float(new_y0), float(new_x1), float(new_y1))
+
+    def _expand_bbox(
+        self,
+        bbox: Tuple[float, float, float, float],
+        padding: int,
+        width: int,
+        height: int
+    ) -> Tuple[float, float, float, float]:
+        """Expand bounding box while staying inside the page bounds."""
+        if padding <= 0:
+            return bbox
+        x0, y0, x1, y1 = bbox
+        x0 = max(0.0, x0 - padding)
+        y0 = max(0.0, y0 - padding)
+        x1 = min(float(width), x1 + padding)
+        y1 = min(float(height), y1 + padding)
+        if x1 <= x0 or y1 <= y0:
+            return bbox
+        return (x0, y0, x1, y1)
     
     def _analyze_block_content(
         self,
@@ -2495,13 +2644,17 @@ class LayoutSegmenter:
             x_min = block.bbox[0]
             
             if multi_column:
-                # Cluster by x-position for multi-column
-                # Simple approach: group blocks by x-center position
-                x_cluster_id = int(x_center / 200)  # 200px cluster width
-                return (y_center, x_cluster_id, x_min)
+                column_id = None
+                if block.metadata:
+                    column_id = block.metadata.get("column_id")
+                if column_id is not None:
+                    return (column_id, y_center, x_min)
+                # Fallback cluster by coarse x-bins
+                x_cluster_id = int(x_center / 200)
+                return (x_cluster_id, y_center, x_min)
             else:
                 return (y_center, x_min)
-        
+
         return sorted(blocks, key=get_sort_key)
     
     def segment_page(
@@ -2512,7 +2665,8 @@ class LayoutSegmenter:
         resolve_order: bool = True,
         digital_words: Optional[List[WordBox]] = None,
         analysis_layers: Optional[Dict[str, Any]] = None,
-        orientation: Optional[float] = None
+        orientation: Optional[float] = None,
+        template_hint: Optional[str] = None
     ) -> List[Block]:
         """
         Segment a single page.
@@ -2551,18 +2705,14 @@ class LayoutSegmenter:
                     print(f"  ➕ Added {len(new_tables)} table blocks from TableBank model")
         
         # Light text augmentation ONLY if model missed significant text regions
-        # For form-heavy pages where geometric form detection is enabled, we keep
-        # the raw model layout as much as possible and avoid aggressive heuristics.
+        # For form-heavy pages where geometric form detection is enabled, rely on the ML detections
+        # to avoid fragmenting fields into many small Text/Title blocks.
         heuristic_strictness = getattr(self, 'heuristic_strictness', 0.7)
-        if not getattr(self, "enable_form_geometry", True):
-            # General documents: allow heuristic text augmentation and texture-based relabeling
+        apply_text_augmentation = not getattr(self, "enable_form_geometry", True)
+        if apply_text_augmentation:
             blocks = self._augment_text_with_heuristic(image, blocks, page_id, heuristic_strictness)
-            # Reclassify ambiguous blocks using texture cues (before merging)
-            blocks = self._reclassify_blocks_by_texture(image, blocks, page_id, heuristic_strictness)
-        else:
-            # Form mode: rely primarily on the ML model + dedicated form geometry detector.
-            # We keep heuristics minimal to avoid over-fragmenting forms into many titles/text blocks.
-            pass
+        # Always allow texture-based reclassification, even when skipping augmentation
+        blocks = self._reclassify_blocks_by_texture(image, blocks, page_id, heuristic_strictness)
         
         orientation_hint = orientation
         if orientation_hint is None and analysis_layers:
@@ -2577,6 +2727,28 @@ class LayoutSegmenter:
             )
             if form_blocks:
                 blocks.extend(form_blocks)
+                # Suppress tiny ML text/title blocks that sit entirely inside the new form fields.
+                page_area = float(max(image.shape[0] * image.shape[1], 1))
+                form_bboxes = [fb.bbox for fb in form_blocks]
+                filtered_blocks: List[Block] = []
+                for block in blocks:
+                    if block in form_blocks:
+                        filtered_blocks.append(block)
+                        continue
+                    if block.type in {BlockType.TEXT, BlockType.TITLE, BlockType.LIST}:
+                        width = max(1.0, block.bbox[2] - block.bbox[0])
+                        height = max(1.0, block.bbox[3] - block.bbox[1])
+                        area_ratio = (width * height) / page_area
+                        if area_ratio <= 0.12:
+                            overlap = max(
+                                self._calculate_iou(block.bbox, fb_bbox)
+                                for fb_bbox in form_bboxes
+                            )
+                            if overlap >= 0.7:
+                                # Skip the ML block; the geometry-derived form block will cover OCR.
+                                continue
+                    filtered_blocks.append(block)
+                blocks = filtered_blocks
         
         # Merge overlapping boxes first (conservative - only truly overlapping)
         if merge_boxes:
@@ -2611,6 +2783,18 @@ class LayoutSegmenter:
                 continue
             tight_bbox = self._tighten_bbox(image, block.bbox, margin=5)  # Larger margin to preserve block structure
             block.bbox = tight_bbox
+
+        template_columns = None
+        normalized_template_hint = template_hint.lower() if template_hint else None
+        if getattr(self, "enable_template_alignment", False) and normalized_template_hint:
+            template_columns = self._apply_template_alignment(blocks, image.shape, normalized_template_hint)
+
+        assign_columns_to_blocks(
+            blocks,
+            page_width=image.shape[1] if len(image.shape) >= 2 else 0,
+            tolerance=0.05,
+            template_centers=template_columns
+        )
         
         # Resolve reading order
         if resolve_order:

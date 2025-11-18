@@ -6,12 +6,18 @@ from typing import List, Tuple, Optional
 from collections.abc import Mapping
 from paddleocr import PaddleOCR
 from utils.models import WordBox
+from utils.config import Config
 
 
 class PaddleOCRWrapper:
     """Wrapper for PaddleOCR with lazy initialization and optimized settings."""
     
-    def __init__(self, lang: str = 'en', use_angle_cls: bool = False):
+    def __init__(
+        self,
+        lang: str = 'en',
+        use_angle_cls: bool = False,
+        use_gpu: Optional[bool] = None
+    ):
         """
         Initialize PaddleOCR wrapper (lazy initialization).
         
@@ -21,6 +27,7 @@ class PaddleOCRWrapper:
         """
         self.lang = lang
         self.use_angle_cls = use_angle_cls
+        self.use_gpu = Config.USE_GPU if use_gpu is None else use_gpu
         self.ocr = None
         self._initialized = False
     
@@ -35,10 +42,13 @@ class PaddleOCRWrapper:
         
         try:
             # Use minimal parameters compatible with PaddleOCR 3.x
-            self.ocr = PaddleOCR(
-                use_angle_cls=self.use_angle_cls,
-                lang=self.lang
-            )
+            init_kwargs = {
+                "use_angle_cls": self.use_angle_cls,
+                "lang": self.lang,
+            }
+            if self.use_gpu:
+                init_kwargs["use_gpu"] = True
+            self.ocr = PaddleOCR(**init_kwargs)
             init_time = time.time() - start_time
             print(f"✅ PaddleOCR initialized in {init_time:.2f}s")
             self._initialized = True

@@ -27,6 +27,7 @@ from src.pipelines.segment import LayoutSegmenter
 from src.pipelines.ocr import OCRPipeline
 from src.pipelines.slm_label import SLMLabeler
 from src.pipelines.assemble import DocumentAssembler
+from utils.ollama_status import is_ollama_available
 from utils.visualization import draw_bounding_boxes, BLOCK_TYPE_COLORS, get_block_color
 
 
@@ -138,6 +139,38 @@ def _render_block_text(block: Block) -> str:
     if isinstance(block, FigureBlock):
         return block.caption or "[Figure region]"
     return "[Empty]"
+
+
+def _build_form_links(blocks: List[Block]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Return connector line definitions, badge metadata, and validator rows."""
+    block_map = {block.id: block for block in blocks}
+    connectors: List[Dict[str, Any]] = []
+    badges: List[Dict[str, Any]] = []
+    validator_rows: List[Dict[str, Any]] = []
+    for block in blocks:
+        meta = getattr(block, "metadata", {}) or {}
+        form_meta = meta.get("form_field") or {}
+        if not form_meta:
+            continue
+        label_id = form_meta.get("label_id")
+        label_block = block_map.get(label_id)
+        if label_block:
+            connectors.append({
+                "label_bbox": label_block.bbox,
+                "field_bbox": block.bbox,
+                "status": form_meta.get("validator_passed", False)
+            })
+        badges.append({
+            "bbox": block.bbox,
+            "status": form_meta.get("validator_passed", False)
+        })
+        validator_rows.append({
+            "Field": form_meta.get("label_text") or f"Field {block.id}",
+            "Type": form_meta.get("field_type") or "unknown",
+            "Value": form_meta.get("value_text") or (block.text or "").strip(),
+            "Status": "PASS" if form_meta.get("validator_passed") else "CHECK"
+        })
+    return connectors, badges, validator_rows
 
 
 def _set_highlight(block_id: str):
@@ -363,7 +396,9 @@ def draw_annotated_image(
     blocks: list[Block],
     highlight_id: Optional[str] = None,
     show_labels: bool = True,
-    label_size: float = 0.6
+    label_size: float = 0.6,
+    connectors: Optional[List[Dict[str, Any]]] = None,
+    validator_badges: Optional[List[Dict[str, Any]]] = None
 ) -> np.ndarray:
     """
     Draw bounding boxes with labels on image.
@@ -379,6 +414,20 @@ def draw_annotated_image(
         Annotated image
     """
     result = image.copy()
+    if connectors:
+        for connector in connectors:
+            lb = connector.get("label_bbox")
+            fb = connector.get("field_bbox")
+            if not lb or not fb:
+                continue
+            lx = int((lb[0] + lb[2]) / 2)
+            ly = int((lb[1] + lb[3]) / 2)
+            fx = int((fb[0] + fb[2]) / 2)
+            fy = int((fb[1] + fb[3]) / 2)
+            status = bool(connector.get("status"))
+            color_rgb = (0, 200, 0) if status else (255, 165, 0)
+            color_bgr = (color_rgb[2], color_rgb[1], color_rgb[0])
+            cv2.line(result, (lx, ly), (fx, fy), color_bgr, 2, cv2.LINE_AA)
     
     for block in blocks:
         x0, y0, x1, y1 = [int(coord) for coord in block.bbox]
@@ -445,6 +494,17 @@ def draw_annotated_image(
                 thickness_text,
                 cv2.LINE_AA
             )
+    if validator_badges:
+        for badge in validator_badges:
+            bbox = badge.get("bbox")
+            if not bbox:
+                continue
+            x0, y0, x1, y1 = [int(coord) for coord in bbox]
+            center = (max(x0 + 10, x0), max(y0 + 10, y0))
+            status = bool(badge.get("status"))
+            color_rgb = (0, 200, 0) if status else (0, 0, 255)
+            color_bgr = (color_rgb[2], color_rgb[1], color_rgb[0])
+            cv2.circle(result, center, 6, color_bgr, -1, lineType=cv2.LINE_AA)
     
     return result
 
@@ -481,6 +541,10 @@ def main():
         st.session_state.enable_vlm = Config.ENABLE_VLM
     if "result_summary" not in st.session_state:
         st.session_state.result_summary = None
+    if "show_connectors" not in st.session_state:
+        st.session_state.show_connectors = True
+    if "show_validator_badges" not in st.session_state:
+        st.session_state.show_validator_badges = True
     
     # Sidebar (collapsible)
     if not sidebar_collapsed:
@@ -652,6 +716,32 @@ def main():
                 )
                 st.session_state.heuristic_strictness = heuristic_strictness
 
+                linker_mode = st.selectbox(
+                    "Label↔Value Linking",
+                    options=["Greedy", "Hungarian"],
+                    index=0 if st.session_state.get("linker_mode", "Greedy") == "Greedy" else 1,
+                    help="Choose how form fields link to labels. Greedy uses nearest-neighbor; Hungarian finds the optimal one-to-one pairing (recommended for dense forms)."
+                )
+                st.session_state.linker_mode = linker_mode
+
+                enable_template_alignment = st.checkbox(
+                    "Enable Template Alignment",
+                    value=st.session_state.get("enable_template_alignment", False),
+                    help="Use template-specific column guides (CMS-1500, NCPDP, UB-04) to stabilize reading order."
+                )
+                st.session_state.enable_template_alignment = enable_template_alignment
+                template_options = ["Auto", "CMS-1500", "NCPDP", "UB-04"]
+                saved_hint = st.session_state.get("template_hint", "Auto")
+                default_idx = template_options.index(saved_hint) if saved_hint in template_options else 0
+                template_choice = st.selectbox(
+                    "Template Hint",
+                    options=template_options,
+                    index=default_idx,
+                    disabled=not enable_template_alignment,
+                    help="Select a template profile (optional). 'Auto' lets the geometry pass infer columns dynamically."
+                )
+                st.session_state.template_hint = template_choice
+
                 enable_form_geom = st.checkbox(
                     "Enable Form Geometry Detection",
                     value=st.session_state.get("enable_form_geometry", True),
@@ -672,21 +762,37 @@ def main():
                 slm_toggle = st.checkbox(
                     "Enable Semantic Labeling (SLM)",
                     value=st.session_state.enable_slm,
-                    help="Uses Qwen2.5-7B-Instruct via Ollama to assign semantic roles (title, h1, h2, header, footer, etc.) to text blocks. Requires: 1) Ollama running (ollama serve), 2) Model pulled (ollama pull qwen2.5:7b-instruct)"
+                    help="Uses Qwen2.5-7B-Instruct via Ollama to assign semantic roles. Requires Ollama server and model pull."
                 )
+                if slm_toggle and not is_ollama_available():
+                    st.warning("⚠️ Ollama server not reachable. Run `ollama serve` and ensure the model is pulled before enabling SLM.")
+                    slm_toggle = False
                 st.session_state.enable_slm = slm_toggle
                 
                 vlm_toggle = st.checkbox(
                     "Enable Qwen-VL for tables/figures (VLM)",
                     value=st.session_state.enable_vlm,
-                    help="Uses Qwen-VL via Ollama for advanced table structure extraction and figure classification. Requires: 1) Ollama running (ollama serve), 2) Model pulled (ollama pull qwen-vl)"
+                    help="Uses Qwen-VL via Ollama for advanced table/figure processing. Requires Ollama server and qwen-vl model."
                 )
+                if vlm_toggle and not is_ollama_available():
+                    st.warning("⚠️ Ollama server not reachable. Run `ollama serve` and ensure qwen-vl is pulled before enabling VLM.")
+                    vlm_toggle = False
                 st.session_state.enable_vlm = vlm_toggle
             
             # Visualization settings
             with st.expander("🎨 Visualization", expanded=False):
                 st.session_state.show_labels = st.checkbox("Show Labels", value=st.session_state.show_labels, help="Display block type labels on image")
                 st.session_state.label_size = st.slider("Label Size", 0.4, 1.0, st.session_state.label_size, 0.1)
+                st.session_state.show_connectors = st.checkbox(
+                    "Show Link Connectors",
+                    value=st.session_state.show_connectors,
+                    help="Draw lines between linked labels and form fields"
+                )
+                st.session_state.show_validator_badges = st.checkbox(
+                    "Show Validator Badges",
+                    value=st.session_state.show_validator_badges,
+                    help="Display pass/fail markers for validator-backed fields"
+                )
                 
                 visible_type_defaults = [bt.value for bt in BlockType if bt != BlockType.UNKNOWN]
                 if "block_type_filter" not in st.session_state:
@@ -780,6 +886,12 @@ def main():
         st.session_state.layout_threshold = 0.25  # Lower default for better granularity
     if "current_page_idx" not in st.session_state:
         st.session_state.current_page_idx = 0  # Default to first page
+    if "enable_template_alignment" not in st.session_state:
+        st.session_state.enable_template_alignment = False
+    if "template_hint" not in st.session_state:
+        st.session_state.template_hint = "Auto"
+    if "linker_mode" not in st.session_state:
+        st.session_state.linker_mode = "Greedy"
     
     # Run pipeline stages
     pipeline_start = time.time()
@@ -837,6 +949,7 @@ def main():
                 segmenter.heuristic_strictness = heuristic_strictness
                 segmenter.enable_form_geometry = st.session_state.get("enable_form_geometry", True)
                 segmenter.geometry_strictness = st.session_state.get("geometry_strictness", 0.7)
+                segmenter.enable_template_alignment = st.session_state.get("enable_template_alignment", False)
                 if hasattr(segmenter.model, "threshold"):
                     segmenter.model.threshold = current_threshold
                 print(f"   Using ML threshold: {current_threshold}, Heuristic strictness: {heuristic_strictness}, Form geometry: {segmenter.enable_form_geometry}, Form strictness: {segmenter.geometry_strictness}")
@@ -863,6 +976,10 @@ def main():
                     }
                     kwargs["analysis_layers"] = analysis_layers
                     kwargs["orientation"] = getattr(page, "orientation", None)
+                    template_hint_value = st.session_state.get("template_hint", "Auto")
+                    if segmenter.enable_template_alignment and template_hint_value and template_hint_value.lower() != "auto":
+                        template_slug = template_hint_value.lower().replace(" ", "-")
+                        kwargs["template_hint"] = template_slug
                     blocks = segmenter.segment_page(
                         page.image,
                         page.page_id,
@@ -927,11 +1044,11 @@ def main():
             try:
                 # Lazy OCR pipeline initialization (cached to avoid re-initialization)
                 @st.cache_resource
-                def get_ocr_pipeline():
+                def get_ocr_pipeline(link_mode: str = "Greedy"):
                     print("🔄 Initializing OCR pipeline (one-time, may take 30-60 seconds)...")
-                    return OCRPipeline(max_workers=4)
+                    return OCRPipeline(max_workers=4, assignment_mode=link_mode.lower())
                 
-                ocr_pipeline = get_ocr_pipeline()
+                ocr_pipeline = get_ocr_pipeline(st.session_state.get("linker_mode", "Greedy"))
                 
                 # Process OCR for ALL pages (but cache results per page to avoid re-processing)
                 # Check which pages need OCR processing
@@ -1088,6 +1205,9 @@ def main():
         b for b in page_blocks
         if b.type.value in visible_types or (highlight_id and b.id == highlight_id)
     ]
+    connectors_meta, badge_meta, validator_rows = _build_form_links(page_blocks)
+    connectors_to_draw = connectors_meta if st.session_state.show_connectors else []
+    badges_to_draw = badge_meta if st.session_state.show_validator_badges else []
     
     # Create annotated image
     show_labels_setting = show_labels
@@ -1099,10 +1219,20 @@ def main():
             visible_blocks,
             highlight_id=highlight_id,
             show_labels=show_labels_setting,
-            label_size=label_size_setting
+            label_size=label_size_setting,
+            connectors=connectors_to_draw,
+            validator_badges=badges_to_draw
         )
     else:
-        annotated_image = page_image
+        annotated_image = draw_annotated_image(
+            page_image,
+            page_blocks,
+            highlight_id=highlight_id,
+            show_labels=False,
+            label_size=label_size_setting,
+            connectors=connectors_to_draw,
+            validator_badges=badges_to_draw
+        )
     
     # Professional two-column layout: Image left, Results/JSON right (like Reducto/Extend)
     st.subheader(f"📄 Page {page_idx + 1} of {num_pages}")
@@ -1137,6 +1267,12 @@ def main():
                 st.metric("Status", "✅ Complete")
             else:
                 st.metric("Status", "🔄 Processing")
+
+        if validator_rows:
+            st.markdown("---")
+            st.subheader("🧪 Validator Panel")
+            validator_df = pd.DataFrame(validator_rows)
+            st.dataframe(validator_df, use_container_width=True, hide_index=True)
         
         # Processing time if available
         if st.session_state.get("result_summary"):

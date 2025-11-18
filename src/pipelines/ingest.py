@@ -13,6 +13,7 @@ import re
 from utils.models import PageImage, WordBox
 from utils.config import Config
 from src.processing.preprocessing import preprocess_image
+from src.processing.gpu_utils import GPUUtils
 
 
 def _ensure_gray(image: np.ndarray) -> np.ndarray:
@@ -62,9 +63,15 @@ def _generate_analysis_layers(image: np.ndarray) -> Dict[str, Any]:
     if gray is None:
         return result
     
-    # High-contrast grayscale via CLAHE
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    high_contrast = clahe.apply(gray)
+    use_gpu = GPUUtils.is_available()
+    if use_gpu:
+        try:
+            high_contrast = GPUUtils.clahe(gray, clip_limit=2.0, tile_grid_size=(8, 8))
+        except Exception:
+            high_contrast = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    else:
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        high_contrast = clahe.apply(gray)
     
     # Adaptive threshold for binary analysis image
     binary = cv2.adaptiveThreshold(
@@ -86,12 +93,26 @@ def _generate_analysis_layers(image: np.ndarray) -> Dict[str, Any]:
         (1, max(15, height // 80))
     )
     
-    horizontal_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
-    vertical_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
+    try:
+        if use_gpu:
+            horizontal_lines = GPUUtils.morphology(binary, cv2.MORPH_OPEN, horizontal_kernel)
+            vertical_lines = GPUUtils.morphology(binary, cv2.MORPH_OPEN, vertical_kernel)
+        else:
+            horizontal_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
+            vertical_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
+    except Exception:
+        horizontal_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
+        vertical_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
     line_mask = cv2.bitwise_or(horizontal_lines, vertical_lines)
     
     box_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-    box_mask = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, box_kernel, iterations=1)
+    try:
+        if use_gpu:
+            box_mask = GPUUtils.morphology(binary, cv2.MORPH_CLOSE, box_kernel)
+        else:
+            box_mask = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, box_kernel, iterations=1)
+    except Exception:
+        box_mask = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, box_kernel, iterations=1)
     
     orientation, orientation_conf = _estimate_orientation_from_masks(horizontal_lines, vertical_lines)
     

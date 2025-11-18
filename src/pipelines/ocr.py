@@ -10,6 +10,11 @@ import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 
+try:
+    from scipy.optimize import linear_sum_assignment
+except Exception:  # pragma: no cover - scipy optional in some environments
+    linear_sum_assignment = None
+
 from utils.models import Block, BlockType, BlockRole, WordBox
 from src.ocr.paddle_ocr import PaddleOCRWrapper
 from src.ocr.tesseract_ocr import TesseractOCRWrapper
@@ -21,10 +26,28 @@ from src.pipelines.validators import (
 )
 
 
+def compute_label_field_cost(field_block: Block, label_block: Block) -> float:
+    """Heuristic cost between a form field and label (lower is better)."""
+    fx0, fy0, fx1, fy1 = field_block.bbox
+    lx0, ly0, lx1, ly1 = label_block.bbox
+    field_height = max(fy1 - fy0, 1.0)
+    horizontal_gap = max(0.0, fx0 - lx1)
+    vertical_center_diff = abs(((fy0 + fy1) / 2.0) - ((ly0 + ly1) / 2.0))
+    overlap = max(0.0, min(fy1, ly1) - max(fy0, ly0)) / field_height
+    overlap_penalty = (1.0 - min(1.0, overlap)) * field_height * 1.2
+    right_penalty = 150.0 if lx0 >= fx1 else 0.0
+    return horizontal_gap + (vertical_center_diff * 0.8) + overlap_penalty + right_penalty
+
+
 class OCRPipeline:
     """OCR pipeline with header/footer and caption detection."""
     
-    def __init__(self, use_paddle: bool = True, max_workers: Optional[int] = None):
+    def __init__(
+        self,
+        use_paddle: bool = True,
+        max_workers: Optional[int] = None,
+        assignment_mode: str = "greedy"
+    ):
         """
         Initialize OCR pipeline.
         
@@ -39,6 +62,9 @@ class OCRPipeline:
         self.low_confidence_threshold = 0.72
         self.checkbox_on_threshold = 0.55
         self.checkbox_off_threshold = 0.25
+        self.assignment_mode = assignment_mode.lower() if assignment_mode and assignment_mode.lower() in {"greedy", "hungarian"} else "greedy"
+        self.max_assignment_cost = 220.0
+        self.max_block_area_ratio = 0.55  # Skip very large regions for faster OCR
         
         if use_paddle:
             try:
@@ -89,7 +115,8 @@ class OCRPipeline:
     def _crop_block_image(
         image: np.ndarray,
         block: Block,
-        padding: int = 10
+        padding: int = 10,
+        max_area_ratio: float = 0.8
     ) -> Optional[Tuple[np.ndarray, Tuple[int, int, int, int], float]]:
         """Crop block from image with padding and return crop + bbox + area ratio."""
         if image is None or not hasattr(image, "shape"):
@@ -104,7 +131,7 @@ class OCRPipeline:
         block_area = (x1 - x0) * (y1 - y0)
         page_area = image.shape[0] * image.shape[1]
         area_ratio = block_area / page_area if page_area > 0 else 0
-        if area_ratio > 0.8:
+        if area_ratio > max_area_ratio:
             return None
         block_image = image[y0:y1, x0:x1]
         if block_image.size == 0:
@@ -125,7 +152,7 @@ class OCRPipeline:
     ) -> Tuple[str, List[WordBox], Dict[str, Any]]:
         if not self.tesseract_ocr:
             return "", [], {"avg_confidence": 0.0, "engine": "none"}
-        crop_info = self._crop_block_image(page_image, block, padding=6)
+        crop_info = self._crop_block_image(page_image, block, padding=6, max_area_ratio=self.max_block_area_ratio)
         if crop_info is None:
             return "", [], {"avg_confidence": 0.0, "engine": "tesseract"}
         block_image, _, _ = crop_info
@@ -163,7 +190,7 @@ class OCRPipeline:
                 return text, block.word_boxes, {"avg_confidence": 1.0, "engine": "digital"}
             return "", [], {"avg_confidence": 0.0, "engine": "digital"}
         
-        crop_info = self._crop_block_image(image, block)
+        crop_info = self._crop_block_image(image, block, max_area_ratio=self.max_block_area_ratio)
         if crop_info is None:
             return "", [], {"avg_confidence": 0.0, "engine": "paddle"}
         block_image, (x0, y0, x1, y1), area_ratio = crop_info
@@ -295,8 +322,8 @@ class OCRPipeline:
             
             # Fix number recognition errors: O vs 0 in numeric contexts (general)
             # Only fix when O appears between digits or at end of number patterns
-            text = re.sub(r'(\d)O(\d)', r'\10\2', text)  # "3O" -> "30" between digits
-            text = re.sub(r'(\d{1,2})O\b', r'\10', text)  # "30" -> "30" at word boundary
+            text = re.sub(r'(\d)O(\d)', r'\g<1>0\g<2>', text)  # "3O" -> "30" between digits
+            text = re.sub(r'(\d{1,2})O\b', r'\g<1>0', text)  # "30" -> "30" at word boundary
             
             # Fix date formatting (general pattern)
             text = re.sub(r'\b(\d{1,2})\s*\)\s*,\s*(\d{4})\b', r'\1, \2', text)  # "30), 1997" -> "30, 1997"
@@ -518,6 +545,9 @@ class OCRPipeline:
                 page_lookup[page_id] = page
         processed_blocks: List[Block] = []
         for block in blocks:
+            if block.type not in {BlockType.TEXT, BlockType.TITLE, BlockType.LIST, BlockType.FORM}:
+                processed_blocks.append(block)
+                continue
             page_entry = page_lookup.get(block.page_id)
             page_image = None
             page_obj = None
@@ -578,12 +608,26 @@ class OCRPipeline:
             form_blocks = [b for b in page_blocks if b.type == BlockType.FORM]
             if not form_blocks:
                 continue
-            for form_block in form_blocks:
-                field_kind = form_block.metadata.get("field_kind")
-                if form_block.metadata.get("checkbox") or field_kind == "checkbox":
-                    self._annotate_checkbox(form_block, text_blocks)
-                else:
-                    self._link_form_field(form_block, text_blocks)
+            checkbox_blocks = [
+                blk for blk in form_blocks
+                if blk.metadata.get("checkbox") or blk.metadata.get("field_kind") == "checkbox"
+            ]
+            field_blocks = [
+                blk for blk in form_blocks
+                if blk not in checkbox_blocks
+            ]
+            for checkbox_block in checkbox_blocks:
+                self._annotate_checkbox(checkbox_block, text_blocks)
+            hungarian_applied = False
+            if (
+                field_blocks
+                and self.assignment_mode == "hungarian"
+                and linear_sum_assignment is not None
+            ):
+                hungarian_applied = self._associate_form_fields_hungarian(field_blocks, text_blocks)
+            if not hungarian_applied:
+                for field_block in field_blocks:
+                    self._link_form_field(field_block, text_blocks)
 
     def _annotate_checkbox(self, checkbox_block: Block, label_candidates: List[Block]) -> None:
         fill_ratio = checkbox_block.metadata.get("filled_ratio_estimate", 0.0)
@@ -607,8 +651,46 @@ class OCRPipeline:
         checkbox_block.role = BlockRole.KV_VALUE
         checkbox_block.metadata["role_locked"] = True
 
-    def _link_form_field(self, field_block: Block, text_blocks: List[Block]) -> None:
-        label = self._find_nearest_label(field_block, text_blocks)
+    def _associate_form_fields_hungarian(
+        self,
+        field_blocks: List[Block],
+        text_blocks: List[Block]
+    ) -> bool:
+        if not field_blocks or not text_blocks or linear_sum_assignment is None:
+            return False
+        label_candidates = [b for b in text_blocks if b.text and b.text.strip()]
+        if not label_candidates:
+            return False
+        cost_matrix = np.zeros((len(field_blocks), len(label_candidates)), dtype=float)
+        large_penalty = self.max_assignment_cost * 4
+        for i, field in enumerate(field_blocks):
+            for j, label in enumerate(label_candidates):
+                if field.page_id != label.page_id:
+                    cost_matrix[i, j] = large_penalty
+                else:
+                    cost_matrix[i, j] = compute_label_field_cost(field, label)
+        row_ind, col_ind = linear_sum_assignment(cost_matrix)
+        used_labels = set()
+        matched = False
+        for row, col in zip(row_ind, col_ind):
+            cost = cost_matrix[row, col]
+            if cost > self.max_assignment_cost:
+                continue
+            label_block = label_candidates[col]
+            if label_block.id in used_labels:
+                continue
+            used_labels.add(label_block.id)
+            self._link_form_field(field_blocks[row], text_blocks, label_override=label_block)
+            matched = True
+        return matched
+
+    def _link_form_field(
+        self,
+        field_block: Block,
+        text_blocks: List[Block],
+        label_override: Optional[Block] = None
+    ) -> None:
+        label = label_override if label_override is not None else self._find_nearest_label(field_block, text_blocks)
         label_text = label.text if label and label.text else None
         field_text = (field_block.text or "").strip()
         field_type = guess_field_type(label_text) if label_text else None

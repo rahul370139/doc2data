@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from typing import Tuple, Optional
 from PIL import Image
+from src.processing.gpu_utils import GPUUtils
 
 
 def deskew_image(image: np.ndarray) -> Tuple[np.ndarray, float]:
@@ -25,8 +26,14 @@ def deskew_image(image: np.ndarray) -> Tuple[np.ndarray, float]:
     else:
         gray = image.copy()
 
-    # Contrast enhancement + binarization
-    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    # Contrast enhancement + binarization (GPU accelerated when available)
+    try:
+        if GPUUtils.is_available():
+            gray = GPUUtils.gaussian_blur(gray, (3, 3), 0)
+        else:
+            gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    except Exception:
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
     binary = cv2.adaptiveThreshold(
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 8
     )
@@ -88,14 +95,18 @@ def denoise_image(image: np.ndarray, method: str = "median") -> np.ndarray:
         Denoised image
     """
     if method == "median":
-        # Median blur is better for salt-and-pepper noise
         if len(image.shape) == 3:
             denoised = cv2.medianBlur(image, 3)
         else:
             denoised = cv2.medianBlur(image, 3)
     elif method == "gaussian":
-        # Gaussian blur is better for general noise
-        denoised = cv2.GaussianBlur(image, (3, 3), 0)
+        try:
+            if GPUUtils.is_available():
+                denoised = GPUUtils.gaussian_blur(image, (3, 3), 0)
+            else:
+                denoised = cv2.GaussianBlur(image, (3, 3), 0)
+        except Exception:
+            denoised = cv2.GaussianBlur(image, (3, 3), 0)
     else:
         denoised = image
     
@@ -138,4 +149,3 @@ def preprocess_image(
         metadata["denoised"] = True
     
     return processed, metadata
-

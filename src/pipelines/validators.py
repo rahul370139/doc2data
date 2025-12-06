@@ -12,6 +12,9 @@ DATE_PATTERN = re.compile(r"^(0?[1-9]|1[0-2])[\-/](0?[1-9]|[12][0-9]|3[01])[\-/]
 PHONE_PATTERN = re.compile(r"^\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$")
 NUMERIC_PATTERN = re.compile(r"^[0-9]+$")
 ALPHANUM_PATTERN = re.compile(r"^[A-Z0-9]+$", re.IGNORECASE)
+SSN_PATTERN = re.compile(r"^(\d{3}-?\d{2}-?\d{4})$")
+ZIP_PATTERN = re.compile(r"^\d{5}(?:-\d{4})?$")
+MONEY_PATTERN = re.compile(r"^[\$]?\d{1,6}(?:,\d{3})*(?:\.\d{1,2})?$")
 
 
 def validate_npi(value: str) -> Tuple[bool, Dict[str, Any]]:
@@ -92,6 +95,37 @@ def validate_member_id(value: str) -> Tuple[bool, Dict[str, Any]]:
     return False, {"reason": "format"}
 
 
+def validate_ssn(value: str) -> Tuple[bool, Dict[str, Any]]:
+    if not value:
+        return False, {"reason": "empty"}
+    cleaned = value.strip()
+    if SSN_PATTERN.match(cleaned):
+        digits = re.sub(r"[^0-9]", "", cleaned)
+        return True, {"normalized": f"{digits[:3]}-{digits[3:5]}-{digits[5:]}"}
+    return False, {"reason": "format"}
+
+
+def validate_zip(value: str) -> Tuple[bool, Dict[str, Any]]:
+    if not value:
+        return False, {"reason": "empty"}
+    cleaned = value.strip()
+    if ZIP_PATTERN.match(cleaned):
+        return True, {"normalized": cleaned}
+    return False, {"reason": "format"}
+
+
+def validate_money(value: str) -> Tuple[bool, Dict[str, Any]]:
+    if not value:
+        return False, {"reason": "empty"}
+    cleaned = value.replace(" ", "").strip()
+    if MONEY_PATTERN.match(cleaned):
+        norm = cleaned
+        if not norm.startswith("$"):
+            norm = "$" + norm
+        return True, {"normalized": norm}
+    return False, {"reason": "format"}
+
+
 def validate_numeric(value: str, min_len: int = 1, max_len: int = 20) -> Tuple[bool, Dict[str, Any]]:
     digits = re.sub(r"[^0-9]", "", value)
     if min_len <= len(digits) <= max_len:
@@ -108,6 +142,9 @@ FIELD_VALIDATORS = {
     "phone": validate_phone,
     "member_id": validate_member_id,
     "numeric": validate_numeric,
+    "ssn": validate_ssn,
+    "zip": validate_zip,
+    "money": validate_money,
 }
 
 
@@ -139,4 +176,10 @@ def guess_field_type(label_text: Optional[str]) -> Optional[str]:
         return "member_id"
     if "zip" in text or "postal" in text:
         return "numeric"
+    if "ssn" in text or "social" in text:
+        return "ssn"
+    if "zip" in text:
+        return "zip"
+    if "amount" in text or "paid" in text or "charge" in text:
+        return "money"
     return None

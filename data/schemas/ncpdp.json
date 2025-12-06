@@ -1,0 +1,11 @@
+{
+  "fields": [
+    {"id": "member_id", "label": "MEMBER ID", "field_type": "member_id", "bbox_norm": [0.05, 0.08, 0.40, 0.11]},
+    {"id": "patient_name", "label": "PATIENT NAME", "field_type": "generic", "bbox_norm": [0.05, 0.12, 0.40, 0.15]},
+    {"id": "dob", "label": "DATE OF BIRTH", "field_type": "date", "bbox_norm": [0.42, 0.12, 0.55, 0.15]},
+    {"id": "address", "label": "ADDRESS", "field_type": "generic", "bbox_norm": [0.05, 0.16, 0.55, 0.20]},
+    {"id": "ndc", "label": "NDC", "field_type": "ndc", "bbox_norm": [0.60, 0.32, 0.80, 0.36]},
+    {"id": "qty", "label": "QUANTITY", "field_type": "numeric", "bbox_norm": [0.82, 0.32, 0.92, 0.36]},
+    {"id": "amount_paid", "label": "AMOUNT PAID", "field_type": "money", "bbox_norm": [0.70, 0.82, 0.93, 0.86]}
+  ]
+}

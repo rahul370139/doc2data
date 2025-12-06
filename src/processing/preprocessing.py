@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from typing import Tuple, Optional
 from PIL import Image
+from utils.config import Config
 from src.processing.gpu_utils import GPUUtils
 
 
@@ -117,7 +118,8 @@ def preprocess_image(
     image: np.ndarray,
     deskew: bool = True,
     denoise: bool = True,
-    denoise_method: str = "median"
+    denoise_method: str = "median",
+    doc_type: str = "generic"
 ) -> Tuple[np.ndarray, dict]:
     """
     Apply preprocessing to image.
@@ -138,6 +140,13 @@ def preprocess_image(
     }
     
     processed = image.copy()
+    hint = (doc_type or Config.DOC_TYPE_HINT or "generic").lower()
+    # Adaptive upscaling for handwritten/low-res scans
+    if hint in {"handwritten", "scan", "scanned"}:
+        scale = 1.3
+        new_w = int(processed.shape[1] * scale)
+        new_h = int(processed.shape[0] * scale)
+        processed = cv2.resize(processed, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
     
     if deskew:
         processed, angle = deskew_image(processed)
@@ -147,5 +156,12 @@ def preprocess_image(
     if denoise:
         processed = denoise_image(processed, method=denoise_method)
         metadata["denoised"] = True
-    
+
+    # Form-specific tweak: stronger contrast for forms
+    if hint in {"form", "cms1500", "ub04", "ncpdp"}:
+        gray = cv2.cvtColor(processed, cv2.COLOR_RGB2GRAY) if len(processed.shape) == 3 else processed
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
+        processed = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+
     return processed, metadata

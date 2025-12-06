@@ -17,7 +17,7 @@ class Config:
     # Ollama Configuration (stubbed for local testing)
     OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "localhost:11434")
     OLLAMA_MODEL_SLM: str = os.getenv("OLLAMA_MODEL_SLM", "qwen2.5:7b-instruct")
-    OLLAMA_MODEL_VLM: str = os.getenv("OLLAMA_MODEL_VLM", "qwen2-vl:7b")
+    OLLAMA_MODEL_VLM: str = os.getenv("OLLAMA_MODEL_VLM", "minicpm-v")
     ENABLE_SLM: bool = os.getenv("ENABLE_SLM", "false").lower() == "true"
     ENABLE_VLM: bool = os.getenv("ENABLE_VLM", "false").lower() == "true"
     
@@ -47,6 +47,11 @@ class Config:
     # GPU Configuration (optional, for future use)
     USE_GPU: bool = os.getenv("USE_GPU", "false").lower() == "true"
     CUDA_VISIBLE_DEVICES: Optional[str] = os.getenv("CUDA_VISIBLE_DEVICES")
+    # TATR model - use HuggingFace model name directly
+    TATR_MODEL_PATH: Optional[str] = os.getenv("TATR_MODEL_PATH", "microsoft/table-transformer-structure-recognition")
+
+    # Document type hint for adaptive preprocessing (generic|form|cms1500|ub04|ncpdp|handwritten)
+    DOC_TYPE_HINT: str = os.getenv("DOC_TYPE_HINT", "generic").lower()
     
     # NVIDIA DGX Configuration (optional, for future use)
     DGX_HOST: Optional[str] = os.getenv("DGX_HOST")
@@ -72,4 +77,3 @@ class Config:
 
 # Initialize directories
 Config.ensure_directories()
-

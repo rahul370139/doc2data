@@ -88,6 +88,36 @@ def compute_template_column_centers(
         return None
     return [min(page_width, max(0.0, col * page_width)) for col in columns]
 
+
+def _load_template_schema(template_hint: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not template_hint:
+        return None
+    import json
+    slug = template_hint.lower()
+    schema_path = Path(__file__).parent.parent / "data" / "schemas" / f"{slug}.json"
+    if not schema_path.exists():
+        return None
+    try:
+        with open(schema_path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _compute_field_score(block: Block) -> float:
+    ocr_conf = block.metadata.get("ocr_confidence", 0.0) if hasattr(block, "metadata") else 0.0
+    layout_conf = block.confidence or 0.0
+    validator_passed = block.metadata.get("validator_passed", False) if hasattr(block, "metadata") else False
+    score = 0.6 * ocr_conf + 0.3 * layout_conf + (0.1 if validator_passed else 0.0)
+    return float(max(0.0, min(1.0, score)))
+
+
+def _norm_to_abs_bbox(norm_bbox: List[float], width: int, height: int) -> Tuple[float, float, float, float]:
+    if not norm_bbox or len(norm_bbox) < 4:
+        return (0.0, 0.0, 0.0, 0.0)
+    x0, y0, x1, y1 = norm_bbox[:4]
+    return (x0 * width, y0 * height, x1 * width, y1 * height)
+
 try:
     from layoutparser.models.paddledetection.catalog import LABEL_MAP_CATALOG
 except Exception:  # pragma: no cover - layoutparser minimal install
@@ -229,6 +259,16 @@ class LayoutSegmenter:
         
         return blocks
     
+    def _get_local_detectron2_weights(self, config_uri: str) -> Optional[str]:
+        """Get path to locally downloaded Detectron2 model weights."""
+        # Map config URIs to local weight files
+        local_weights_map = {
+            "lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config": "/root/.detectron2/models/publaynet_faster_rcnn_R_50_FPN_3x.pth",
+            "lp://PubLayNet/mask_rcnn_R_50_FPN_3x/config": "/root/.detectron2/models/publaynet_mask_rcnn_R_50_FPN_3x.pth",
+            "lp://DocLayNet/faster_rcnn_R_50_FPN_3x/config": "/root/.detectron2/models/doclaynet_faster_rcnn_R_50_FPN_3x.pth",
+        }
+        return local_weights_map.get(config_uri)
+    
     def _load_local_model(self, config_uri: str, extra_config: Optional[Dict[str, Any]] = None):
         """Try to load PaddleDetection weights from local cache when offline."""
         folder = self.LOCAL_MODEL_FOLDERS.get(config_uri)
@@ -312,9 +352,20 @@ class LayoutSegmenter:
                 elif backend == "detectron2":
                     print(f"Attempting Detectron2 model: {config_uri}")
                     detectron_device = "cuda" if device == "cuda" else "cpu"
+                    # Try local model first to avoid iopath caching issues
+                    local_weights = self._get_local_detectron2_weights(config_uri)
                     try:
+                        if local_weights and Path(local_weights).exists():
+                            print(f"  Using local weights: {local_weights}")
+                            model = lp.Detectron2LayoutModel(
+                                config_uri,
+                                model_path=local_weights,
+                                device=detectron_device
+                            )
+                        else:
                         model = lp.Detectron2LayoutModel(config_uri, device=detectron_device)
                     except TypeError:
+                        # Older API without model_path
                         model = lp.Detectron2LayoutModel(config_uri)
                 else:
                     continue
@@ -393,6 +444,7 @@ class LayoutSegmenter:
         
         if key in ("publaynet", "default", "text"):
             return [
+                # Detectron2 first (better accuracy, now with local weights to avoid iopath issues)
                 ("detectron2", "lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config"),
                 ("paddle", "lp://PubLayNet/ppyolov2_r50vd_dcn_365e/config"),
                 ("paddle", "lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config"),
@@ -424,6 +476,49 @@ class LayoutSegmenter:
             ("paddle", "lp://PubLayNet/ppyolov2_r50vd_dcn_365e/config"),
             ("auto", "lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config"),
         ]
+
+    def _merge_detection_ensembles(
+        self,
+        primary_blocks: List[Block],
+        secondary_blocks: Optional[List[Block]]
+    ) -> List[Block]:
+        if not secondary_blocks:
+            return primary_blocks
+        merged: List[Block] = []
+        all_blocks = primary_blocks + secondary_blocks
+        used = [False] * len(all_blocks)
+        iou_thresh = 0.5
+
+        def _priority(block: Block) -> int:
+            backend = str(block.metadata.get("model_backend", "") if hasattr(block, "metadata") else "").lower()
+            if block.type in {BlockType.TABLE, BlockType.FIGURE}:
+                if "detectron" in backend:
+                    return 3
+            if "detectron" in backend:
+                return 2
+            if "paddle" in backend:
+                return 1
+            return 0
+
+        for i, b1 in enumerate(all_blocks):
+            if used[i]:
+                continue
+            group = [b1]
+            used[i] = True
+            for j, b2 in enumerate(all_blocks):
+                if used[j] or i == j:
+                    continue
+                if b1.page_id != b2.page_id:
+                    continue
+                if b1.type != b2.type:
+                    continue
+                iou = self._calculate_iou(b1.bbox, b2.bbox)
+                if iou >= iou_thresh:
+                    group.append(b2)
+                    used[j] = True
+            best = max(group, key=lambda b: (_priority(b), b.confidence))
+            merged.append(best)
+        return merged
     
     @staticmethod
     def _clip_bbox(
@@ -1467,6 +1562,70 @@ class LayoutSegmenter:
             block.metadata = dict(block.metadata or {})
             block.metadata["template_hint"] = template_hint
         return template_columns
+
+    def _apply_template_schema(
+        self,
+        blocks: List[Block],
+        image_shape: Tuple[int, int],
+        template_hint: Optional[str]
+    ) -> List[Block]:
+        schema = _load_template_schema(template_hint)
+        if not schema:
+            return blocks
+        width = image_shape[1] if len(image_shape) >= 2 else 1
+        height = image_shape[0] if len(image_shape) >= 2 else 1
+        fields = schema.get("fields", [])
+        if not fields:
+            return blocks
+        updated = list(blocks)
+        # Index existing form blocks
+        form_blocks = [b for b in blocks if b.type == BlockType.FORM]
+        for idx, field in enumerate(fields):
+            norm_bbox = field.get("bbox") or field.get("bbox_norm")
+            if not norm_bbox:
+                continue
+            abs_bbox = _norm_to_abs_bbox(norm_bbox, width, height)
+            field_type = field.get("field_type")
+            label_text = field.get("label")
+            # Find overlapping form block
+            best = None
+            best_iou = 0.0
+            for fb in form_blocks:
+                iou = self._calculate_iou(abs_bbox, fb.bbox)
+                if iou > best_iou:
+                    best_iou = iou
+                    best = fb
+            if best and best_iou >= 0.5:
+                # Snap bbox to template if template is tighter
+                best.bbox = abs_bbox
+                best.metadata = dict(best.metadata or {})
+                best.metadata["template_hint"] = template_hint
+                best.metadata.setdefault("form_field", {})
+                best.metadata["form_field"].update({
+                    "field_type": field_type,
+                    "label_text": label_text,
+                })
+                best.metadata["field_score"] = _compute_field_score(best)
+            else:
+                # Synthesize a form block for missing field
+                new_block = Block(
+                    id=f"template_{template_hint}_{idx}",
+                    type=BlockType.FORM,
+                    bbox=abs_bbox,
+                    page_id=0,
+                    confidence=0.4,
+                    metadata={
+                        "detected_by": "template_schema",
+                        "template_hint": template_hint,
+                        "form_field": {
+                            "field_type": field_type,
+                            "label_text": label_text,
+                        }
+                    }
+                )
+                new_block.metadata["field_score"] = _compute_field_score(new_block)
+                updated.append(new_block)
+        return updated
     
     def _augment_text_with_heuristic(
         self,
@@ -1499,8 +1658,10 @@ class LayoutSegmenter:
             gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2
         )
         
-        # Use morphological operations to connect text components (lighter touch)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        # Use morphological operations to connect text components
+        # Use a horizontal kernel to bridge gaps between words (Run Length Smoothing)
+        # This is crucial for headers like "EVAC   CATEGORY"
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (20, 1))
         dilated = cv2.dilate(binary, kernel, iterations=1)
         
         # Find connected components
@@ -1544,7 +1705,7 @@ class LayoutSegmenter:
             text_density = cv2.countNonZero(crop) / float(w * h)
             
             # Text regions should have reasonable text density
-            if text_density < 0.03 or text_density > 0.92:
+            if text_density < 0.01 or text_density > 0.95:
                 continue
             
             bbox = (float(x), float(y), float(x+w), float(y+h))
@@ -1875,25 +2036,59 @@ class LayoutSegmenter:
         updated_blocks: List[Block] = []
         existing_tables = [b for b in blocks if b.type == BlockType.TABLE]
         
+        # Form mode: more aggressive table→form conversion when form_geometry is enabled
+        form_mode = getattr(self, 'enable_form_geometry', False)
+        form_strictness = 1.0 - getattr(self, 'geometry_strictness', 0.7)  # Lower strictness = more aggressive
+        tables_in_page = [b for b in blocks if b.type == BlockType.TABLE]
+        # If we have an explosion of tiny tables, demote the smallest immediately
+        if form_mode and len(tables_in_page) > 120:
+            page_area = float(image.shape[0] * image.shape[1])
+            for tbl in tables_in_page:
+                area_ratio = ((tbl.bbox[2] - tbl.bbox[0]) * (tbl.bbox[3] - tbl.bbox[1])) / max(page_area, 1.0)
+                if area_ratio < 0.02:
+                    tbl.type = BlockType.FORM
+
+        # Adjust thresholds based on form mode
+        large_table_threshold = 0.35 if form_mode else 0.55  # Smaller tables → forms in form mode
+        medium_table_threshold = 0.10 if form_mode else 0.18  # More aggressive validation
+        
         for block in blocks:
             block_area = max((block.bbox[2] - block.bbox[0]) * (block.bbox[3] - block.bbox[1]), 1.0)
             block_area_ratio = block_area / page_area if page_area > 0 else 0.0
             new_type: Optional[BlockType] = None
             features: Optional[Dict[str, float]] = None
             
+            # In form mode, be MUCH more aggressive about converting tables to forms
+            if form_mode and block.type == BlockType.TABLE:
+                # Any table > 10% of page in form mode likely part of form layout
+                if block_area_ratio > 0.10:
+                    features = self._analyze_block_content(image, block)
+                    if features:
+                        # Forms have grid lines + text, pure tables have mostly grid
+                        text_density = features["text_density"]
+                        line_density = features["line_density"]
+                        # If has both text and lines, it's form-like
+                        if text_density > 0.02 or line_density > 0.015:
+                            new_type = BlockType.FORM
+                elif block_area_ratio < 0.05:
+                    features = features or self._analyze_block_content(image, block)
+                    if features and features.get("line_density", 0.0) < 0.01:
+                        # tiny "tables" in forms are usually just boxed fields
+                        new_type = BlockType.FORM
+            
             # Extremely large "table" detections are often entire-page forms
-            if block.type == BlockType.TABLE and block_area_ratio > 0.55:
+            if new_type is None and block.type == BlockType.TABLE and block_area_ratio > large_table_threshold:
                 new_type = BlockType.FORM
             
             # Validate large table blocks using line density
-            elif block.type == BlockType.TABLE and block_area_ratio > 0.18:
+            elif new_type is None and block.type == BlockType.TABLE and block_area_ratio > medium_table_threshold:
                 if not self._validate_table_block(image, block):
                     features = self._analyze_block_content(image, block)
                     text_density = features["text_density"] if features else 0.0
                     line_density = features["line_density"] if features else 0.0
                     if text_density > 0.05 and line_density > 0.01:
                         new_type = BlockType.FORM
-                    elif text_density < 0.02:
+                    elif text_density < 0.02 and line_density < 0.01:
                         new_type = BlockType.FIGURE
                     else:
                         new_type = BlockType.FORM
@@ -1925,7 +2120,7 @@ class LayoutSegmenter:
                         # Keep as FIGURE, don't change
                         new_type = None
                     else:
-                        has_grid = line_density > 0.032 and horiz > 0.010 and vert > 0.010
+                        has_grid = line_density > 0.015 and horiz > 0.010 and vert > 0.010
                         if has_grid:
                             if block_area_ratio > 0.35:
                                 new_type = BlockType.FORM
@@ -2449,6 +2644,225 @@ class LayoutSegmenter:
             return "form"
         return "other"
     
+    def _clean_layout_heuristics(
+        self,
+        blocks: List[Block],
+        image: np.ndarray
+    ) -> List[Block]:
+        """
+        Master layout cleaner with Granularity Preference:
+        1. Evaluates Containers vs Content.
+           - If a container is huge or vague and has good content, discard container.
+           - If a container is tight and semantic, discard content.
+        2. Snaps to visual grid lines.
+        3. Removes overlaps strictly.
+        """
+        if not blocks:
+            return []
+            
+        height, width = image.shape[:2]
+        page_area = height * width
+        
+        # 1. Hierarchy & Granularity Check
+        # Sort by area (largest first) to process containers first
+        blocks.sort(key=lambda b: (b.bbox[2]-b.bbox[0])*(b.bbox[3]-b.bbox[1]), reverse=True)
+        
+        # Mark blocks to remove
+        to_remove = set()
+        
+        # Map of container -> list of contained blocks
+        containment_map = {i: [] for i in range(len(blocks))}
+        
+        # Build containment map
+        for i, container in enumerate(blocks):
+            if i in to_remove: continue
+            
+            container_area = (container.bbox[2]-container.bbox[0])*(container.bbox[3]-container.bbox[1])
+            container_ratio = container_area / page_area if page_area > 0 else 0
+            
+            for j, content in enumerate(blocks):
+                if i == j or j in to_remove: continue
+                
+                if self._is_contained(content.bbox, container.bbox, threshold=0.65):
+                    containment_map[i].append(j)
+            
+            # Evaluate Container vs Children
+            children_indices = containment_map[i]
+            if not children_indices:
+                continue
+                
+            # Logic: Should we keep the container or the children?
+            
+            # Case A: Giant Page-Level Wrapper (e.g. "Form" covering > 50% of page)
+            # If it has valid semantic children (Table, Figure, Title), prefer children.
+            if container_ratio > 0.5:
+                has_semantic_child = any(
+                    blocks[idx].type in {BlockType.TABLE, BlockType.FIGURE, BlockType.TITLE, BlockType.FORM} 
+                    for idx in children_indices
+                )
+                if has_semantic_child:
+                    # The container is too big and vague. Kill it.
+                    to_remove.add(i)
+                    continue
+
+            # Case B: Form/Table containing distinct Figures/Tables
+            # Detectron sometimes wraps a whole section including a figure as a "Table".
+            # We prefer the Figure + Table + Text separated.
+            distinct_types = {blocks[idx].type for idx in children_indices}
+            if container.type in {BlockType.FORM, BlockType.TABLE}:
+                if BlockType.FIGURE in distinct_types or BlockType.TABLE in distinct_types:
+                     # Container is aggregating too much. Kill it.
+                    to_remove.add(i)
+                    continue
+            
+            # Case B2: Figure containing Text/Form/Table
+            # Figures shouldn't contain other blocks usually
+            if container.type == BlockType.FIGURE:
+                if any(blocks[idx].type != BlockType.FIGURE for idx in children_indices):
+                    to_remove.add(i)
+                    continue
+            
+            # Case C: Tight Container (e.g. Table around cells, or Text grouping lines)
+            # If we haven't killed the container yet, it wins. Kill the children.
+            # This preserves structure for things that SHOULD be grouped.
+            for child_idx in children_indices:
+                # Don't kill semantic blocks if they are significant
+                # But generally, if we decided to keep the container, we consume the children
+                # UNLESS the child is a Figure inside a Text block (unlikely but possible)
+                to_remove.add(child_idx)
+                
+                # Add as metadata for OCR reference if needed
+                if "child_blocks" not in container.metadata:
+                    container.metadata["child_blocks"] = []
+                container.metadata["child_blocks"].append({
+                    "id": blocks[child_idx].id,
+                    "type": str(blocks[child_idx].type),
+                    "bbox": list(blocks[child_idx].bbox),
+                    "confidence": blocks[child_idx].confidence
+                })
+
+        # Filter blocks
+        kept_blocks = [b for i, b in enumerate(blocks) if i not in to_remove]
+        
+        # 2. Snap to Visual Grid Lines
+        try:
+            kept_blocks = self._snap_blocks_to_lines(kept_blocks, image)
+        except Exception as e:
+            print(f"  ⚠️ Grid snapping failed: {e}")
+        
+        # 3. Strict Overlap Resolution (NMS)
+        # Sort by confidence for NMS to keep best blocks
+        kept_blocks.sort(key=lambda b: b.confidence, reverse=True)
+        final_blocks = []
+        
+        for block in kept_blocks:
+            overlap = False
+            for existing in final_blocks:
+                iou = self._calculate_iou(block.bbox, existing.bbox)
+                if iou > 0.1:  # Strict non-overlap
+                    overlap = True
+                    break
+            
+            if not overlap:
+                final_blocks.append(block)
+        
+        return final_blocks
+
+    def _snap_blocks_to_lines(
+        self,
+        blocks: List[Block],
+        image: np.ndarray
+    ) -> List[Block]:
+        """Snap block boundaries to detected horizontal/vertical lines."""
+        try:
+            import cv2
+        except ImportError:
+            return blocks
+            
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = image.copy()
+            
+        # Detect lines
+        edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=100, minLineLength=100, maxLineGap=10)
+        
+        if lines is None:
+            return blocks
+            
+        h_lines = []  # y-coords
+        v_lines = []  # x-coords
+        
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            if abs(y1 - y2) < 5:  # Horizontal
+                h_lines.append((y1 + y2) / 2)
+            elif abs(x1 - x2) < 5:  # Vertical
+                v_lines.append((x1 + x2) / 2)
+                
+        snap_dist = 15.0
+        
+        for block in blocks:
+            x0, y0, x1, y1 = list(block.bbox)
+            
+            # Snap Y coordinates
+            best_y0_diff = snap_dist
+            new_y0 = y0
+            for y in h_lines:
+                diff = abs(y - y0)
+                if diff < best_y0_diff:
+                    best_y0_diff = diff
+                    new_y0 = y
+            
+            best_y1_diff = snap_dist
+            new_y1 = y1
+            for y in h_lines:
+                diff = abs(y - y1)
+                if diff < best_y1_diff:
+                    best_y1_diff = diff
+                    new_y1 = y
+                    
+            # Snap X coordinates
+            best_x0_diff = snap_dist
+            new_x0 = x0
+            for x in v_lines:
+                diff = abs(x - x0)
+                if diff < best_x0_diff:
+                    best_x0_diff = diff
+                    new_x0 = x
+            
+            best_x1_diff = snap_dist
+            new_x1 = x1
+            for x in v_lines:
+                diff = abs(x - x1)
+                if diff < best_x1_diff:
+                    best_x1_diff = diff
+                    new_x1 = x
+            
+            block.bbox = (new_x0, new_y0, new_x1, new_y1)
+            
+        return blocks
+
+    def _is_contained(self, inner_bbox, outer_bbox, threshold=0.9):
+        """Check if inner_bbox is mostly contained within outer_bbox."""
+        ix0, iy0, ix1, iy1 = inner_bbox
+        ox0, oy0, ox1, oy1 = outer_bbox
+        
+        # Intersection coordinates
+        x0 = max(ix0, ox0)
+        y0 = max(iy0, oy0)
+        x1 = min(ix1, ox1)
+        y1 = min(iy1, oy1)
+        
+        if x1 < x0 or y1 < y0:
+            return False
+            
+        intersection_area = (x1 - x0) * (y1 - y0)
+        inner_area = (ix1 - ix0) * (iy1 - iy0)
+        
+        return (intersection_area / inner_area) > threshold
+    
     def _merge_adjacent_blocks(
         self,
         blocks: List[Block],
@@ -2456,8 +2870,537 @@ class LayoutSegmenter:
         distance_threshold: float = 20.0
     ) -> List[Block]:
         """
-        Merge ONLY small adjacent blocks of the same type that are clearly related.
-        This groups small form fields and key-value pairs, but preserves large distinct blocks.
+        Clean up detection results using the new strict layout cleaner.
+        """
+        if len(blocks) <= 1:
+            return blocks
+        
+        form_mode = getattr(self, 'enable_form_geometry', False)
+        
+        # Step 1: Clean up layout (Containment & Overlaps)
+        blocks = self._clean_layout_heuristics(blocks, image)
+        
+        # Step 2: Recover Tables from Grid Lines (Fixes split tables)
+        if form_mode:
+            blocks = self._recover_tables_from_grid(blocks, image)
+            # Also merge vertically adjacent table parts
+            blocks = self._merge_vertical_tables(blocks)
+            
+        # Step 3: Merge Horizontal Text Lines (Fixes split headers)
+        blocks = self._merge_horizontal_text_lines(blocks, image)
+        
+        # Step 4: For forms, try to merge remaining adjacent blocks into sections
+        if form_mode:
+            blocks = self._merge_tiny_fragments_only(blocks, image)
+        
+        return blocks
+
+    def _merge_vertical_tables(self, blocks: List[Block]) -> List[Block]:
+        """Merge table blocks that are stacked vertically."""
+        if not blocks:
+            return []
+            
+        merged_blocks = []
+        used = set()
+        
+        # Sort by Y
+        sorted_blocks = sorted(blocks, key=lambda b: b.bbox[1])
+        
+        for i, block1 in enumerate(sorted_blocks):
+            if i in used: continue
+            
+            current_group = [block1]
+            current_bbox = list(block1.bbox)
+            
+            # We can also merge a TITLE/TEXT into a TABLE if it's right above it (Header glue)
+            is_table_group = (block1.type == BlockType.TABLE)
+            
+            for j, block2 in enumerate(sorted_blocks[i+1:], start=i+1):
+                if j in used: continue
+                
+                # Logic: 
+                # 1. Merge Table + Table (Vertical split)
+                # 2. Merge Text/Title + Table (Caption/Header)
+                
+                is_compatible = False
+                if block1.type == BlockType.TABLE and block2.type == BlockType.TABLE:
+                    is_compatible = True
+                elif block1.type in {BlockType.TEXT, BlockType.TITLE} and block2.type == BlockType.TABLE:
+                    # Only merge if block1 is close above block2
+                    is_compatible = True
+                    is_table_group = True
+                
+                if not is_compatible:
+                    continue
+                
+                # Check X alignment (width overlap)
+                x_overlap = min(current_bbox[2], block2.bbox[2]) - max(current_bbox[0], block2.bbox[0])
+                width1 = current_bbox[2] - current_bbox[0]
+                width2 = block2.bbox[2] - block2.bbox[0]
+                
+                # Relaxed overlap: 50% overlap is enough
+                if x_overlap / min(width1, width2) < 0.5: 
+                    continue
+                    
+                # Check Y proximity
+                y_gap = block2.bbox[1] - current_bbox[3]
+                
+                # Aggressive gap: 100px (handles large headers and split tables)
+                if y_gap < 100: 
+                    current_group.append(block2)
+                    used.add(j)
+                    # Expand bbox
+                    current_bbox[0] = min(current_bbox[0], block2.bbox[0])
+                    current_bbox[1] = min(current_bbox[1], block2.bbox[1])
+                    current_bbox[2] = max(current_bbox[2], block2.bbox[2])
+                    current_bbox[3] = max(current_bbox[3], block2.bbox[3])
+            
+            if len(current_group) > 1 and is_table_group:
+                # Force type to TABLE if we merged things into a table
+                main_block = max(current_group, key=lambda b: b.confidence)
+                merged_block = Block(
+                    id=main_block.id,
+                    type=BlockType.TABLE,
+                    bbox=tuple(current_bbox),
+                    page_id=main_block.page_id,
+                    confidence=main_block.confidence,
+                    metadata={**main_block.metadata, "merged_from": [b.id for b in current_group]}
+                )
+                merged_blocks.append(merged_block)
+            else:
+                merged_blocks.append(block1)
+                
+        return merged_blocks
+
+    def _merge_horizontal_text_lines(
+        self,
+        blocks: List[Block],
+        image: np.ndarray
+    ) -> List[Block]:
+        """Merge text blocks that are on the same visual line."""
+        if not blocks:
+            return []
+            
+        merged_blocks = []
+        used = set()
+        
+        # Sort by Y, then X
+        sorted_blocks = sorted(blocks, key=lambda b: (b.bbox[1], b.bbox[0]))
+        
+        for i, block1 in enumerate(sorted_blocks):
+            if i in used: continue
+            
+            current_group = [block1]
+            current_bbox = list(block1.bbox)
+            
+            # Only merge text-like things
+            if block1.type not in {BlockType.TEXT, BlockType.TITLE, BlockType.LIST}:
+                merged_blocks.append(block1)
+                continue
+                
+            for j, block2 in enumerate(sorted_blocks[i+1:], start=i+1):
+                if j in used: continue
+                if block2.type != block1.type: continue
+                
+                # Check alignment using vertical overlap instead of center point
+                # This handles skewed text much better
+                y1_min, y1_max = current_bbox[1], current_bbox[3]
+                y2_min, y2_max = block2.bbox[1], block2.bbox[3]
+                
+                overlap_y = min(y1_max, y2_max) - max(y1_min, y2_min)
+                min_height = min(y1_max - y1_min, y2_max - y2_min)
+                
+                # If they don't overlap vertically, or overlap is tiny, skip
+                if overlap_y <= 0 or (min_height > 0 and overlap_y / min_height < 0.3):
+                    continue
+                    
+                # Horizontal distance
+                h_dist = block2.bbox[0] - current_bbox[2]
+                
+                # Super-Aggressive horizontal gap (600px to jump over huge blank spaces in headers)
+                if 0 <= h_dist < 600:
+                    current_group.append(block2)
+                    used.add(j)
+                    # Expand bbox
+                    current_bbox[0] = min(current_bbox[0], block2.bbox[0])
+                    current_bbox[1] = min(current_bbox[1], block2.bbox[1])
+                    current_bbox[2] = max(current_bbox[2], block2.bbox[2])
+                    current_bbox[3] = max(current_bbox[3], block2.bbox[3])
+            
+            if len(current_group) > 1:
+                merged_blocks.append(self._create_merged_block(current_group, current_bbox))
+            else:
+                merged_blocks.append(block1)
+                
+        return merged_blocks
+
+    def _recover_tables_from_grid(
+        self,
+        blocks: List[Block],
+        image: np.ndarray
+    ) -> List[Block]:
+        """Detect grid lines and force Table blocks around them."""
+        try:
+            import cv2
+        except ImportError:
+            return blocks
+            
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = image.copy()
+            
+        # Detect horizontal and vertical lines
+        thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+        
+        # Find lines
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40, 1))
+        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 40))
+        
+        h_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, h_kernel, iterations=1)
+        v_lines = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, v_kernel, iterations=1)
+        
+        grid_mask = cv2.add(h_lines, v_lines)
+        
+        # Find connected components of the grid
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(grid_mask, connectivity=8)
+        
+        new_blocks = list(blocks)
+        
+        height, width = image.shape[:2]
+        page_area = height * width
+        
+        for i in range(1, num_labels):
+            x, y, w, h, area = stats[i]
+            
+            # Is this a significant grid?
+            if area < page_area * 0.05: # Ignore small grids
+                continue
+                
+            # Check if we already have a table covering this
+            grid_bbox = (x, y, x+w, y+h)
+            covered = False
+            for b in blocks:
+                if b.type == BlockType.TABLE and self._calculate_iou(b.bbox, grid_bbox) > 0.6:
+                    covered = True
+                    break
+            
+            if not covered:
+                # Create new table block
+                new_table = Block(
+                    id=f"grid_table_{i}",
+                    type=BlockType.TABLE,
+                    bbox=grid_bbox,
+                    page_id=blocks[0].page_id if blocks else 0,
+                    confidence=0.85,
+                    metadata={"detected_by": "grid_heuristic"}
+                )
+                
+                # Remove blocks that are INSIDE this new table (rows/cells)
+                filtered_blocks = []
+                for b in new_blocks:
+                    if self._is_contained(b.bbox, grid_bbox, threshold=0.8):
+                        # Add as child
+                        if "child_blocks" not in new_table.metadata:
+                            new_table.metadata["child_blocks"] = []
+                        new_table.metadata["child_blocks"].append({
+                            "id": b.id, 
+                            "type": str(b.type), 
+                            "bbox": list(b.bbox)
+                        })
+                    else:
+                        filtered_blocks.append(b)
+                
+                filtered_blocks.append(new_table)
+                new_blocks = filtered_blocks
+                print(f"  🕸️ Recovered table from grid lines: {grid_bbox}")
+                
+        return new_blocks
+    
+    def _merge_tiny_fragments_only(
+        self,
+        blocks: List[Block],
+        image: np.ndarray
+    ) -> List[Block]:
+        """
+        Merge only tiny text fragments that are clearly part of the same line/field.
+        Keeps distinct sections separate - Reducto style.
+        """
+        if len(blocks) <= 1:
+            return blocks
+        
+        height, width = image.shape[:2]
+        page_area = height * width
+        
+        # Only merge blocks that are:
+        # 1. Very small (< 2% of page)
+        # 2. Same type
+        # 3. On the same horizontal line (within 15px vertically)
+        # 4. Close horizontally (within 30px)
+        
+        merged = []
+        used = set()
+        sorted_blocks = sorted(blocks, key=lambda b: (b.bbox[1], b.bbox[0]))
+        
+        for i, block1 in enumerate(sorted_blocks):
+            if i in used:
+                continue
+            
+            block1_area = (block1.bbox[2] - block1.bbox[0]) * (block1.bbox[3] - block1.bbox[1])
+            block1_ratio = block1_area / page_area if page_area > 0 else 0
+            
+            # Only try to merge tiny blocks
+            if block1_ratio > 0.02:  # > 2% of page - don't merge
+                merged.append(block1)
+                continue
+            
+            current_group = [block1]
+            current_bbox = list(block1.bbox)
+            
+            for j, block2 in enumerate(sorted_blocks[i+1:], start=i+1):
+                if j in used:
+                    continue
+                
+                # Must be same type for merging
+                if block2.type != block1.type:
+                    continue
+                
+                block2_area = (block2.bbox[2] - block2.bbox[0]) * (block2.bbox[3] - block2.bbox[1])
+                block2_ratio = block2_area / page_area if page_area > 0 else 0
+                
+                # Only merge tiny blocks
+                if block2_ratio > 0.02:
+                    continue
+                
+                # Check if on same horizontal line (within 15px vertically)
+                y1_center = (block1.bbox[1] + block1.bbox[3]) / 2
+                y2_center = (block2.bbox[1] + block2.bbox[3]) / 2
+                v_diff = abs(y1_center - y2_center)
+                
+                if v_diff > 15:  # Not on same line
+                    continue
+                
+                # Check horizontal proximity (within 30px)
+                h_gap = block2.bbox[0] - current_bbox[2]  # left of block2 - right of current
+                
+                if h_gap > 30 or h_gap < -10:  # Too far or wrong order
+                    continue
+                
+                # Merge this tiny fragment
+                current_group.append(block2)
+                used.add(j)
+                current_bbox[0] = min(current_bbox[0], block2.bbox[0])
+                current_bbox[1] = min(current_bbox[1], block2.bbox[1])
+                current_bbox[2] = max(current_bbox[2], block2.bbox[2])
+                current_bbox[3] = max(current_bbox[3], block2.bbox[3])
+            
+            if len(current_group) > 1:
+                merged.append(self._create_merged_block(current_group, current_bbox))
+            else:
+                merged.append(block1)
+        
+        if len(merged) < len(blocks):
+            print(f"  🔗 Merged {len(blocks) - len(merged)} tiny fragments")
+        
+        return merged
+    
+    def _merge_into_sections(
+        self,
+        blocks: List[Block],
+        image: np.ndarray
+    ) -> List[Block]:
+        """
+        Section-level merging for forms (like Reducto).
+        Groups blocks into horizontal bands (rows) and merges within each band.
+        Creates larger, logical sections instead of individual boxes.
+        """
+        if len(blocks) <= 1:
+            return blocks
+        
+        height, width = image.shape[:2]
+        page_area = height * width
+        
+        # Step 1: Group blocks into horizontal bands based on y-position overlap
+        # A band is a group of blocks that share vertical space
+        sorted_blocks = sorted(blocks, key=lambda b: b.bbox[1])  # Sort by top y
+        
+        bands: List[List[Block]] = []
+        current_band: List[Block] = []
+        band_bottom = 0
+        
+        for block in sorted_blocks:
+            block_top = block.bbox[1]
+            block_bottom = block.bbox[3]
+            
+            # If this block starts below the current band, start a new band
+            # Allow some overlap (20% of band height)
+            if current_band:
+                band_height = band_bottom - min(b.bbox[1] for b in current_band)
+                overlap_threshold = band_height * 0.3  # 30% overlap allowed
+                
+                if block_top > band_bottom + overlap_threshold:
+                    # Save current band and start new one
+                    if current_band:
+                        bands.append(current_band)
+                    current_band = [block]
+                    band_bottom = block_bottom
+                else:
+                    # Add to current band and extend bottom
+                    current_band.append(block)
+                    band_bottom = max(band_bottom, block_bottom)
+            else:
+                current_band = [block]
+                band_bottom = block_bottom
+        
+        # Add last band
+        if current_band:
+            bands.append(current_band)
+        
+        # Step 2: Within each band, merge blocks that are close horizontally
+        merged_blocks: List[Block] = []
+        
+        for band in bands:
+            if len(band) == 1:
+                merged_blocks.append(band[0])
+                continue
+            
+            # Sort by x position within band
+            band_sorted = sorted(band, key=lambda b: b.bbox[0])
+            
+            # Merge blocks within band that are close together
+            current_group: List[Block] = [band_sorted[0]]
+            current_bbox = list(band_sorted[0].bbox)
+            
+            for block in band_sorted[1:]:
+                # Check horizontal gap
+                gap = block.bbox[0] - current_bbox[2]  # left edge - right edge of current
+                gap_threshold = width * 0.15  # 15% of page width
+                
+                # Also check if merging would create too wide a block
+                potential_width = block.bbox[2] - current_bbox[0]
+                
+                if gap < gap_threshold and potential_width < width * 0.95:
+                    # Merge into current group
+                    current_group.append(block)
+                    current_bbox[0] = min(current_bbox[0], block.bbox[0])
+                    current_bbox[1] = min(current_bbox[1], block.bbox[1])
+                    current_bbox[2] = max(current_bbox[2], block.bbox[2])
+                    current_bbox[3] = max(current_bbox[3], block.bbox[3])
+                else:
+                    # Save current group and start new one
+                    merged_blocks.append(self._create_merged_block(current_group, current_bbox))
+                    current_group = [block]
+                    current_bbox = list(block.bbox)
+            
+            # Add last group in band
+            merged_blocks.append(self._create_merged_block(current_group, current_bbox))
+        
+        # Step 3: Second pass - merge vertically adjacent sections with same type
+        # This creates larger sections like Reducto
+        final_blocks = self._merge_vertical_sections(merged_blocks, height)
+        
+        if len(final_blocks) < len(blocks):
+            print(f"  🔗 Section merge: {len(blocks)} → {len(final_blocks)} blocks (form mode)")
+        
+        return final_blocks
+    
+    def _create_merged_block(
+        self,
+        blocks: List[Block],
+        bbox: List[float]
+    ) -> Block:
+        """Create a merged block from a group of small blocks (tiny fragments only)."""
+        if len(blocks) == 1:
+            return blocks[0]
+        
+        # Use the most common type
+        type_counts = Counter(b.type for b in blocks)
+        primary_type = type_counts.most_common(1)[0][0]
+        
+        # Use highest confidence
+        main_block = max(blocks, key=lambda b: b.confidence)
+        
+        return Block(
+            id=main_block.id,
+            type=primary_type,
+            bbox=tuple(bbox),
+            page_id=main_block.page_id,
+            confidence=main_block.confidence,
+            metadata={
+                **main_block.metadata,
+                "merged_count": len(blocks)
+            }
+        )
+    
+    def _merge_vertical_sections(
+        self,
+        blocks: List[Block],
+        page_height: int
+    ) -> List[Block]:
+        """
+        Second pass: merge vertically adjacent sections of similar type.
+        Creates even larger sections for form documents.
+        """
+        if len(blocks) <= 1:
+            return blocks
+        
+        # Sort by y position
+        sorted_blocks = sorted(blocks, key=lambda b: b.bbox[1])
+        
+        merged = []
+        used = set()
+        
+        for i, block1 in enumerate(sorted_blocks):
+            if i in used:
+                continue
+            
+            current_blocks = [block1]
+            current_bbox = list(block1.bbox)
+            
+            # Look for blocks directly below this one
+            for j, block2 in enumerate(sorted_blocks[i+1:], start=i+1):
+                if j in used:
+                    continue
+                
+                # Check vertical gap
+                v_gap = block2.bbox[1] - current_bbox[3]
+                gap_threshold = page_height * 0.03  # 3% of page height
+                
+                # Check horizontal alignment (should overlap significantly)
+                h_overlap = min(current_bbox[2], block2.bbox[2]) - max(current_bbox[0], block2.bbox[0])
+                block1_width = current_bbox[2] - current_bbox[0]
+                block2_width = block2.bbox[2] - block2.bbox[0]
+                min_width = min(block1_width, block2_width)
+                
+                # Should overlap at least 50% in width
+                if v_gap < gap_threshold and h_overlap > min_width * 0.5:
+                    # Compatible types for merging
+                    compatible = (
+                        block1.type == block2.type or
+                        {block1.type, block2.type} <= {BlockType.FORM, BlockType.TABLE, BlockType.TEXT}
+                    )
+                    
+                    if compatible:
+                        current_blocks.append(block2)
+                        used.add(j)
+                        current_bbox[0] = min(current_bbox[0], block2.bbox[0])
+                        current_bbox[1] = min(current_bbox[1], block2.bbox[1])
+                        current_bbox[2] = max(current_bbox[2], block2.bbox[2])
+                        current_bbox[3] = max(current_bbox[3], block2.bbox[3])
+            
+            merged.append(self._create_merged_block(current_blocks, current_bbox))
+        
+        return merged
+    
+    def _merge_small_adjacent_blocks(
+        self,
+        blocks: List[Block],
+        image: np.ndarray,
+        distance_threshold: float = 20.0
+    ) -> List[Block]:
+        """
+        Conservative merging for non-form documents.
+        Only merges small adjacent blocks of the same type.
         """
         if len(blocks) <= 1:
             return blocks
@@ -2510,22 +3453,20 @@ class LayoutSegmenter:
                 # Vertical distance (for stacked blocks)
                 v_dist = max(y1_min - y2_max, y2_min - y1_max, 0)
                 
-                # Check if blocks are adjacent (close together) - MORE CONSERVATIVE
+                # Check if blocks are adjacent (close together)
                 is_adjacent = False
                 
                 # For vertical stacking (most common in forms)
-                if v_dist < distance_threshold and h_dist < width * 0.1:  # Within 10% of page width
-                    # Check if they overlap or are very close horizontally
+                if v_dist < distance_threshold and h_dist < width * 0.1:
                     if (x1_min <= x2_max + distance_threshold and x2_min <= x1_max + distance_threshold):
                         is_adjacent = True
-                # For horizontal side-by-side (less common)
-                elif h_dist < distance_threshold and v_dist < height * 0.05:  # Within 5% of page height
-                    # Check if they overlap or are very close vertically
+                # For horizontal side-by-side
+                elif h_dist < distance_threshold and v_dist < height * 0.05:
                     if (y1_min <= y2_max + distance_threshold and y2_min <= y1_max + distance_threshold):
                         is_adjacent = True
                 
                 if is_adjacent:
-                    # Check merged size - don't merge if result would be too large
+                    # Check merged size
                     merged_x0 = min(current_bbox[0], block2.bbox[0])
                     merged_y0 = min(current_bbox[1], block2.bbox[1])
                     merged_x1 = max(current_bbox[2], block2.bbox[2])
@@ -2533,7 +3474,6 @@ class LayoutSegmenter:
                     merged_area = (merged_x1 - merged_x0) * (merged_y1 - merged_y0)
                     merged_area_ratio = merged_area / page_area if page_area > 0 else 0
                     
-                    # Only merge if result is still small (<8% of page)
                     if merged_area_ratio < 0.08:
                         current_blocks.append(block2)
                         used.add(j)
@@ -2541,7 +3481,6 @@ class LayoutSegmenter:
             
             # Create merged block
             if len(current_blocks) > 1:
-                # Use the block with highest confidence
                 main_block = max(current_blocks, key=lambda b: b.confidence)
                 merged_block = Block(
                     id=main_block.id,
@@ -2682,6 +3621,12 @@ class LayoutSegmenter:
             List of blocks
         """
         # Detect layout with proper threshold (0.3) for quality detection using PubLayNet
+        # Ensemble: if GPU and detectron2+paddle available, aggregate both; else single model
+        if Config.USE_GPU and not self.use_heuristic and self.table_model:
+            primary = self.detect_layout(image, page_id)
+            paddle_blocks = self._detect_tables_with_model(image, page_id)
+            blocks = self._merge_detection_ensembles(primary, paddle_blocks)
+        else:
         blocks = self.detect_layout(image, page_id)
         analysis_layers = analysis_layers or {}
         
@@ -2704,19 +3649,18 @@ class LayoutSegmenter:
                     blocks.extend(new_tables)
                     print(f"  ➕ Added {len(new_tables)} table blocks from TableBank model")
         
-        # Light text augmentation ONLY if model missed significant text regions
-        # For form-heavy pages where geometric form detection is enabled, rely on the ML detections
-        # to avoid fragmenting fields into many small Text/Title blocks.
+        # Light text augmentation to catch missed text regions
+        # Always run this to ensure full page coverage (Gap Filling)
         heuristic_strictness = getattr(self, 'heuristic_strictness', 0.7)
-        apply_text_augmentation = not getattr(self, "enable_form_geometry", True)
-        if apply_text_augmentation:
             blocks = self._augment_text_with_heuristic(image, blocks, page_id, heuristic_strictness)
-        # Always allow texture-based reclassification, even when skipping augmentation
+        
+        # Always allow texture-based reclassification
         blocks = self._reclassify_blocks_by_texture(image, blocks, page_id, heuristic_strictness)
         
         orientation_hint = orientation
         if orientation_hint is None and analysis_layers:
             orientation_hint = analysis_layers.get("orientation")
+            
         if getattr(self, "enable_form_geometry", True):
             form_blocks = self._detect_form_geometry(
                 analysis_layers,
@@ -2735,33 +3679,37 @@ class LayoutSegmenter:
                     if block in form_blocks:
                         filtered_blocks.append(block)
                         continue
-                    if block.type in {BlockType.TEXT, BlockType.TITLE, BlockType.LIST}:
+                    
+                    # Check for containment in new form blocks
+                    is_contained = False
+                    for fb_bbox in form_bboxes:
+                        if self._calculate_iou(block.bbox, fb_bbox) > 0.7:
+                            # If contained, usually we drop it.
+                            # BUT for Reducto-style, if it's a distinct text block, we might want to keep it
+                            # and let the cleaner decide later.
+                            # For now, let's stick to suppressing tiny noise (tables are handled by cleaner)
+                    if block.type == BlockType.TABLE:
+                                # Let cleaner handle tables
+                                pass 
+                            else:
                         width = max(1.0, block.bbox[2] - block.bbox[0])
                         height = max(1.0, block.bbox[3] - block.bbox[1])
                         area_ratio = (width * height) / page_area
-                        if area_ratio <= 0.12:
-                            overlap = max(
-                                self._calculate_iou(block.bbox, fb_bbox)
-                                for fb_bbox in form_bboxes
-                            )
-                            if overlap >= 0.7:
-                                # Skip the ML block; the geometry-derived form block will cover OCR.
-                                continue
+                                if area_ratio < 0.05: # Only drop tiny blocks
+                                    is_contained = True
+                                    break
+                    
+                    if not is_contained:
                     filtered_blocks.append(block)
                 blocks = filtered_blocks
         
-        # Merge overlapping boxes first (conservative - only truly overlapping)
+        # Merge overlapping boxes first (conservative)
         if merge_boxes:
-            blocks = self.merge_overlapping_boxes(blocks, iou_threshold=0.5)  # Only merge if >50% overlap
+            blocks = self.merge_overlapping_boxes(blocks, iou_threshold=0.5)
         
-        # Merge ONLY small adjacent blocks (form fields, key-value pairs)
-        # This preserves large distinct blocks while grouping small related ones
+        # Clean up layout using Granularity Preference (Children explode Parent)
+        # This ensures we don't have giant containers hiding content
         blocks = self._merge_adjacent_blocks(blocks, image, distance_threshold=15.0)
-        
-        # Heuristic form detection - only add if form geometry detection is disabled
-        # This prevents double detection when form geometry is enabled
-        if not getattr(self, "enable_form_geometry", True):
-            blocks = self._apply_form_enhancement(image, blocks, page_id)
         
         # Heuristic figure detection - only add if not already detected
         blocks = self._detect_figures_heuristic(image, blocks, page_id)
@@ -2773,6 +3721,38 @@ class LayoutSegmenter:
         # Attach digital text word boxes when available to avoid redundant OCR
         if digital_words:
             blocks = self._attach_digital_text(blocks, digital_words)
+        
+        # Final Cleanup: Remove Text/Title blocks that are inside Form/Table blocks
+        # This prevents double-detection where a Form field also gets picked up as Text (tiny noise).
+        final_cleanup = []
+        form_table_bboxes = [b.bbox for b in blocks if b.type in {BlockType.FORM, BlockType.TABLE}]
+        
+        for block in blocks:
+            # Check containment
+            if block.type in {BlockType.TEXT, BlockType.TITLE}:
+                is_redundant = False
+                block_area = (block.bbox[2] - block.bbox[0]) * (block.bbox[3] - block.bbox[1])
+                if block_area <= 0: block_area = 1.0
+                
+                for parent_bbox in form_table_bboxes:
+                    # Check intersection
+                    x_left = max(block.bbox[0], parent_bbox[0])
+                    y_top = max(block.bbox[1], parent_bbox[1])
+                    x_right = min(block.bbox[2], parent_bbox[2])
+                    y_bottom = min(block.bbox[3], parent_bbox[3])
+                    
+                    if x_right > x_left and y_bottom > y_top:
+                        inter_area = (x_right - x_left) * (y_bottom - y_top)
+                        # If 80% of the text block is inside the form/table, kill it
+                        if inter_area / block_area > 0.8:
+                            is_redundant = True
+                            break
+                
+                if is_redundant:
+                    continue
+
+            final_cleanup.append(block)
+        blocks = final_cleanup
         
         # Tighten bounding boxes to remove blank space (but preserve block integrity)
         # Forms often have tight boxes and handwritten text; aggressively tightening can cut off content.
@@ -2788,6 +3768,9 @@ class LayoutSegmenter:
         normalized_template_hint = template_hint.lower() if template_hint else None
         if getattr(self, "enable_template_alignment", False) and normalized_template_hint:
             template_columns = self._apply_template_alignment(blocks, image.shape, normalized_template_hint)
+
+        # Apply template schema snapping (non-destructive; adds missing fields)
+        blocks = self._apply_template_schema(blocks, image.shape, normalized_template_hint)
 
         assign_columns_to_blocks(
             blocks,

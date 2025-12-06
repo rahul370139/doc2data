@@ -41,13 +41,33 @@ class PaddleOCRWrapper:
         start_time = time.time()
         
         try:
-            # Use minimal parameters compatible with PaddleOCR 3.x
+            # PaddleOCR 3.x uses 'device' parameter instead of 'use_gpu'
+            # device can be: 'gpu', 'cpu', 'gpu:0', etc.
             init_kwargs = {
                 "use_angle_cls": self.use_angle_cls,
                 "lang": self.lang,
             }
+            
+            # Try new API first (device), fall back to old API (use_gpu)
             if self.use_gpu:
-                init_kwargs["use_gpu"] = True
+                # Try to detect which API version we have
+                import inspect
+                try:
+                    sig = inspect.signature(PaddleOCR.__init__)
+                    params = sig.parameters
+                    if 'device' in params:
+                        init_kwargs["device"] = "gpu"
+                        print("  Using PaddleOCR 3.x API (device='gpu')")
+                    elif 'use_gpu' in params:
+                        init_kwargs["use_gpu"] = True
+                        print("  Using PaddleOCR 2.x API (use_gpu=True)")
+                    else:
+                        # Neither parameter found, let PaddleOCR auto-detect
+                        print("  Using PaddleOCR auto-detection for device")
+                except Exception:
+                    # Fall back to not specifying device - let PaddleOCR auto-detect
+                    print("  Using PaddleOCR default device detection")
+            
             self.ocr = PaddleOCR(**init_kwargs)
             init_time = time.time() - start_time
             print(f"✅ PaddleOCR initialized in {init_time:.2f}s")

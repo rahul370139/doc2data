@@ -1,0 +1,10 @@
+{
+  "fields": [
+    {"id": "patient_name", "label": "PATIENT NAME", "field_type": "generic", "bbox_norm": [0.05, 0.07, 0.55, 0.10]},
+    {"id": "patient_addr", "label": "PATIENT ADDRESS", "field_type": "generic", "bbox_norm": [0.05, 0.11, 0.55, 0.15]},
+    {"id": "patient_dob", "label": "DATE OF BIRTH", "field_type": "date", "bbox_norm": [0.58, 0.07, 0.70, 0.10]},
+    {"id": "patient_sex", "label": "SEX", "field_type": "generic", "bbox_norm": [0.71, 0.07, 0.78, 0.10]},
+    {"id": "provider_name", "label": "PROVIDER NAME", "field_type": "generic", "bbox_norm": [0.05, 0.18, 0.55, 0.22]},
+    {"id": "claim_amount", "label": "TOTAL CHARGES", "field_type": "money", "bbox_norm": [0.65, 0.80, 0.90, 0.83]}
+  ]
+}

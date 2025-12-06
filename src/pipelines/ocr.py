@@ -24,6 +24,11 @@ from src.pipelines.validators import (
     validate_field,
     guess_field_type,
 )
+from utils.corrections import log_correction, auto_tune_thresholds, load_threshold_overrides
+try:
+    from src.vlm.qwen_vl import QwenVLProcessor
+except Exception:
+    QwenVLProcessor = None
 
 
 def compute_label_field_cost(field_block: Block, label_block: Block) -> float:
@@ -64,7 +69,11 @@ class OCRPipeline:
         self.checkbox_off_threshold = 0.25
         self.assignment_mode = assignment_mode.lower() if assignment_mode and assignment_mode.lower() in {"greedy", "hungarian"} else "greedy"
         self.max_assignment_cost = 220.0
+        self.vlm = None
+        self.vlm_cache: Dict[str, Dict[str, Any]] = {}
         self.max_block_area_ratio = 0.55  # Skip very large regions for faster OCR
+        tuned = auto_tune_thresholds({"low_confidence_threshold": self.low_confidence_threshold})
+        self.low_confidence_threshold = tuned.get("low_confidence_threshold", self.low_confidence_threshold)
         
         if use_paddle:
             try:
@@ -86,6 +95,12 @@ class OCRPipeline:
                 self.tesseract_ocr = TesseractOCRWrapper()
             except Exception as e:
                 print(f"Warning: Tesseract fallback unavailable: {e}")
+        # Lazy-init VLM only if enabled and available
+        if Config.ENABLE_VLM and QwenVLProcessor:
+            try:
+                self.vlm = QwenVLProcessor(enabled=True)
+            except Exception:
+                self.vlm = None
     
     @staticmethod
     def _extract_page_image(page_entry: Any):
@@ -96,6 +111,13 @@ class OCRPipeline:
         if image is not None:
             return image
         return page_entry if hasattr(page_entry, "shape") else None
+
+    @staticmethod
+    def _hash_crop(crop: np.ndarray) -> str:
+        try:
+            return hashlib.md5(crop.tobytes()).hexdigest()
+        except Exception:
+            return ""
     
     @staticmethod
     def _get_page_height(page_entry: Any) -> int:
@@ -305,7 +327,7 @@ class OCRPipeline:
         # Combine text with proper spacing
         text = " ".join([wb.text for wb in adjusted_word_boxes])
         text = postprocess_text(text)
-        
+
         # General post-processing for better text quality (no hardcoded word fixes)
         if text:
             import re
@@ -338,15 +360,69 @@ class OCRPipeline:
             # Clean up multiple spaces
             text = re.sub(r' +', ' ', text)
             text = text.strip()
-        
+
+        # Tier-2: re-OCR for low-confidence
+        stats = {"avg_confidence": self._calculate_text_confidence(adjusted_word_boxes), "engine": engine}
+        avg_conf = stats["avg_confidence"]
+        if avg_conf < 0.75:
+            tier2_boxes: List[WordBox] = []
+            tier2_text = ""
+            try:
+                import cv2
+                h2, w2 = block_image.shape[:2]
+                scale = 1.8
+                enlarged = cv2.resize(block_image, (int(w2 * scale), int(h2 * scale)), interpolation=cv2.INTER_CUBIC)
+                gray = cv2.cvtColor(enlarged, cv2.COLOR_RGB2GRAY) if len(enlarged.shape) == 3 else enlarged
+                bin_img = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 5)
+                bin_img = cv2.cvtColor(bin_img, cv2.COLOR_GRAY2RGB)
+                if self.use_paddle and self.paddle_ocr:
+                    tier2_boxes = self.paddle_ocr.extract_text(bin_img)
+                elif self.tesseract_ocr:
+                    tier2_boxes = self.tesseract_ocr.extract_text(bin_img)
+                tier2_text = postprocess_text(" ".join([wb.text for wb in tier2_boxes]))
+            except Exception:
+                tier2_boxes = []
+            if tier2_boxes:
+                tier2_avg = self._calculate_text_confidence(tier2_boxes)
+                if tier2_avg > avg_conf:
+                    log_correction({
+                        "block_id": block.id,
+                        "source": "tier2_reocr",
+                        "old_confidence": avg_conf,
+                        "new_confidence": tier2_avg,
+                        "old_text": text,
+                        "new_text": tier2_text
+                    })
+                    adjusted_word_boxes = [
+                        WordBox(text=wb.text, bbox=(wb.bbox[0] + x0, wb.bbox[1] + y0, wb.bbox[2] + x0, wb.bbox[3] + y0), confidence=wb.confidence)
+                        for wb in tier2_boxes
+                    ]
+                    text = tier2_text
+                    avg_conf = tier2_avg
+                    stats = {"avg_confidence": avg_conf, "engine": engine + "+tier2"}
+                else:
+                    stats["tier2_avg"] = tier2_avg
+                    stats["tier2_text"] = tier2_text
+
+        # Tier-3: VLM assist for very low confidence (suggestion only)
+        if avg_conf < 0.5 and self.vlm is not None:
+            try:
+                vlm_result = self.vlm.process_table(block_image, None)
+                vlm_text = vlm_result.get("content") if isinstance(vlm_result, dict) else None
+                if vlm_text:
+                    stats["vlm_text"] = vlm_text
+                    stats["vlm_used"] = True
+            except Exception:
+                pass
+
         # Debug output
         if len(adjusted_word_boxes) == 0:
             print(f"⚠️ No text extracted from block {block.id} (type: {block.type.value}, size: {block_image.shape})")
         elif len(text) == 0:
             print(f"⚠️ Empty text after processing for block {block.id}")
-        
-        avg_conf = self._calculate_text_confidence(adjusted_word_boxes)
-        return text, adjusted_word_boxes, {"avg_confidence": avg_conf, "engine": engine}
+
+        stats["avg_confidence"] = avg_conf
+        return text, adjusted_word_boxes, stats
     
     def _extract_from_digital_layer(
         self,
@@ -544,6 +620,7 @@ class OCRPipeline:
                 page_id = getattr(page, "page_id", idx)
                 page_lookup[page_id] = page
         processed_blocks: List[Block] = []
+        vlm_candidates: List[Dict[str, Any]] = []
         for block in blocks:
             if block.type not in {BlockType.TEXT, BlockType.TITLE, BlockType.LIST, BlockType.FORM}:
                 processed_blocks.append(block)
@@ -585,17 +662,94 @@ class OCRPipeline:
             if not used_digital:
                 ocr_text, ocr_boxes, ocr_stats = self.extract_text_from_block(page_image, block, skip_ocr=False)
                 text, word_boxes, stats = ocr_text, ocr_boxes, ocr_stats
+                original_text = text
+                original_conf = stats.get("avg_confidence", 0.0)
                 need_fallback = stats.get("avg_confidence", 0.0) < self.low_confidence_threshold or not text.strip()
                 if need_fallback and self.tesseract_ocr:
                     fallback_text, fallback_boxes, fallback_stats = self._run_tesseract_fallback(block, page_image)
                     if fallback_boxes and fallback_stats.get("avg_confidence", 0.0) >= stats.get("avg_confidence", 0.0):
+                        if fallback_text and fallback_text != original_text:
+                            log_correction({
+                                "block_id": block.id,
+                                "source": "tesseract_fallback",
+                                "old_confidence": original_conf,
+                                "new_confidence": fallback_stats.get("avg_confidence", 0.0),
+                                "old_text": original_text,
+                                "new_text": fallback_text
+                            })
                         text, word_boxes, stats = fallback_text, fallback_boxes, fallback_stats
+                # Validator feedback: if field type is known and validator fails with low conf, flag for review
+                field_type = block.metadata.get("form_field", {}).get("field_type") if hasattr(block, "metadata") else None
+                if not field_type:
+                    field_type = guess_field_type(block.metadata.get("label_text")) if hasattr(block, "metadata") else None
+                if field_type and text.strip():
+                    passed, val_info = validate_field(field_type, text)
+                    stats["validator_passed"] = passed
+                    stats["validator_info"] = val_info
+                    if not passed and stats.get("avg_confidence", 0.0) < 0.75:
+                        stats["needs_review"] = True
+                        block.metadata["needs_review"] = True
             block.text = text
             block.word_boxes = word_boxes
             block.metadata = dict(block.metadata)
             block.metadata["ocr_confidence"] = stats.get("avg_confidence", 0.0)
             block.metadata["ocr_engine"] = stats.get("engine")
+            if stats.get("vlm_text"):
+                block.metadata["vlm_text"] = stats.get("vlm_text")
+            if stats.get("needs_review"):
+                block.metadata["needs_review"] = True
+            if self.vlm and Config.ENABLE_VLM and stats.get("avg_confidence", 0.0) < 0.5:
+                crop_info = self._crop_block_image(page_image, block, padding=6, max_area_ratio=self.max_block_area_ratio)
+                if crop_info is not None:
+                    crop_img, _, _ = crop_info
+                    crop_hash = self._hash_crop(crop_img)
+                    vlm_candidates.append({
+                        "hash": crop_hash or f"{block.id}",
+                        "image": crop_img,
+                        "block": block,
+                        "hint": block.text,
+                        "base_conf": stats.get("avg_confidence", 0.0)
+                    })
             processed_blocks.append(block)
+        # Batch VLM for low-confidence blocks (per-page cache)
+        if self.vlm and Config.ENABLE_VLM and vlm_candidates:
+            unique: Dict[str, Tuple[str, np.ndarray, Optional[str]]] = {}
+            for req in vlm_candidates:
+                if req["hash"] not in self.vlm_cache:
+                    unique[req["hash"]] = (req["hash"], req["image"], req.get("hint"))
+            vlm_results: Dict[str, Dict[str, Any]] = {}
+            if unique:
+                try:
+                    vlm_results = self.vlm.process_text_batch(list(unique.values()))
+                except Exception as exc:
+                    print(f"⚠ VLM batch failed: {exc}")
+                    vlm_results = {}
+                for key, res in vlm_results.items():
+                    self.vlm_cache[key] = res
+            for req in vlm_candidates:
+                res = self.vlm_cache.get(req["hash"])
+                if not res or not res.get("text"):
+                    continue
+                block = req["block"]
+                vlm_text = res.get("text", "")
+                vlm_conf = float(res.get("confidence", 0.0) or 0.0)
+                # Store metadata regardless; replace text only if it's empty or clearly better
+                block.metadata = dict(block.metadata)
+                block.metadata["vlm_text"] = vlm_text
+                block.metadata["vlm_confidence"] = vlm_conf
+                if (not block.text or req["base_conf"] < 0.4 or vlm_conf > (req["base_conf"] + 0.1)) and vlm_text:
+                    log_correction({
+                        "block_id": block.id,
+                        "source": "vlm_text",
+                        "old_text": block.text,
+                        "new_text": vlm_text,
+                        "old_confidence": req["base_conf"],
+                        "new_confidence": vlm_conf
+                    })
+                    block.text = vlm_text
+                    block.word_boxes = []
+                    block.metadata["ocr_confidence"] = max(req["base_conf"], vlm_conf)
+                    block.metadata["ocr_engine"] = block.metadata.get("ocr_engine", "vlm")
         self._associate_form_geometry(processed_blocks)
         return processed_blocks
 

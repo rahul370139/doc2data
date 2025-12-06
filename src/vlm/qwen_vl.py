@@ -3,7 +3,7 @@ Qwen-VL integration for figure/table processing via Ollama.
 """
 import base64
 import json
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import numpy as np
 from PIL import Image
 from io import BytesIO
@@ -60,6 +60,59 @@ class QwenVLProcessor:
         pil_image.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode()
         return img_str
+
+    def process_text(
+        self,
+        image: np.ndarray,
+        ocr_hint: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Lightweight OCR-style read using Qwen-VL. Returns a JSON dict with
+        {text, confidence}. Falls back to empty payload when disabled.
+        """
+        if not self.enabled:
+            return {"text": "", "confidence": 0.0}
+
+        image_b64 = self.image_to_base64(image)
+        prompt = """Read the text in this cropped field. Return ONLY JSON:
+{"text": "<string>", "confidence": 0.0-1.0}
+Use the confidence to indicate how sure you are."""
+        if ocr_hint:
+            prompt += f"\nOCR hint: {ocr_hint[:240]}"
+
+        try:
+            response = self.client.generate(
+                model=self.model,
+                prompt=prompt,
+                images=[image_b64],
+                format="json"
+            )
+            response_text = response.get("response", "")
+            json_start = response_text.find("{")
+            json_end = response_text.rfind("}") + 1
+            if json_start >= 0 and json_end > json_start:
+                json_str = response_text[json_start:json_end]
+                result = json.loads(json_str)
+                return {
+                    "text": result.get("text", ""),
+                    "confidence": float(result.get("confidence", 0.0))
+                }
+        except Exception as e:
+            print(f"⚠ VLM text read failed: {e}")
+        return {"text": "", "confidence": 0.0}
+
+    def process_text_batch(
+        self,
+        items: List[Tuple[str, np.ndarray, Optional[str]]]
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Process a list of (key, image, hint) tuples. Returns {key: {text, confidence}}.
+        Executes sequentially but keeps a consistent interface for batching.
+        """
+        results: Dict[str, Dict[str, Any]] = {}
+        for key, image, hint in items:
+            results[key] = self.process_text(image, hint)
+        return results
     
     def classify_figure(
         self,
@@ -263,4 +316,3 @@ Return ONLY a JSON object with this structure:
             "units": None,
             "confidence": 0.0
         }
-

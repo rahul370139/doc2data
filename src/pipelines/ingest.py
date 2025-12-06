@@ -303,7 +303,8 @@ def ingest_document(
     dpi: int = None,
     deskew: bool = None,
     denoise: bool = None,
-    use_pymupdf: bool = True
+    use_pymupdf: bool = True,
+    doc_type_hint: Optional[str] = None
 ) -> List[PageImage]:
     """
     Ingest document (PDF or image) and return list of PageImage objects.
@@ -326,6 +327,7 @@ def ingest_document(
         denoise = Config.DENOISE_ENABLED
     
     file_path = Path(file_path)
+    doc_type_hint = (doc_type_hint or Config.DOC_TYPE_HINT or "generic").lower()
     pages = []
     digital_text_data = None
     
@@ -363,7 +365,8 @@ def ingest_document(
         processed_image, preprocess_meta = preprocess_image(
             image,
             deskew=deskew,
-            denoise=denoise
+            denoise=denoise,
+            doc_type=doc_type_hint
         )
         
         analysis_layers = _generate_analysis_layers(processed_image)
@@ -372,6 +375,7 @@ def ingest_document(
         preprocess_meta["analysis_generated"] = bool(analysis_layers)
         preprocess_meta["orientation_estimate"] = orientation
         preprocess_meta["orientation_confidence"] = orientation_conf
+        preprocess_meta["doc_type_hint"] = doc_type_hint
         
         # Check if page has digital text and store word boxes if available
         has_digital_text = False

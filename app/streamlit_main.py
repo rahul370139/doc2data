@@ -683,99 +683,120 @@ def main():
             st.session_state.run_label = st.checkbox("3️⃣ Label", value=st.session_state.run_label, help="Semantic labeling via Ollama SLM")
             st.session_state.run_ocr_assemble = st.checkbox("4️⃣ OCR & Assemble", value=st.session_state.run_ocr_assemble, help="Extract text from blocks and build JSON/Markdown")
             
-            # Model settings
-            with st.expander("🔧 Model Settings", expanded=False):
-                from utils.config import Config as ConfigClass
-                default_model = (ConfigClass.LAYOUT_MODEL or "publaynet").lower()
-                model_options = ["publaynet", "prima", "docbank", "tablebank"]
-                selected_model = st.selectbox(
-                    "Layout Model",
-                    options=model_options,
-                    index=0 if default_model in model_options else 0,
-                    help="Choose LayoutParser model. DocBank/PRIMA may provide more granular detection."
-                )
-                st.session_state.layout_model_choice = selected_model
+            # Simplified Model Settings with Presets
+            with st.expander("🔧 Document Type & Settings", expanded=True):
+                # Document Type Presets - the main control
+                doc_type_presets = {
+                    "📋 Forms (CMS-1500, TCCC, etc.)": {
+                        "layout_model": "publaynet",
+                        "layout_threshold": 0.25,  # Higher for fewer, larger section-level blocks (like Reducto)
+                        "heuristic_strictness": 0.5,  # Less strict for forms
+                        "enable_form_geometry": True,  # Enables section-level merging
+                        "geometry_strictness": 0.4,  # Catch more checkboxes
+                        "linker_mode": "Hungarian",  # Better for dense forms
+                        "enable_slm": True,
+                    },
+                    "📄 Reports & Articles": {
+                        "layout_model": "publaynet",
+                        "layout_threshold": 0.30,  # Higher for clean docs
+                        "heuristic_strictness": 0.7,
+                        "enable_form_geometry": False,
+                        "geometry_strictness": 0.7,
+                        "linker_mode": "Greedy",
+                        "enable_slm": True,
+                    },
+                    "📊 Tables & Invoices": {
+                        "layout_model": "tablebank",
+                        "layout_threshold": 0.20,
+                        "heuristic_strictness": 0.6,
+                        "enable_form_geometry": False,
+                        "geometry_strictness": 0.6,
+                        "linker_mode": "Greedy",
+                        "enable_slm": True,
+                    },
+                    "🔧 Custom": {
+                        "layout_model": st.session_state.get("layout_model_choice", "publaynet"),
+                        "layout_threshold": st.session_state.get("layout_threshold", 0.25),
+                        "heuristic_strictness": st.session_state.get("heuristic_strictness", 0.7),
+                        "enable_form_geometry": st.session_state.get("enable_form_geometry", True),
+                        "geometry_strictness": st.session_state.get("geometry_strictness", 0.6),
+                        "linker_mode": st.session_state.get("linker_mode", "Hungarian"),
+                        "enable_slm": st.session_state.get("enable_slm", False),
+                    },
+                }
                 
-                det_threshold = st.slider(
-                    "ML Model Detection Threshold",
-                    min_value=0.05,
-                    max_value=0.50,
-                    value=st.session_state.get("layout_threshold", 0.25),
-                    step=0.05,
-                    help="Lower = more blocks detected (may include noise). Higher = fewer, higher-confidence blocks. Recommended: 0.15-0.25"
-                )
-                st.session_state.layout_threshold = det_threshold
+                preset_names = list(doc_type_presets.keys())
+                current_preset = st.session_state.get("doc_type_preset", "📋 Forms (CMS-1500, TCCC, etc.)")
+                preset_idx = preset_names.index(current_preset) if current_preset in preset_names else 0
                 
-                heuristic_strictness = st.slider(
-                    "Heuristic Strictness",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=st.session_state.get("heuristic_strictness", 0.7),
-                    step=0.1,
-                    help="Controls how strict heuristic rules are. Higher = fewer false positives (logos as FORM, # as LIST). Lower = more aggressive detection. Recommended: 0.6-0.8"
+                selected_preset = st.selectbox(
+                    "📑 Document Type",
+                    options=preset_names,
+                    index=preset_idx,
+                    help="Select your document type for optimal settings. Use 'Custom' for manual tuning."
                 )
-                st.session_state.heuristic_strictness = heuristic_strictness
-
-                linker_mode = st.selectbox(
-                    "Label↔Value Linking",
-                    options=["Greedy", "Hungarian"],
-                    index=0 if st.session_state.get("linker_mode", "Greedy") == "Greedy" else 1,
-                    help="Choose how form fields link to labels. Greedy uses nearest-neighbor; Hungarian finds the optimal one-to-one pairing (recommended for dense forms)."
+                st.session_state.doc_type_preset = selected_preset
+                
+                # Apply preset values
+                preset = doc_type_presets[selected_preset]
+                if selected_preset != "🔧 Custom":
+                    st.session_state.layout_model_choice = preset["layout_model"]
+                    st.session_state.layout_threshold = preset["layout_threshold"]
+                    st.session_state.heuristic_strictness = preset["heuristic_strictness"]
+                    st.session_state.enable_form_geometry = preset["enable_form_geometry"]
+                    st.session_state.geometry_strictness = preset["geometry_strictness"]
+                    st.session_state.linker_mode = preset["linker_mode"]
+                    if not st.session_state.enable_slm:
+                        st.session_state.enable_slm = preset["enable_slm"]
+                
+                # Show current settings (read-only unless Custom)
+                if selected_preset != "🔧 Custom":
+                    st.caption(f"**Model:** {preset['layout_model']} | **Threshold:** {preset['layout_threshold']:.2f} | **Forms:** {'✓' if preset['enable_form_geometry'] else '✗'}")
+                else:
+                    # Show manual controls only in Custom mode
+                    from utils.config import Config as ConfigClass
+                    model_options = ["publaynet", "prima", "docbank", "tablebank"]
+                    st.session_state.layout_model_choice = st.selectbox(
+                        "Layout Model", options=model_options,
+                        index=model_options.index(st.session_state.get("layout_model_choice", "publaynet")),
+                        help="Choose LayoutParser model"
                 )
-                st.session_state.linker_mode = linker_mode
-
-                enable_template_alignment = st.checkbox(
-                    "Enable Template Alignment",
-                    value=st.session_state.get("enable_template_alignment", False),
-                    help="Use template-specific column guides (CMS-1500, NCPDP, UB-04) to stabilize reading order."
+                    st.session_state.layout_threshold = st.slider(
+                        "Detection Threshold", 0.05, 0.50,
+                        st.session_state.get("layout_threshold", 0.25), 0.05,
+                        help="Lower = more blocks, Higher = fewer but more confident"
                 )
-                st.session_state.enable_template_alignment = enable_template_alignment
-                template_options = ["Auto", "CMS-1500", "NCPDP", "UB-04"]
-                saved_hint = st.session_state.get("template_hint", "Auto")
-                default_idx = template_options.index(saved_hint) if saved_hint in template_options else 0
-                template_choice = st.selectbox(
-                    "Template Hint",
-                    options=template_options,
-                    index=default_idx,
-                    disabled=not enable_template_alignment,
-                    help="Select a template profile (optional). 'Auto' lets the geometry pass infer columns dynamically."
+                    st.session_state.enable_form_geometry = st.checkbox(
+                        "Form Detection", st.session_state.get("enable_form_geometry", True),
+                        help="Enable checkbox and form field detection"
                 )
-                st.session_state.template_hint = template_choice
-
-                enable_form_geom = st.checkbox(
-                    "Enable Form Geometry Detection",
-                    value=st.session_state.get("enable_form_geometry", True),
-                    help="Detect checkboxes and form fields using geometry from the analysis masks. Disable if over-detecting on dense pages."
-                )
-                st.session_state.enable_form_geometry = enable_form_geom
-
-                geometry_strictness = st.slider(
-                    "Form Geometry Strictness",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=st.session_state.get("geometry_strictness", 0.7),
-                    step=0.1,
-                    help="Higher = fewer small boxes (checkbox noise). Lower = more candidates."
-                )
-                st.session_state.geometry_strictness = geometry_strictness
+                
+                st.divider()
+                
+                # AI Features (always visible)
+                ollama_ok = is_ollama_available()
+                if st.button("🔄 Recheck Ollama status", key="ollama_recheck"):
+                    ollama_ok = is_ollama_available()
+                status_icon = "🟢" if ollama_ok else "🔴"
+                st.caption(f"{status_icon} Ollama status: {'available' if ollama_ok else 'unreachable'}")
                 
                 slm_toggle = st.checkbox(
-                    "Enable Semantic Labeling (SLM)",
+                    "🤖 Enable AI Labeling (SLM)",
                     value=st.session_state.enable_slm,
-                    help="Uses Qwen2.5-7B-Instruct via Ollama to assign semantic roles. Requires Ollama server and model pull."
+                    help="Uses Qwen2.5-7B via Ollama to assign semantic roles"
                 )
-                if slm_toggle and not is_ollama_available():
-                    st.warning("⚠️ Ollama server not reachable. Run `ollama serve` and ensure the model is pulled before enabling SLM.")
+                if slm_toggle and not ollama_ok:
+                    st.warning("⚠️ Ollama not reachable. SLM disabled.")
                     slm_toggle = False
                 st.session_state.enable_slm = slm_toggle
                 
                 vlm_toggle = st.checkbox(
-                    "Enable Qwen-VL for tables/figures (VLM)",
+                    "🖼️ Enable Vision AI (VLM)",
                     value=st.session_state.enable_vlm,
-                    help="Uses Qwen-VL via Ollama for advanced table/figure processing. Requires Ollama server and qwen-vl model."
+                    help="Uses Qwen-VL for table/figure analysis"
                 )
-                if vlm_toggle and not is_ollama_available():
-                    st.warning("⚠️ Ollama server not reachable. Run `ollama serve` and ensure qwen-vl is pulled before enabling VLM.")
+                if vlm_toggle and not ollama_ok:
+                    st.warning("⚠️ Ollama not reachable. VLM disabled.")
                     vlm_toggle = False
                 st.session_state.enable_vlm = vlm_toggle
             
@@ -899,7 +920,7 @@ def main():
     if run_ingest:
         with st.spinner("🔄 Ingesting document..."):
             try:
-                pages = ingest_document(str(document_path))
+                pages = ingest_document(str(document_path), doc_type_hint=st.session_state.get("template_hint", None))
                 st.session_state.pages = pages
                 st.session_state.blocks = []
                 st.session_state.document = None

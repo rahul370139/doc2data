@@ -20,6 +20,7 @@ class FigureProcessor:
         vlm_enabled = Config.ENABLE_VLM if enable_vlm is None else enable_vlm
         self.qwen_vl = QwenVLProcessor(enabled=vlm_enabled)
         self.paddle_ocr = None
+        self.vlm_cache: Dict[str, Dict[str, Any]] = {}
         try:
             self.paddle_ocr = PaddleOCRWrapper()
         except:
@@ -59,9 +60,17 @@ class FigureProcessor:
             )
         
         figure_image = page_image[y0:y1, x0:x1]
+        cache_key = None
+        try:
+            cache_key = str(hash(figure_image.tobytes()))
+        except Exception:
+            cache_key = None
         
-        # Step 1: Classify figure type using Qwen-VL
-        classification = self.qwen_vl.classify_figure(figure_image, caption)
+        # Step 1: Classify figure type using Qwen-VL (cached)
+        if cache_key and cache_key in self.vlm_cache:
+            classification = self.vlm_cache[cache_key].get("classification", {})
+        else:
+            classification = self.qwen_vl.classify_figure(figure_image, caption)
         figure_type = classification.get("figure_type", "other")
         confidence = classification.get("confidence", 0.5)
         
@@ -79,10 +88,16 @@ class FigureProcessor:
         # Process based on figure type
         if figure_type in ["bar", "line", "pie", "scatter"]:
             # Chart - extract data
-            chart_data = self.qwen_vl.extract_chart_data(figure_image, figure_type)
+            if cache_key and cache_key in self.vlm_cache and "chart_data" in self.vlm_cache[cache_key]:
+                chart_data = self.vlm_cache[cache_key]["chart_data"]
+            else:
+                chart_data = self.qwen_vl.extract_chart_data(figure_image, figure_type)
             figure_block.series = chart_data.get("series", [])
             figure_block.metadata["axes"] = chart_data.get("axes", {})
             figure_block.metadata["units"] = chart_data.get("units", {})
+            if cache_key is not None:
+                self.vlm_cache.setdefault(cache_key, {})["classification"] = classification
+                self.vlm_cache[cache_key]["chart_data"] = chart_data
         else:
             # Non-chart image
             # Store thumbnail path
@@ -98,11 +113,32 @@ class FigureProcessor:
                         figure_block.alt_text = embedded_text
                 except:
                     pass
+            if cache_key is not None:
+                self.vlm_cache.setdefault(cache_key, {})["classification"] = classification
         
         # Add citations
         figure_block.add_citation(block.page_id, block.bbox)
         
         return figure_block
+
+    def process_figure_blocks_batch(
+        self,
+        blocks: List[Block],
+        page_image: np.ndarray,
+        captions: Optional[Dict[str, str]] = None
+    ) -> List[FigureBlock]:
+        """Batch-friendly wrapper leveraging the shared cache."""
+        processed: List[FigureBlock] = []
+        captions = captions or {}
+        for blk in blocks:
+            processed.append(
+                self.process_figure_block(
+                    blk,
+                    page_image,
+                    caption=captions.get(blk.id)
+                )
+            )
+        return processed
     
     def _save_thumbnail(
         self,

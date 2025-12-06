@@ -1,0 +1,44 @@
+# Core dependencies for Docker (PyTorch/CUDA provided by base image)
+
+# PDF and image processing
+PyMuPDF>=1.23.0
+pdf2image>=1.16.3
+Pillow  # Let pip resolve version based on other deps
+opencv-python>=4.8.0
+
+# Layout detection
+layoutparser>=0.3.4
+# detectron2 installed manually in Dockerfile
+# torch/torchvision provided by base image
+
+# OCR
+# paddlepaddle-gpu installed manually or via separate command
+paddleocr>=2.7.0
+pytesseract>=0.3.10
+
+# LLM/VLM (Ollama client)
+ollama>=0.1.0
+requests>=2.31.0
+
+# Table processing
+transformers>=4.30.0
+timm>=0.9.0  # Required for Table Transformer backbone
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+streamlit>=1.28.0
+
+# Utilities
+numpy>=1.24.0
+scipy>=1.10.0
+pandas  # Let pip resolve version
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Logging
+loguru>=0.7.0

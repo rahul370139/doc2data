@@ -72,34 +72,59 @@ class DocumentAssembler:
                 text_by_page.setdefault(block.page_id, []).append(block)
         
         enriched: List[Block] = []
-        for block in blocks:
-            page = page_lookup.get(block.page_id)
-            if block.type == BlockType.TABLE and self.table_processor and page and not block.metadata.get("table_processed"):
-                processed = self.table_processor.process_table_block(
-                    block,
+        # Batch process per page for fewer VLM calls
+        for page_id, page in page_lookup.items():
+            page_blocks = [b for b in blocks if b.page_id == page_id]
+            tables = [
+                b for b in page_blocks
+                if b.type == BlockType.TABLE and self.table_processor and not b.metadata.get("table_processed")
+            ]
+            figures = [
+                b for b in page_blocks
+                if b.type == BlockType.FIGURE and self.figure_processor and not b.metadata.get("figure_processed")
+            ]
+
+            table_results: Dict[str, Block] = {}
+            if tables:
+                processed_tables = self.table_processor.process_table_blocks_batch(
+                    tables,
                     page.image,
                     use_vlm=self.use_vlm
                 )
-                processed.metadata = dict(processed.metadata)
-                processed.metadata["table_processed"] = True
-                enriched.append(processed)
-            elif block.type == BlockType.FIGURE and self.figure_processor and page and not block.metadata.get("figure_processed"):
-                caption = block.metadata.get("caption_candidate_text")
-                if not caption:
-                    caption = self.figure_processor.find_caption_for_figure(
-                        block,
-                        text_by_page.get(block.page_id, [])
-                    )
-                processed = self.figure_processor.process_figure_block(
-                    block,
+                for t in processed_tables:
+                    t.metadata = dict(t.metadata)
+                    t.metadata["table_processed"] = True
+                    table_results[t.id] = t
+
+            figure_results: Dict[str, Block] = {}
+            if figures:
+                caption_map: Dict[str, str] = {}
+                for f in figures:
+                    caption = f.metadata.get("caption_candidate_text")
+                    if not caption:
+                        caption = self.figure_processor.find_caption_for_figure(
+                            f,
+                            text_by_page.get(f.page_id, [])
+                        )
+                    if caption:
+                        caption_map[f.id] = caption
+                processed_figures = self.figure_processor.process_figure_blocks_batch(
+                    figures,
                     page.image,
-                    caption=caption
+                    captions=caption_map
                 )
-                processed.metadata = dict(processed.metadata)
-                processed.metadata["figure_processed"] = True
-                enriched.append(processed)
-            else:
-                enriched.append(block)
+                for fig in processed_figures:
+                    fig.metadata = dict(fig.metadata)
+                    fig.metadata["figure_processed"] = True
+                    figure_results[fig.id] = fig
+
+            for b in page_blocks:
+                if b.id in table_results:
+                    enriched.append(table_results[b.id])
+                elif b.id in figure_results:
+                    enriched.append(figure_results[b.id])
+                else:
+                    enriched.append(b)
         return enriched
     
     def build_hierarchy(self, blocks: List[Block]) -> List[Block]:

@@ -94,7 +94,7 @@ def _load_template_schema(template_hint: Optional[str]) -> Optional[Dict[str, An
         return None
     import json
     slug = template_hint.lower()
-    schema_path = Path(__file__).parent.parent / "data" / "schemas" / f"{slug}.json"
+    schema_path = Config.PROJECT_ROOT / "data" / "schemas" / f"{slug}.json"
     if not schema_path.exists():
         return None
     try:
@@ -363,7 +363,7 @@ class LayoutSegmenter:
                                 device=detectron_device
                             )
                         else:
-                        model = lp.Detectron2LayoutModel(config_uri, device=detectron_device)
+                            model = lp.Detectron2LayoutModel(config_uri, device=detectron_device)
                     except TypeError:
                         # Older API without model_path
                         model = lp.Detectron2LayoutModel(config_uri)
@@ -1587,6 +1587,7 @@ class LayoutSegmenter:
             abs_bbox = _norm_to_abs_bbox(norm_bbox, width, height)
             field_type = field.get("field_type")
             label_text = field.get("label")
+            schema_id = field.get("id")
             # Find overlapping form block
             best = None
             best_iou = 0.0
@@ -1604,6 +1605,7 @@ class LayoutSegmenter:
                 best.metadata["form_field"].update({
                     "field_type": field_type,
                     "label_text": label_text,
+                    "schema_id": schema_id,
                 })
                 best.metadata["field_score"] = _compute_field_score(best)
             else:
@@ -1620,6 +1622,7 @@ class LayoutSegmenter:
                         "form_field": {
                             "field_type": field_type,
                             "label_text": label_text,
+                            "schema_id": schema_id,
                         }
                     }
                 )
@@ -3627,7 +3630,7 @@ class LayoutSegmenter:
             paddle_blocks = self._detect_tables_with_model(image, page_id)
             blocks = self._merge_detection_ensembles(primary, paddle_blocks)
         else:
-        blocks = self.detect_layout(image, page_id)
+            blocks = self.detect_layout(image, page_id)
         analysis_layers = analysis_layers or {}
         
         # Set page IDs
@@ -3652,7 +3655,7 @@ class LayoutSegmenter:
         # Light text augmentation to catch missed text regions
         # Always run this to ensure full page coverage (Gap Filling)
         heuristic_strictness = getattr(self, 'heuristic_strictness', 0.7)
-            blocks = self._augment_text_with_heuristic(image, blocks, page_id, heuristic_strictness)
+        blocks = self._augment_text_with_heuristic(image, blocks, page_id, heuristic_strictness)
         
         # Always allow texture-based reclassification
         blocks = self._reclassify_blocks_by_texture(image, blocks, page_id, heuristic_strictness)
@@ -3683,24 +3686,27 @@ class LayoutSegmenter:
                     # Check for containment in new form blocks
                     is_contained = False
                     for fb_bbox in form_bboxes:
-                        if self._calculate_iou(block.bbox, fb_bbox) > 0.7:
+                        iou = self._calculate_iou(block.bbox, fb_bbox)
+                        if iou > 0.7:
                             # If contained, usually we drop it.
                             # BUT for Reducto-style, if it's a distinct text block, we might want to keep it
                             # and let the cleaner decide later.
                             # For now, let's stick to suppressing tiny noise (tables are handled by cleaner)
-                    if block.type == BlockType.TABLE:
-                                # Let cleaner handle tables
-                                pass 
+                            if block.type == BlockType.TABLE:
+                                # Let cleaner handle tables - don't mark as contained
+                                pass
                             else:
-                        width = max(1.0, block.bbox[2] - block.bbox[0])
-                        height = max(1.0, block.bbox[3] - block.bbox[1])
-                        area_ratio = (width * height) / page_area
-                                if area_ratio < 0.05: # Only drop tiny blocks
+                                # For non-table blocks, check if they're tiny enough to suppress
+                                width = max(1.0, block.bbox[2] - block.bbox[0])
+                                height = max(1.0, block.bbox[3] - block.bbox[1])
+                                area_ratio = (width * height) / page_area
+                                if area_ratio < 0.05:  # Only drop tiny blocks (< 5% of page)
                                     is_contained = True
                                     break
                     
                     if not is_contained:
-                    filtered_blocks.append(block)
+                        filtered_blocks.append(block)
+                
                 blocks = filtered_blocks
         
         # Merge overlapping boxes first (conservative)

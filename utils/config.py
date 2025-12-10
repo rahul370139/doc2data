@@ -14,12 +14,12 @@ load_dotenv()
 class Config:
     """Configuration class for application settings."""
     
-    # Ollama Configuration (stubbed for local testing)
+    # Ollama Configuration
     OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "localhost:11434")
-    OLLAMA_MODEL_SLM: str = os.getenv("OLLAMA_MODEL_SLM", "qwen2.5:7b-instruct")
-    OLLAMA_MODEL_VLM: str = os.getenv("OLLAMA_MODEL_VLM", "minicpm-v")
-    ENABLE_SLM: bool = os.getenv("ENABLE_SLM", "false").lower() == "true"
-    ENABLE_VLM: bool = os.getenv("ENABLE_VLM", "false").lower() == "true"
+    OLLAMA_MODEL_SLM: str = os.getenv("OLLAMA_MODEL_SLM", "llama3.2:3b")  # Fast, good for structured extraction
+    OLLAMA_MODEL_VLM: str = os.getenv("OLLAMA_MODEL_VLM", "llama3.2:3b")  # Fallback to SLM if no VLM
+    ENABLE_SLM: bool = os.getenv("ENABLE_SLM", "true").lower() == "true"  # Enabled by default
+    ENABLE_VLM: bool = os.getenv("ENABLE_VLM", "true").lower() == "true"  # Enabled by default
     
     # Model Paths
     MODEL_CACHE_DIR: Path = Path(os.getenv("MODEL_CACHE_DIR", "models/weights"))

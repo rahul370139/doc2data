@@ -221,7 +221,65 @@ class DocumentAssembler:
         form_fields, checkboxes = self._collect_form_outputs(document.blocks)
         enhanced_json["form_fields"] = form_fields
         enhanced_json["checkboxes"] = checkboxes
+        enhanced_json["filled_schema"] = self.export_filled_schema(document.blocks)
         return enhanced_json
+
+    def export_filled_schema(self, blocks: List[Block]) -> Dict[str, Any]:
+        """
+        Export filled schema where keys are schema IDs and values are extracted text/state.
+        
+        Args:
+            blocks: List of blocks
+            
+        Returns:
+            Dictionary mapping schema IDs to values
+        """
+        filled = {}
+        
+        for block in blocks:
+            meta = getattr(block, "metadata", {}) or {}
+            
+            # Check checkboxes
+            if meta.get("checkbox_state"):
+                # Check if this checkbox is linked to a schema field
+                # Checkboxes might be linked to a label that has a schema ID?
+                # Or the checkbox itself might have been snapped to a schema field
+                form_meta = meta.get("form_field")
+                schema_id = form_meta.get("schema_id") if form_meta else None
+                
+                # If check box doesn't have schema_id directly, maybe it's in the label?
+                if not schema_id:
+                    # This logic depends on how schema is applied to checkboxes
+                    # segment.py _apply_template_schema handles FORM blocks
+                    # If a checkbox is detected as FORM, it might get schema_id
+                    pass
+                
+                if schema_id:
+                    state = meta.get("checkbox_state")
+                    # Map to boolean or string
+                    value = True if state == "checked" else False
+                    filled[schema_id] = value
+                elif meta.get("label_text"):
+                    # Fallback to label text as key if no schema ID
+                    key = meta.get("label_text")
+                    state = meta.get("checkbox_state")
+                    filled[key] = state
+                continue
+            
+            # Check form fields
+            form_meta = meta.get("form_field")
+            if form_meta:
+                schema_id = form_meta.get("schema_id")
+                value = form_meta.get("value_text")
+                
+                if schema_id:
+                    filled[schema_id] = value
+                elif form_meta.get("label_text"):
+                    # Fallback to label text
+                    key = form_meta.get("label_text")
+                    filled[key] = value
+                    
+        return filled
 
     def _collect_form_outputs(self, blocks: List[Block]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         form_fields: List[Dict[str, Any]] = []

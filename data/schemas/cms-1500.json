@@ -1,172 +1,309 @@
 {
+  "form_type": "CMS-1500",
+  "description": "Health Insurance Claim Form - Patient filled data extraction",
+  "version": "02/12",
+  "notes": "Bounding boxes calibrated from actual PDF text layer positions. Normalized [0-1] for 2550x3300 pixels at 300 DPI.",
   "fields": [
     {
-      "id": "1",
-      "label": "Medicare",
-      "field_type": "checkbox",
-      "bbox_norm": [0.022, 0.070, 0.055, 0.090]
-    },
-    {
       "id": "1a_insured_id",
-      "label": "INSURED'S ID NUMBER",
-      "field_type": "member_id",
-      "bbox_norm": [0.702, 0.070, 0.965, 0.090]
+      "label": "INSURED'S I.D. NUMBER",
+      "field_type": "text",
+      "bbox_norm": [0.60, 0.125, 0.72, 0.155],
+      "description": "Insured's ID number (e.g., ID10-45678)"
     },
     {
       "id": "2_patient_name",
       "label": "PATIENT'S NAME",
-      "field_type": "generic",
-      "bbox_norm": [0.040, 0.110, 0.470, 0.132]
+      "field_type": "text",
+      "bbox_norm": [0.035, 0.155, 0.165, 0.185],
+      "description": "Patient name (Last, First)"
     },
     {
-      "id": "3_patient_birth",
-      "label": "PATIENT BIRTH DATE",
+      "id": "3_patient_dob",
+      "label": "PATIENT'S BIRTH DATE",
       "field_type": "date",
-      "bbox_norm": [0.038, 0.150, 0.250, 0.172]
+      "bbox_norm": [0.385, 0.155, 0.48, 0.185],
+      "description": "Patient DOB (MM DD YY)"
     },
     {
       "id": "3_patient_sex",
       "label": "SEX",
-      "field_type": "generic",
-      "bbox_norm": [0.258, 0.150, 0.320, 0.172]
+      "field_type": "checkbox",
+      "bbox_norm": [0.295, 0.155, 0.32, 0.185],
+      "description": "Patient sex M/F"
     },
     {
       "id": "4_insured_name",
       "label": "INSURED'S NAME",
-      "field_type": "generic",
-      "bbox_norm": [0.510, 0.110, 0.940, 0.132]
+      "field_type": "text",
+      "bbox_norm": [0.60, 0.155, 0.74, 0.185],
+      "description": "Insured's name (Last, First)"
     },
     {
       "id": "5_patient_address",
       "label": "PATIENT'S ADDRESS",
-      "field_type": "generic",
-      "bbox_norm": [0.040, 0.190, 0.470, 0.240]
+      "field_type": "text",
+      "bbox_norm": [0.035, 0.185, 0.22, 0.215],
+      "description": "Patient street address"
     },
     {
       "id": "7_insured_address",
       "label": "INSURED'S ADDRESS",
-      "field_type": "generic",
-      "bbox_norm": [0.510, 0.190, 0.940, 0.240]
+      "field_type": "text",
+      "bbox_norm": [0.60, 0.185, 0.80, 0.215],
+      "description": "Insured street address"
     },
     {
-      "id": "9_other_insured",
+      "id": "5_patient_city",
+      "label": "CITY",
+      "field_type": "text",
+      "bbox_norm": [0.035, 0.215, 0.145, 0.245],
+      "description": "Patient city"
+    },
+    {
+      "id": "5_patient_state",
+      "label": "STATE",
+      "field_type": "text",
+      "bbox_norm": [0.16, 0.215, 0.20, 0.245],
+      "description": "Patient state"
+    },
+    {
+      "id": "7_insured_city",
+      "label": "CITY",
+      "field_type": "text",
+      "bbox_norm": [0.60, 0.215, 0.68, 0.245],
+      "description": "Insured city"
+    },
+    {
+      "id": "7_insured_state",
+      "label": "STATE",
+      "field_type": "text",
+      "bbox_norm": [0.90, 0.215, 0.96, 0.245],
+      "description": "Insured state"
+    },
+    {
+      "id": "5_patient_zip",
+      "label": "ZIP CODE",
+      "field_type": "text",
+      "bbox_norm": [0.035, 0.248, 0.095, 0.278],
+      "description": "Patient ZIP code"
+    },
+    {
+      "id": "5_patient_phone",
+      "label": "TELEPHONE",
+      "field_type": "phone",
+      "bbox_norm": [0.24, 0.248, 0.32, 0.278],
+      "description": "Patient phone number"
+    },
+    {
+      "id": "7_insured_zip",
+      "label": "ZIP CODE",
+      "field_type": "text",
+      "bbox_norm": [0.60, 0.248, 0.66, 0.278],
+      "description": "Insured ZIP code"
+    },
+    {
+      "id": "7_insured_phone",
+      "label": "TELEPHONE",
+      "field_type": "phone",
+      "bbox_norm": [0.82, 0.248, 0.91, 0.278],
+      "description": "Insured phone number"
+    },
+    {
+      "id": "9_other_insured_name",
       "label": "OTHER INSURED'S NAME",
-      "field_type": "generic",
-      "bbox_norm": [0.040, 0.270, 0.470, 0.292]
+      "field_type": "text",
+      "bbox_norm": [0.035, 0.280, 0.22, 0.310],
+      "description": "Other insured name"
     },
     {
-      "id": "11_insured_policy",
-      "label": "INSURED'S POLICY OR FECA NUMBER",
-      "field_type": "member_id",
-      "bbox_norm": [0.510, 0.270, 0.940, 0.292]
+      "id": "9a_other_insured_policy",
+      "label": "OTHER INSURED'S POLICY NUMBER",
+      "field_type": "text",
+      "bbox_norm": [0.035, 0.305, 0.22, 0.335],
+      "description": "Other insured policy/group number"
+    },
+    {
+      "id": "11_insured_policy_group",
+      "label": "INSURED'S POLICY GROUP OR FECA NUMBER",
+      "field_type": "text",
+      "bbox_norm": [0.60, 0.280, 0.82, 0.310],
+      "description": "Insured policy/group/FECA number"
+    },
+    {
+      "id": "11a_insured_dob",
+      "label": "INSURED'S DATE OF BIRTH",
+      "field_type": "date",
+      "bbox_norm": [0.60, 0.305, 0.75, 0.335],
+      "description": "Insured DOB"
+    },
+    {
+      "id": "11a_insured_sex",
+      "label": "SEX",
+      "field_type": "checkbox",
+      "bbox_norm": [0.75, 0.305, 0.78, 0.335],
+      "description": "Insured sex M/F"
+    },
+    {
+      "id": "11c_insurance_plan_name",
+      "label": "INSURANCE PLAN NAME",
+      "field_type": "text",
+      "bbox_norm": [0.60, 0.355, 0.90, 0.385],
+      "description": "Insurance plan name"
     },
     {
       "id": "12_patient_signature",
-      "label": "PATIENT'S SIGNATURE",
-      "field_type": "generic",
-      "bbox_norm": [0.040, 0.320, 0.470, 0.350]
+      "label": "PATIENT SIGNATURE",
+      "field_type": "signature",
+      "bbox_norm": [0.035, 0.405, 0.25, 0.445],
+      "description": "Patient signature"
+    },
+    {
+      "id": "12_signature_date",
+      "label": "DATE",
+      "field_type": "date",
+      "bbox_norm": [0.26, 0.405, 0.37, 0.445],
+      "description": "Signature date"
     },
     {
       "id": "13_insured_signature",
       "label": "INSURED'S SIGNATURE",
-      "field_type": "generic",
-      "bbox_norm": [0.510, 0.320, 0.940, 0.350]
+      "field_type": "signature",
+      "bbox_norm": [0.60, 0.405, 0.90, 0.445],
+      "description": "Insured signature"
     },
     {
-      "id": "14_date_current_illness",
-      "label": "DATE OF CURRENT ILLNESS",
-      "field_type": "date",
-      "bbox_norm": [0.040, 0.365, 0.220, 0.387]
-    },
-    {
-      "id": "15_other_date",
-      "label": "OTHER DATE",
-      "field_type": "date",
-      "bbox_norm": [0.225, 0.365, 0.400, 0.387]
-    },
-    {
-      "id": "16_dates_unable_to_work",
-      "label": "DATES PATIENT UNABLE TO WORK",
-      "field_type": "date",
-      "bbox_norm": [0.405, 0.365, 0.640, 0.387]
-    },
-    {
-      "id": "17_referring_provider",
-      "label": "NAME OF REFERRING PROVIDER",
-      "field_type": "generic",
-      "bbox_norm": [0.040, 0.405, 0.270, 0.430]
+      "id": "19_additional_claim_info",
+      "label": "ADDITIONAL CLAIM INFORMATION",
+      "field_type": "text",
+      "bbox_norm": [0.035, 0.550, 0.85, 0.575],
+      "description": "Box 19 additional claim info"
     },
     {
       "id": "20_outside_lab",
       "label": "OUTSIDE LAB",
+      "field_type": "checkbox",
+      "bbox_norm": [0.85, 0.545, 0.90, 0.575],
+      "description": "Yes/No for outside lab"
+    },
+    {
+      "id": "20_charges",
+      "label": "$ CHARGES",
       "field_type": "money",
-      "bbox_norm": [0.675, 0.405, 0.820, 0.430]
+      "bbox_norm": [0.82, 0.545, 0.88, 0.575],
+      "description": "Outside lab charges"
     },
     {
-      "id": "21_diagnosis",
-      "label": "DIAGNOSIS",
-      "field_type": "generic",
-      "bbox_norm": [0.040, 0.440, 0.940, 0.510]
+      "id": "21_diagnosis_a",
+      "label": "DIAGNOSIS A",
+      "field_type": "icd10",
+      "bbox_norm": [0.035, 0.582, 0.17, 0.610],
+      "description": "ICD-10 diagnosis code A"
     },
     {
-      "id": "22_resubmission",
-      "label": "RESUBMISSION",
-      "field_type": "generic",
-      "bbox_norm": [0.040, 0.520, 0.300, 0.545]
+      "id": "21_diagnosis_b",
+      "label": "DIAGNOSIS B",
+      "field_type": "icd10",
+      "bbox_norm": [0.17, 0.582, 0.30, 0.610],
+      "description": "ICD-10 diagnosis code B"
     },
     {
-      "id": "23_prior_auth",
-      "label": "PRIOR AUTHORIZATION NUMBER",
-      "field_type": "generic",
-      "bbox_norm": [0.310, 0.520, 0.540, 0.545]
-    },
-    {
-      "id": "24_services",
-      "label": "SERVICES RENDERED",
+      "id": "24_service_lines",
+      "label": "SERVICE LINES TABLE",
       "field_type": "table",
-      "bbox_norm": [0.040, 0.555, 0.940, 0.705]
+      "bbox_norm": [0.035, 0.625, 0.97, 0.810],
+      "description": "Service lines table (dates, procedures, charges)"
     },
     {
       "id": "25_federal_tax_id",
-      "label": "FEDERAL TAX ID",
-      "field_type": "member_id",
-      "bbox_norm": [0.040, 0.720, 0.200, 0.745]
+      "label": "FEDERAL TAX I.D. NUMBER",
+      "field_type": "tax_id",
+      "bbox_norm": [0.035, 0.820, 0.14, 0.850],
+      "description": "Provider federal tax ID"
     },
     {
       "id": "26_patient_account",
-      "label": "PATIENT ACCOUNT NO",
-      "field_type": "generic",
-      "bbox_norm": [0.210, 0.720, 0.400, 0.745]
+      "label": "PATIENT'S ACCOUNT NO.",
+      "field_type": "text",
+      "bbox_norm": [0.15, 0.820, 0.26, 0.850],
+      "description": "Patient account number"
+    },
+    {
+      "id": "27_accept_assignment",
+      "label": "ACCEPT ASSIGNMENT",
+      "field_type": "checkbox",
+      "bbox_norm": [0.27, 0.820, 0.35, 0.850],
+      "description": "Yes/No for accept assignment"
     },
     {
       "id": "28_total_charge",
       "label": "TOTAL CHARGE",
       "field_type": "money",
-      "bbox_norm": [0.410, 0.720, 0.560, 0.745]
+      "bbox_norm": [0.36, 0.820, 0.45, 0.850],
+      "description": "Total charges"
     },
     {
       "id": "29_amount_paid",
       "label": "AMOUNT PAID",
       "field_type": "money",
-      "bbox_norm": [0.570, 0.720, 0.720, 0.745]
+      "bbox_norm": [0.46, 0.820, 0.54, 0.850],
+      "description": "Amount paid"
     },
     {
-      "id": "31_signature_physician",
+      "id": "31_physician_signature",
       "label": "SIGNATURE OF PHYSICIAN",
-      "field_type": "generic",
-      "bbox_norm": [0.040, 0.760, 0.470, 0.800]
+      "field_type": "signature",
+      "bbox_norm": [0.035, 0.860, 0.25, 0.920],
+      "description": "Physician signature"
     },
     {
-      "id": "32_service_facility",
-      "label": "SERVICE FACILITY LOCATION",
-      "field_type": "generic",
-      "bbox_norm": [0.040, 0.805, 0.470, 0.845]
+      "id": "32_service_facility_name",
+      "label": "SERVICE FACILITY NAME",
+      "field_type": "text",
+      "bbox_norm": [0.035, 0.870, 0.30, 0.895],
+      "description": "Service facility name"
     },
     {
-      "id": "33_billing_provider",
-      "label": "BILLING PROVIDER INFO",
-      "field_type": "generic",
-      "bbox_norm": [0.510, 0.760, 0.940, 0.845]
+      "id": "32_service_facility_address",
+      "label": "SERVICE FACILITY ADDRESS",
+      "field_type": "text",
+      "bbox_norm": [0.035, 0.895, 0.30, 0.945],
+      "description": "Service facility address"
+    },
+    {
+      "id": "32a_npi",
+      "label": "NPI (Box 32a)",
+      "field_type": "npi",
+      "bbox_norm": [0.12, 0.945, 0.30, 0.970],
+      "description": "Service facility NPI"
+    },
+    {
+      "id": "33_billing_provider_phone",
+      "label": "BILLING PROVIDER PHONE",
+      "field_type": "phone",
+      "bbox_norm": [0.60, 0.820, 0.74, 0.850],
+      "description": "Billing provider phone"
+    },
+    {
+      "id": "33_billing_provider_name",
+      "label": "BILLING PROVIDER NAME",
+      "field_type": "text",
+      "bbox_norm": [0.60, 0.860, 0.90, 0.885],
+      "description": "Billing provider name"
+    },
+    {
+      "id": "33_billing_provider_address",
+      "label": "BILLING PROVIDER ADDRESS",
+      "field_type": "text",
+      "bbox_norm": [0.60, 0.885, 0.90, 0.945],
+      "description": "Billing provider address"
+    },
+    {
+      "id": "33a_npi",
+      "label": "NPI (Box 33a)",
+      "field_type": "npi",
+      "bbox_norm": [0.61, 0.935, 0.72, 0.960],
+      "description": "Billing provider NPI"
     }
   ]
 }

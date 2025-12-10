@@ -1,12 +1,13 @@
 # Document-to-Data Pipeline
 
-**Version:** 1.0.0-gpu  
+**Version:** 1.1.0-beta (CMS-1500 Focus)  
 **Status:** ✅ Production-Ready (GPU-Accelerated)  
-**Last Updated:** December 5, 2025  
-**Live Demo:** http://100.126.216.92:8501
+**Last Updated:** December 10, 2025  
+**Live Demo:** http://100.126.216.92:8501  
+**Scrum Report:** [View Full Status & Roadmap](SCRUM_REPORT.md)
 
 Goal:
-A production-ready document processing pipeline that converts PDFs and images into structured JSON data. Uses state-of-the-art ML models (LayoutParser, PaddleOCR) combined with intelligent heuristics, SLM/VLM enrichment, and GPU-aware preprocessing for layout detection, OCR, and content classification.
+A production-ready document processing pipeline that converts PDFs and images into structured JSON data. Uses state-of-the-art ML models (LayoutParser, PaddleOCR, TrOCR) combined with intelligent heuristics, SLM/VLM enrichment (Llama/Qwen), and GPU-aware preprocessing for layout detection, OCR, and content classification.
 
 ## 🏛 Architecture Overview
 
@@ -480,4 +481,3 @@ ollama serve
 - **Technical Summary:** See `DEMO_SUMMARY.md` for detailed model information and next steps
 - **API Documentation:** See `app/api_main.py` for FastAPI endpoints
 - **Code Comments:** All major functions have docstrings
-

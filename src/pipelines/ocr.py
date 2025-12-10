@@ -852,10 +852,13 @@ class OCRPipeline:
         validator_info: Dict[str, Any] = {}
         if field_type and field_text:
             validator_passed, validator_info = validate_field(field_type, field_text)
+        
+        existing_meta = field_block.metadata.get("form_field", {})
         field_block.metadata["form_field"] = {
-            "label_id": label.id if label else None,
-            "label_text": label_text,
-            "field_type": field_type,
+            "label_id": label.id if label else existing_meta.get("label_id"),
+            "label_text": label_text or existing_meta.get("label_text"),
+            "field_type": field_type or existing_meta.get("field_type"),
+            "schema_id": existing_meta.get("schema_id"),
             "validator_passed": validator_passed,
             "validator_info": validator_info,
             "value_text": field_text,

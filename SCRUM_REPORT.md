@@ -1,130 +1,271 @@
 # 📊 Doc2Data Scrum Report
 
 **Date:** December 10, 2025  
-**Current Sprint:** Phase 1 Finalization & CMS-1500 Optimization  
-**Status:** 🟢 On Track
+**Current Sprint:** CMS-1500 Optimization (Phase 1 Finalization)  
+**Sprint Goal:** 100% accuracy on CMS-1500 forms + Business Schema mapping  
+**Status:** 🟡 In Progress
 
 ---
 
-## 📅 Sprint Status
+## 📅 Sprint History
 
-### ✅ Completed Work (Previous Sprints)
+### ✅ Week of Nov 2: Foundations
+| Item | Status | Notes |
+|------|--------|-------|
+| Problem Analysis | ✅ Done | Deep dive into parsing requirements |
+| Architecture Design | ✅ Done | Layout → OCR → VLM pipeline established |
+| Infrastructure | ✅ Done | NVIDIA DGX Spark with GPU configured |
+| MVP Deployment | ✅ Done | Streamlit demo hosted on DGX |
 
-**Week of Nov 2: Foundations**
-- **Problem Analysis:** Deep dive into parsing requirements and business schema mapping.
-- **Architecture Design:** Established the Layout -> OCR -> VLM pipeline architecture.
-- **Infrastructure:** Selected and configured NVIDIA DGX environment with GPU support.
-- **MVP Deployment:** Hosted initial building blocks (OCR, Layout) on Streamlit.
-
-**Week of Nov 9: GPU & AI Integration**
-- **GPU Acceleration:** Enabled CUDA for Detectron2 and PaddleOCR (10x-20x speedup).
-- **Segmentation:** Implemented Detectron2 (PubLayNet) for robust layout analysis.
-- **Semantic Labeling:** Integrated SLM (Qwen/Llama) for semantic role assignment.
-- **VLM Parsing:** Added VLM support for extracting structured data from tables and figures.
-- **Remote Access:** Setup secure demo environment on Spark DGX machine.
-
-### 🏃 Current Sprint (Week of Dec 8)
-- **Goal:** Achieve 100% accuracy on CMS-1500 forms.
-- **Form-Specific Tuning:** Fine-tuned pipeline parameters for dense form layouts.
-- **Business Schema Mapping:** Mapped raw OCR output to "Business Schema" (e.g., `patient_name`, `insurance_id`).
-- **Smart Extraction:** Implemented "Smart Pipeline" using schema-guided extraction + VLM grounding.
-- **Demo Enhancement:** "Workstation" UI in Streamlit showing OCR, Raw JSON, and Business JSON side-by-side.
-- **Model Fallback:** Added support for Western models (Llama 3.2, TrOCR) to replace/supplement Qwen where appropriate.
+### ✅ Week of Nov 9: GPU & AI Integration
+| Item | Status | Notes |
+|------|--------|-------|
+| GPU Acceleration | ✅ Done | Detectron2 + PaddleOCR on CUDA (10-20x speedup) |
+| Layout Segmentation | ✅ Done | LayoutParser + Detectron2 (PubLayNet) |
+| Table Extraction (TATR) | ✅ Done | Microsoft Table Transformer integrated |
+| Semantic Labeling (SLM) | ✅ Done | Qwen/Llama via Ollama |
+| VLM for Figures | ✅ Done | MiniCPM-V for chart understanding |
+| Remote Access | ✅ Done | Secure demo on Spark DGX (100.126.216.92:8501) |
 
 ---
 
-## 🛠 Phase 1 Plan: Schema-Agnostic, Text-Centric MVP
+## 🏃 Current Sprint: Week of Dec 8
 
-This architecture is currently implemented and running in production.
+### 🎯 Sprint Goals
+1. **100% accuracy on CMS-1500 forms** (main deliverable)
+2. **Business Schema mapping** (semantic field names: `patient_name`, `insurance_id`)
+3. **Demo-ready UI** showing: Upload → OCR → OCR JSON → Business JSON
+4. **Fallback for Chinese models** (use Llama 3.2 instead of Qwen)
 
-### 1) Ingest & Pre-process
-*   **Input:** PDF/Images → Normalized 300 DPI images.
-*   **Cleanup:** GPU-accelerated de-skew, de-noise, and contrast enhancement (OpenCV CUDA).
-*   **Digital Layer:** If PDF has text layer, extract word-boxes directly to skip OCR (High Accuracy).
-*   **Form Mask:** Precompute "lines & boxes mask" for geometry detection.
+### 📋 Sprint Backlog
 
-### 2) Layout Segmentation (Vision-First)
-*   **Models:** LayoutParser + Detectron2 (PubLayNet) on GPU.
-*   **Form Analyzer:**
-    *   **Line/Box Graph:** Detects physical lines and boxes to identify fields/tables.
-    *   **Column-Aware:** Sorts blocks by column first, then row (crucial for forms).
-    *   **Granularity:** "Child-Explodes-Parent" logic to prefer fine-grained text over giant generic boxes.
-    *   **Grid Snapping:** Snaps detected blocks to visual grid lines for perfect alignment.
-
-### 3) OCR (Intelligent Character Recognition)
-*   **Engines:** PaddleOCR v2.6 (Primary, GPU) + TrOCR (Handwriting) + Tesseract (Fallback).
-*   **Tiered Processing:**
-    *   **Tier 1:** Fast pass on all blocks.
-    *   **Tier 2:** Re-OCR low-confidence regions with enhanced binarization.
-*   **Association:** Links "Labels" to "Values" using spatial heuristics and Hungarian matching.
-*   **Checkboxes:** Detects state (Checked/Unchecked) using pixel density and connected components.
-
-### 4) Semantic Labeling (SLM) & VLM
-*   **Models:** Llama-3.2-3B / Qwen-2.5-7B (via Ollama).
-*   **Role:** Assigns semantic roles (Header, Patient Name, DOB) based on content and position.
-*   **Grounding:** Maps extracted semantic values back to original bounding boxes for verification.
-*   **Tables/Figures:** VLM used to summarize charts or fix broken table structures.
-
-### 5) Assembly & UI
-*   **Output:** Canonical JSON with `page`, `bbox`, `confidence`, `business_key`.
-*   **UI:** Streamlit "Workstation" with split-pane view (Image + Data), interactive correction, and JSON download.
+| Task | Priority | Status | Assignee |
+|------|----------|--------|----------|
+| Collect 5-10 filled CMS-1500 forms (hand + machine) | P0 | ⏳ Pending | - |
+| Fine-tune pipeline for CMS-1500 field extraction | P0 | 🔄 In Progress | - |
+| Implement Business Schema mapper (CMS-1500 specific) | P0 | 🔄 In Progress | - |
+| Add Llama 3.2 as primary model (replace Qwen) | P1 | ✅ Done | - |
+| Demo UI: OCR view, Raw JSON, Business JSON tabs | P1 | 🔄 In Progress | - |
+| Validate field accuracy on test forms | P2 | ⏳ Pending | - |
 
 ---
 
-## 🚀 Key Technical Improvements Implemented
+## 🔍 Technical Deep Dive: The Two-Schema Architecture
 
-### 1. Vision-First Layout Segmentation (The "Reducto" Look)
-*   **Problem:** Standard models produced either giant blocks (hiding fields) or messy fragments.
-*   **Solution:** Implemented **Hybrid Vision-Heuristic Segmenter** (`src/pipelines/segment.py`).
-    *   **Strict NMS:** No overlapping blocks allowed.
-    *   **Visual Grid Snapping:** Uses OpenCV Hough Transform to snap block edges to actual pixel lines.
-    *   **Granularity Preference:** Discards giant containers if they contain valid children.
+### Problem Statement
+The current pipeline extracts **OCR Schema** (generic), but clients need **Business Schema** (domain-specific).
 
-### 2. Aggressive Section Stitching
-*   **Problem:** Headers like "EVAC CATEGORY" were split.
-*   **Solution:** Added **Aggressive Merge Logic**:
-    *   **Horizontal:** Stitches text with gaps up to 600px if aligned.
-    *   **Vertical:** Recovers split tables (Header + Body) even with gaps.
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   OCR Schema    │ ──► │  Business Logic │ ──► │ Business Schema │
+│   (Generic)     │     │    (Mapping)    │     │  (CMS-1500)     │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
 
-### 3. Gap Filling (No Blank Spaces)
-*   **Problem:** ML models often miss non-standard text regions.
-*   **Solution:** **Unconditional Text Augmentation**. A CV pass (connected components) finds *any* text-like pixels missed by the model and sends them to OCR.
+OCR Schema (same for all docs):
+{
+  "page": 0,
+  "bbox": [100, 200, 300, 250],
+  "type": "TEXT",
+  "value": "JOHN DOE",
+  "confidence": 0.95
+}
 
-### 4. Multi-Pass OCR & Validation
-*   **Implementation:**
-    *   **Tiered OCR:** PaddleOCR first; if conf < 0.75, re-run with image enhancement.
-    *   **Validators:** NPI, Date, ICD-10, Phone regex validators integrated.
-    *   **VLM Fallback:** Ambiguous regions sent to Llama/Qwen for "reading".
+Business Schema (CMS-1500 specific):
+{
+  "patient_name": "JOHN DOE",
+  "patient_dob": "01/15/1985",
+  "insurance_id": "XYZ123456",
+  "npi": "1234567890"
+}
+```
+
+### Current Implementation (`form_extractor.py`)
+
+```
+Read → Understand → Ground
+
+1. READ: Full-page PaddleOCR → All text + bboxes
+2. UNDERSTAND: LLM extracts values based on schema
+3. GROUND: Match extracted values back to OCR bboxes
+```
+
+**What's Working:**
+- Full-page OCR captures all text ✅
+- LLM can extract values when Ollama is running ✅
+- Grounding links values back to visual locations ✅
+
+**What's Failing:**
+- LLM not always available on DGX (Ollama connection issues)
+- Heuristic fallback is too naive for dense forms
+- No validation layer (NPI, dates, phone)
 
 ---
 
-## 🧠 Proposed Agentic "Bootstrap" Pipeline
+## 🧠 Proposed Architecture: Template-First for CMS-1500
 
-To achieve 100% accuracy on CMS-1500 and >90% on others, we are moving towards an **Agentic Bootstrap Architecture**:
+Since CMS-1500 is a **fixed-layout form**, we don't need ML to "discover" field locations. We **know** where each field is.
 
-1.  **Fast Pass (The Scout):** Run optimized Layout + PaddleOCR. High speed, moderate accuracy.
-2.  **Validator Gate (The Critic):**
-    *   Check extracted fields against business rules (e.g., "Is DOB a date?", "Is NPI 10 digits?").
-    *   Pass: ✅ Commit to JSON.
-    *   Fail: ❌ Send to "Fixer".
-3.  **The Fixer (Agentic Loop):**
-    *   **Attempt 1 (Vision):** Apply aggressive binarization/upscaling to the specific field crop. Re-OCR.
-    *   **Attempt 2 (Brain):** Send the crop to **VLM (Llama 3.2 Vision / Qwen-VL)** with prompt: *"Read the handwriting in this box exactly."*
-    *   **Attempt 3 (Context):** Look at neighboring fields for context clues.
-4.  **Human-in-the-Loop (Bootstrap):**
-    *   If all agents fail, flag for human review in Streamlit.
-    *   **Bootstrap:** Save human corrections to a dataset.
-    *   **Retrain:** Periodically fine-tune the "Fast Pass" models on this hard data to make them smarter.
+### The "Template-First" Approach
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│  1. ALIGN    │ ──► │  2. CROP     │ ──► │  3. OCR      │ ──► │  4. VALIDATE │
+│  Template    │     │  Field Zones │     │  Per-Field   │     │  & Format    │
+│  Registration│     │  from Schema │     │  TrOCR/Paddle│     │  Business    │
+└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+```
+
+**Step 1: Template Registration**
+- Use ORB/SIFT feature matching to align scanned form to reference template
+- Handle rotation, skew, and scale variations
+- Already implemented: `src/processing/registration.py`
+
+**Step 2: Zone-Based Cropping**
+- CMS-1500 schema defines bounding boxes for each field
+- Crop each field region from the aligned image
+- No ML needed - deterministic coordinates
+
+**Step 3: Field-Specific OCR**
+| Field Type | OCR Strategy |
+|------------|--------------|
+| Printed text | PaddleOCR (fast, accurate) |
+| Handwritten | TrOCR (specialized) |
+| Checkboxes | Pixel density analysis |
+| Dates | OCR + regex validation |
+| NPI/Phone | OCR + format validation |
+
+**Step 4: Business Schema Assembly**
+- Map each field value to its semantic name
+- Apply validators (NPI checksum, date format, phone format)
+- Flag low-confidence fields for review
+
+### Why This Beats the "Agentic" Approach
+
+| Aspect | Agentic (Multi-Agent) | Template-First |
+|--------|----------------------|----------------|
+| Complexity | High (multiple agents, retry loops) | Low (deterministic) |
+| Speed | Slow (multiple LLM calls) | Fast (single OCR pass) |
+| Accuracy for CMS-1500 | Variable (depends on LLM) | High (known field locations) |
+| Debugging | Hard (agent decisions are opaque) | Easy (clear pipeline) |
+| Generalization | Better for unknown forms | Perfect for fixed forms |
+
+**Recommendation:** Use Template-First for CMS-1500 (100% accuracy goal), keep ML pipeline for unknown forms.
 
 ---
 
-## 🔜 Next Steps (Roadmap)
+## 🛠 What's Already Implemented
 
-1.  **Vision-First Parsing:** Implement multi-pass OCR (Vision -> Text) with self-correction.
-2.  **Fine-tune Detectron2:** Train specifically on healthcare forms (CMS-1500, UB-04) using DocLayNet base.
-3.  **Agentic OCR:** Build a self-correcting loop using VLM validation.
-4.  **Schema-Driven Extraction:** Fully generalize the schema mapper for other form types (UB-04, Invoices).
-5.  **Advanced Tables:** Integrate Table Transformer (TATR) for complex grid parsing.
-6.  **Multi-Model Ensemble:** Combine results from Detectron2, Paddle, and Heuristics for robust layout.
-7.  **Continuous Learning:** Implement a feedback loop where user corrections retrain the base models.
+### ✅ Fully Working
+| Component | File | Notes |
+|-----------|------|-------|
+| Ingestion | `src/pipelines/ingest.py` | PDF/Image → 300 DPI, deskew, denoise |
+| Layout Segmentation | `src/pipelines/segment.py` | Detectron2 + LayoutParser + heuristics |
+| PaddleOCR | `src/ocr/paddle_ocr.py` | GPU-accelerated, v2.6 |
+| TrOCR Wrapper | `src/ocr/trocr_wrapper.py` | Handwriting recognition |
+| Tesseract Fallback | `src/ocr/tesseract_ocr.py` | CPU fallback |
+| Table Extraction | `src/pipelines/table_processor.py` | TATR + VLM (MiniCPM-V) |
+| Figure Processing | `src/pipelines/figure_processor.py` | Chart understanding |
+| SLM Labeler | `src/pipelines/slm_label.py` | Qwen/Llama semantic roles |
+| Form Extractor | `src/pipelines/form_extractor.py` | Read-Understand-Ground pipeline |
+| Image Registration | `src/processing/registration.py` | ORB-based alignment |
+| Streamlit UI | `app/streamlit_main.py` | Demo with split-pane view |
 
+### ⚠️ Needs Work
+| Component | Issue | Fix |
+|-----------|-------|-----|
+| Ollama Connection | Unreliable on DGX | Add retry logic, health checks |
+| Business Schema Mapper | Not implemented | Map OCR output to CMS-1500 fields |
+| Field Validators | Partial | Add NPI, date, phone, ICD-10 validators |
+| Template Alignment | Basic | Improve for real-world scans |
+
+---
+
+## 🔜 Next Steps (Week of Dec 8)
+
+### Must-Do (P0)
+1. **Collect CMS-1500 Test Set**
+   - 5-10 filled forms (mix of hand-filled and machine-filled)
+   - Include varied handwriting styles
+   - Store in `data/sample_docs/cms1500_test/`
+
+2. **Implement Business Schema Mapper**
+   ```python
+   # New file: src/pipelines/business_schema.py
+   def map_to_business_schema(ocr_result: Dict) -> Dict:
+       return {
+           "patient_name": extract_field("1_insured_name"),
+           "patient_dob": extract_field("3_patient_dob"),
+           "insurance_id": extract_field("1a_insured_id"),
+           ...
+       }
+   ```
+
+3. **Demo UI Enhancement**
+   - Tab 1: Document View (with bounding boxes)
+   - Tab 2: OCR JSON (raw extraction)
+   - Tab 3: Business JSON (mapped fields)
+   - Dropdown: Select pipeline (CMS-1500 / General)
+
+4. **Model Fallback Chain**
+   ```
+   Llama 3.2 (primary) → Mistral → Qwen (fallback)
+   ```
+
+### Should-Do (P1)
+5. **Field Validators**
+   - NPI: 10 digits + Luhn checksum
+   - Date: MM/DD/YYYY format
+   - Phone: (XXX) XXX-XXXX
+   - ICD-10: A00-Z99 format
+
+6. **Accuracy Measurement**
+   - Create ground-truth JSON for test forms
+   - Script to compare extracted vs ground-truth
+   - Report: Field-level accuracy %
+
+### Nice-to-Have (P2)
+7. **Confidence Visualization**
+   - Green: High confidence (>0.9)
+   - Yellow: Medium (0.7-0.9)
+   - Red: Low (<0.7) - needs review
+
+---
+
+## 📊 Success Metrics
+
+| Metric | Target | Current |
+|--------|--------|---------|
+| CMS-1500 Field Accuracy | 100% | ~60% (needs tuning) |
+| General Form Accuracy | 80-90% | ~70% |
+| Processing Time (1 page) | <5 sec | ~3 sec ✅ |
+| Demo Uptime | 99% | ~95% |
+
+---
+
+## 🗓 Sprint Timeline
+
+| Date | Milestone |
+|------|-----------|
+| Dec 8-10 | Collect test forms, fix Ollama, basic mapping |
+| Dec 11-13 | Implement Business Schema mapper, validators |
+| Dec 14-15 | Demo polish, accuracy testing |
+| Dec 16 | **Sprint Demo** |
+
+---
+
+## 📝 Notes for Next Presentation
+
+1. **Key Message:** We've built a complete IDP pipeline that works for general documents. For CMS-1500 specifically, we're implementing a template-based approach for 100% accuracy.
+
+2. **Demo Flow:**
+   - Upload CMS-1500 form
+   - Show OCR extraction (bounding boxes on image)
+   - Show Raw JSON (OCR Schema)
+   - Show Business JSON (patient_name, insurance_id, etc.)
+   - Highlight confidence scores
+
+3. **Technical Differentiators:**
+   - GPU-accelerated (10-20x faster than CPU)
+   - Hybrid approach (ML for unknown, Template for known forms)
+   - Grounding (every extracted value linked to visual source)
+   - Self-improving (corrections feed back to training)

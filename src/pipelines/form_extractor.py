@@ -20,6 +20,7 @@ from difflib import SequenceMatcher
 
 from utils.config import Config
 from utils.models import Block
+from src.pipelines.business_schema import map_to_business_schema, merge_business_with_ocr
 
 
 def load_form_schema(form_type: str) -> Dict[str, Any]:
@@ -51,6 +52,12 @@ class FormExtractor:
         self.client = None
         self.model = None
         self.ollama_working = False
+        self.model_candidates = [
+            Config.OLLAMA_MODEL_SLM,
+            "mistral:latest",
+            "qwen2.5:7b-instruct",
+        ]
+        self.available_models: List[str] = []
         
         if self.enabled:
             try:
@@ -67,16 +74,22 @@ class FormExtractor:
                     models = resp.json().get("models", [])
                     model_names = [m.get("name", "") for m in models]
                     print(f"[FormExtractor] Available models: {model_names}")
+                    self.available_models = [m for m in self.model_candidates if any(m in name for name in model_names)]
                     if any(self.model in name for name in model_names):
                         self.ollama_working = True
                         print(f"✓ Form extractor enabled using model: {self.model}")
                     else:
                         print(f"⚠ Model {self.model} not found. Available: {model_names}")
                         # Try to use whatever is available
-                        if model_names:
-                            self.model = model_names[0]
+                        if self.available_models:
+                            self.model = self.available_models[0]
                             self.ollama_working = True
-                            print(f"✓ Using available model: {self.model}")
+                            print(f"✓ Using available fallback model: {self.model}")
+                        elif model_names:
+                            self.model = model_names[0]
+                            self.available_models = [self.model]
+                            self.ollama_working = True
+                            print(f"✓ Using first discovered model: {self.model}")
                 else:
                     print(f"⚠ Ollama returned status {resp.status_code}")
             except Exception as e:
@@ -172,27 +185,32 @@ JSON OUTPUT:
 """
         # 3. Call LLM
         try:
-            response = self.client.generate(
-                model=self.model,
-                prompt=prompt,
-                format="json"
-            )
+            extracted_dict: Dict[str, Any] = {}
+            models_to_try = self.available_models if self.available_models else [self.model] if self.model else []
+            for mdl in models_to_try:
+                try:
+                    response = self.client.generate(
+                        model=mdl,
+                        prompt=prompt,
+                        format="json"
+                    )
+                    response_text = response.get("response", "")
+                    start = response_text.find("{")
+                    end = response_text.rfind("}") + 1
+                    if start != -1 and end != -1:
+                        extracted_dict = json.loads(response_text[start:end])
+                    else:
+                        extracted_dict = json.loads(response_text)
+                    if extracted_dict:
+                        self.model = mdl
+                        break
+                except Exception as inner_exc:
+                    print(f"[FormExtractor] Model {mdl} failed: {inner_exc}")
+                    continue
+            if not extracted_dict:
+                print("[FormExtractor] No LLM output, falling back to heuristics")
+                return self._heuristic_fallback(schema, blocks)
             
-            response_text = response.get("response", "")
-            
-            # Extract JSON
-            try:
-                # Try to find JSON block if mixed with text
-                start = response_text.find("{")
-                end = response_text.rfind("}") + 1
-                if start != -1 and end != -1:
-                    extracted_dict = json.loads(response_text[start:end])
-                else:
-                    extracted_dict = json.loads(response_text)
-            except json.JSONDecodeError:
-                print("Failed to parse LLM JSON response")
-                extracted_dict = {}
-
             # 4. Grounding: Find BBoxes for extracted values
             field_details = []
             grounded_count = 0
@@ -321,8 +339,9 @@ JSON OUTPUT:
 
 def extract_with_full_pipeline(
     pdf_path: str,
-    schema: Optional[Dict[str, Any]] = None,
-    use_vlm: bool = True
+        schema: Optional[Dict[str, Any]] = None,
+    use_vlm: bool = True,
+    map_business: bool = True
 ) -> Dict[str, Any]:
     """
     Main entry point for the "Smart" pipeline.
@@ -409,5 +428,9 @@ def extract_with_full_pipeline(
     print(f"  - Fields found: {fields_found}/{len(schema.get('fields', []))}")
     print(f"  - OCR blocks: {len(result.get('ocr_blocks', []))}")
     print(f"{'='*60}\n")
+    
+    if map_business and schema:
+        business = map_to_business_schema(result, form_type=schema.get("form_type", "cms1500"))
+        result = merge_business_with_ocr(result, business)
     
     return result

@@ -8,7 +8,7 @@ accurately even if the scan is rotated, scaled, or translated.
 
 import cv2
 import numpy as np
-from typing import Tuple, Optional, List, Dict
+from typing import Tuple, Optional, List, Dict, Any
 from pathlib import Path
 import os
 

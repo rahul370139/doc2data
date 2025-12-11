@@ -144,7 +144,8 @@ class LayoutSegmenter:
         table_threshold: float = 0.25,  # Balanced threshold for tables
         enable_table_model: bool = True,
         split_large_blocks: bool = False,  # Disable aggressive splitting - let model do its job
-        max_block_area_ratio: float = 0.3  # Max block area as ratio of page
+        max_block_area_ratio: float = 0.3,  # Max block area as ratio of page
+        overlap_iou: float = 0.86
     ):
         """
         Initialize layout segmenter.
@@ -170,6 +171,7 @@ class LayoutSegmenter:
         self.table_model = None
         self.split_large_blocks = split_large_blocks
         self.max_block_area_ratio = max_block_area_ratio
+        self.overlap_iou = overlap_iou
         self.form_geometry_cache: Dict[int, Dict[str, Any]] = {}
         # Geometry controls
         self.enable_form_geometry: bool = True
@@ -533,6 +535,50 @@ class LayoutSegmenter:
         x1 = max(x0 + 1.0, min(float(width), x1))
         y1 = max(y0 + 1.0, min(float(height), y1))
         return (x0, y0, x1, y1)
+
+    @staticmethod
+    def _shrink_bbox(
+        bbox: Tuple[float, float, float, float],
+        factor: float = 0.04
+    ) -> Tuple[float, float, float, float]:
+        """Shrink bbox inward by a fraction to reduce overlaps."""
+        x0, y0, x1, y1 = bbox
+        w = max(1.0, x1 - x0)
+        h = max(1.0, y1 - y0)
+        dx = w * factor
+        dy = h * factor
+        return (x0 + dx, y0 + dy, x1 - dx, y1 - dy)
+
+    def _resolve_overlaps(
+        self,
+        blocks: List[Block],
+        max_iou: float = 0.85
+    ) -> List[Block]:
+        """Non-max suppression per type to reduce heavy overlaps; shrinks lower-priority boxes instead of dropping all coverage."""
+        if not blocks:
+            return blocks
+        type_buckets: Dict[BlockType, List[Block]] = {}
+        for b in blocks:
+            type_buckets.setdefault(b.type, []).append(b)
+        resolved: List[Block] = []
+
+        for btype, bucket in type_buckets.items():
+            bucket = sorted(bucket, key=lambda b: float(b.confidence or 0.0), reverse=True)
+            kept: List[Block] = []
+            for b in bucket:
+                overlap = False
+                for kb in kept:
+                    if kb.page_id != b.page_id:
+                        continue
+                    iou = self._calculate_iou(kb.bbox, b.bbox)
+                    if iou >= max_iou:
+                        # shrink lower-confidence box to preserve some coverage
+                        b.bbox = self._shrink_bbox(b.bbox, factor=0.06)
+                        overlap = True
+                        break
+                kept.append(b)
+            resolved.extend(kept)
+        return resolved
     
     @staticmethod
     def _calculate_iou(
@@ -3759,6 +3805,9 @@ class LayoutSegmenter:
 
             final_cleanup.append(block)
         blocks = final_cleanup
+
+        # Resolve heavy overlaps per type to keep page coverage without box collisions
+        blocks = self._resolve_overlaps(blocks, max_iou=getattr(self, "overlap_iou", 0.86) or 0.86)
         
         # Tighten bounding boxes to remove blank space (but preserve block integrity)
         # Forms often have tight boxes and handwritten text; aggressively tightening can cut off content.
@@ -3767,7 +3816,7 @@ class LayoutSegmenter:
             if block.type == BlockType.FORM:
                 # Preserve original bbox for form fields / checkboxes
                 continue
-            tight_bbox = self._tighten_bbox(image, block.bbox, margin=5)  # Larger margin to preserve block structure
+            tight_bbox = self._tighten_bbox(image, block.bbox, margin=4)  # gentle tighten
             block.bbox = tight_bbox
 
         template_columns = None
@@ -3800,5 +3849,17 @@ class LayoutSegmenter:
             block.page_id = page_id  # Ensure page_id is set correctly
             if not block.citations:
                 block.add_citation(page_id, block.bbox)
+            # Add color hint metadata for overlays (type-based palette)
+            color_palette = {
+                BlockType.TEXT: (80, 150, 255),
+                BlockType.TITLE: (0, 220, 80),
+                BlockType.FORM: (180, 90, 255),
+                BlockType.TABLE: (255, 170, 60),
+                BlockType.FIGURE: (0, 200, 200),
+                BlockType.LIST: (120, 180, 90),
+                BlockType.UNKNOWN: (100, 100, 100),
+            }
+            block.metadata = block.metadata or {}
+            block.metadata["overlay_color"] = color_palette.get(block.type, (100, 100, 100))
         
         return blocks

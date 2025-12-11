@@ -351,7 +351,7 @@ async def segment_endpoint(file_hash: str):
             image = np.array(Image.open(io.BytesIO(img_data)))
             
             # Segment page
-            blocks = segmenter.segment_page(image, page_data["page_id"])
+                blocks = segmenter.segment_page(image, page_data["page_id"]) 
             all_blocks.extend([block.to_dict() for block in blocks])
         
         result = {

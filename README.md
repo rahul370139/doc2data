@@ -80,6 +80,28 @@ lsof -ti:8501 | xargs kill -9
 
 ---
 
+### CMS-1500 Agentic Mode (Template + ICR)
+
+- Sidebar -> choose **CMS-1500** and select **Agentic CMS-1500 (template+ICR)**.
+- Pipeline: template alignment → zone crops → PaddleOCR (print) + TrOCR (handwriting) → LLM backfill (Llama → Mistral → Qwen) → validators → business schema mapping.
+- Handwritten support: enable the `Enable VLM/ICR` toggle to activate TrOCR and LLM backfill.
+- Evaluation: add test PDFs to `data/sample_docs/cms1500_test/`, matching ground truth JSONs to `validation/ground_truth/cms1500/`, then run:
+  ```bash
+  python validation/eval_cms1500.py --use-llm --use-icr
+  ```
+
+---
+
+### Reducto-Style JSON Export
+
+- Generate a Reducto-compatible JSON for CMS-1500:
+  ```bash
+  python scripts/export_reducto.py --input data/sample_docs/cms1500.pdf --output tmp/reducto_like.json
+  ```
+- Streamlit also provides a **Reducto JSON** tab to preview/download the same structure.
+
+---
+
 ## 📋 Features
 
 ### ✅ Implemented

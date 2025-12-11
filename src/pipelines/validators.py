@@ -15,6 +15,7 @@ ALPHANUM_PATTERN = re.compile(r"^[A-Z0-9]+$", re.IGNORECASE)
 SSN_PATTERN = re.compile(r"^(\d{3}-?\d{2}-?\d{4})$")
 ZIP_PATTERN = re.compile(r"^\d{5}(?:-\d{4})?$")
 MONEY_PATTERN = re.compile(r"^[\$]?\d{1,6}(?:,\d{3})*(?:\.\d{1,2})?$")
+TAXID_PATTERN = re.compile(r"^\d{2}-?\d{7}$")
 
 
 def validate_npi(value: str) -> Tuple[bool, Dict[str, Any]]:
@@ -133,10 +134,21 @@ def validate_numeric(value: str, min_len: int = 1, max_len: int = 20) -> Tuple[b
     return False, {"reason": "length"}
 
 
+def validate_tax_id(value: str) -> Tuple[bool, Dict[str, Any]]:
+    if not value:
+        return False, {"reason": "empty"}
+    cleaned = value.strip()
+    if TAXID_PATTERN.match(cleaned):
+        digits = re.sub(r"[^0-9]", "", cleaned)
+        return True, {"normalized": f"{digits[:2]}-{digits[2:]}"}
+    return False, {"reason": "format"}
+
+
 FIELD_VALIDATORS = {
     "npi": validate_npi,
     "ndc": validate_ndc,
     "icd": validate_icd,
+    "icd10": validate_icd,
     "hcpcs": validate_hcpcs,
     "date": validate_date,
     "phone": validate_phone,
@@ -145,6 +157,7 @@ FIELD_VALIDATORS = {
     "ssn": validate_ssn,
     "zip": validate_zip,
     "money": validate_money,
+    "tax_id": validate_tax_id,
 }
 
 
@@ -182,4 +195,6 @@ def guess_field_type(label_text: Optional[str]) -> Optional[str]:
         return "zip"
     if "amount" in text or "paid" in text or "charge" in text:
         return "money"
+    if "tax" in text and "id" in text:
+        return "tax_id"
     return None

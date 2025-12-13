@@ -1,17 +1,83 @@
 """
-Agentic CMS-1500 pipeline.
+Agentic CMS-1500 Pipeline
+=========================
 
-This module wires a set of specialized "agents" to maximize accuracy on
-CMS-1500 without hardcoding pixel coordinates:
-1) RegistrationAgent aligns the page to the template using homography.
-2) ZoneAgent projects schema zones onto the aligned page and refines them
-   using analysis masks (line/box masks) when available.
-3) OCRAgent routes each zone to the best reader (Paddle for print,
-   TrOCR for handwriting/ICR, checkbox density for boxes, PDF digital text
-   when present) and keeps word-level boxes for grounding.
-4) LLMExtractionAgent optionally backfills low-confidence/missing fields
-   using a fallback chain (Llama → Mistral → Qwen).
-5) BusinessMapper converts schema IDs to business fields with validators.
+PURPOSE:
+    Primary pipeline for CMS-1500 form extraction. Uses a multi-agent architecture
+    to maximize accuracy on this specific form type.
+
+INPUT:
+    - PDF or image file path containing a CMS-1500 form
+    - Configuration options for ICR, LLM, template alignment
+
+OUTPUT:
+    - Dict with:
+        - "extracted_fields": {field_id: value}
+        - "field_details": [{id, label, value, bbox, confidence, detected_by}]
+        - "business_fields": {patient_name, dob, insurance_id, ...}
+        - "ocr_blocks": [{text, bbox, confidence}]
+        - Metadata (page dimensions, processing info)
+
+ARCHITECTURE (following your diagram):
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ Document Ingestion → 300 DPI RGB Array                          │
+    └─────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ RegistrationAgent: ORB/SIFT feature matching → Homography warp  │
+    │   - Aligns scanned form to reference CMS-1500 template          │
+    │   - Handles rotation, skew, scale variations                    │
+    │   - Falls back to ML detection if alignment fails               │
+    └─────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ ZoneAgent: Projects schema zones → aligned coordinates          │
+    │   - Uses CMS-1500 field definitions with bbox_norm              │
+    │   - Refines zones using detected lines/boxes                    │
+    └─────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ OCRAgent (Tiered): Full-page OCR → Zone matching                │
+    │   - PaddleOCR for printed text                                  │
+    │   - TrOCR for handwriting/signatures                            │
+    │   - Checkbox density for check marks                            │
+    └─────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ LLMExtractionAgent: Semantic extraction with SLM                │
+    │   - Uses full OCR text context                                  │
+    │   - Fallback chain: Llama 3.2 → Mistral → Qwen                  │
+    │   - Grounds extracted values back to OCR bboxes                 │
+    └─────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+    ┌─────────────────────────────────────────────────────────────────┐
+    │ BusinessMapper: Schema IDs → Business fields + validation       │
+    │   - Maps field_ids to semantic names (patient_name, dob, etc.)  │
+    │   - Applies validators (NPI, date, phone, ICD-10)               │
+    └─────────────────────────────────────────────────────────────────┘
+
+USAGE:
+    from src.pipelines.agentic_cms1500 import run_cms1500_agentic
+    
+    result = run_cms1500_agentic(
+        "path/to/cms1500.pdf",
+        use_icr=True,      # Enable TrOCR for handwriting
+        use_llm=True,      # Enable LLM for semantic extraction
+        align_template=True # Enable template alignment
+    )
+    print(result["business_fields"])
+
+AGENTS:
+    1) RegistrationAgent - Template alignment via homography
+    2) ZoneAgent - Schema zone projection and refinement
+    3) OCRAgent - Tiered OCR (Paddle → TrOCR → checkbox)
+    4) LLMExtractionAgent - SLM-based semantic extraction
+    5) BusinessMapper - Field mapping and validation
 """
 from __future__ import annotations
 

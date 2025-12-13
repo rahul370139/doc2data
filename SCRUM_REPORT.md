@@ -290,11 +290,56 @@ Since CMS-1500 is a **fixed-layout form**, we don't need ML to "discover" field 
 |------|-----------|-------|
 | Dec 8-10 | Collect test forms, fix Ollama, basic mapping | ✅ **DONE** (Dec 10) |
 | Dec 10 | Reducto-style UI, Ensemble pipeline, Business JSON | ✅ **DONE** |
-| Dec 11-13 | Improve LLM prompts, add validators, collect more samples | 🔄 **IN PROGRESS** |
+| Dec 11 | YOLOv8 Fine-tuning, Multi-agent pipeline | ✅ **DONE** |
+| Dec 12-13 | Improve LLM prompts, add validators, collect more samples | 🔄 **IN PROGRESS** |
 | Dec 14-15 | Demo polish, accuracy testing, fine-tuning | ⏳ **PENDING** |
 | Dec 16 | **Sprint Demo** | ⏳ **PENDING** |
 
-## 📝 December 10, 2025 - Detailed Update
+## 📝 December 11, 2025 - Detailed Update
+
+### What Was Implemented
+
+#### 1. **Multi-Agent Architecture** ✅
+- **Implemented**: `src/pipelines/multi_agent_pipeline.py`
+- **Agents**: Registration, Zone, Layout, OCR, Labeling, Validation, Assembly
+- **Logic**: Modular agents running in sequence/parallel with shared state
+- **Benefit**: Cleaner, more maintainable code than monolithic scripts
+
+#### 2. **YOLOv8 Fine-Tuning** ✅
+- **Status**: Training completed (50 epochs)
+- **Dataset**: ~20 CMS-1500 images (augmented)
+- **Model**: `yolov8m.pt` fine-tuned for fields, tables, checkboxes
+- **Integration**: Deployed to `runs/detect/cms1500_yolo_run1/weights/best.pt`
+- **Usage**: Automatically used by layout agent when available
+
+#### 3. **Dataset Preparation Pipeline** ✅
+- **Tools**: `training/prepare_dataset.py`, `training/visualize_labels.py`
+- **Logic**: Bootstraps labels from OCR + Template Schema
+- **Features**: Data augmentation (noise, blur, contrast), train/val split
+- **Robustness**: Fixed Tesseract/PaddleOCR compatibility issues on DGX
+
+#### 4. **Streamlit UI Updates** ✅
+- **New Mode**: "Multi-Agent (Recommended)" pipeline
+- **Config**: Auto-detect form type, YOLO model selection
+- **Visuals**: Dark theme, improved sidebar
+
+### Technical Architecture Decisions
+
+#### Why Multi-Agent?
+The single-pass script was getting too complex. Agents allow us to:
+- **Swap components**: Replace YOLO with LayoutLMv3 easily
+- **Parallelize**: Run OCR and Layout detection concurrently (future)
+- **Debug**: Inspect state at each step
+
+#### Why YOLOv8?
+- **Speed**: Real-time inference on GPU
+- **Accuracy**: Good for object detection (fields/tables)
+- **Data Efficiency**: Fine-tunes well on small datasets (20 images)
+
+### Next Steps
+1. **Validation**: Verify YOLO performance on held-out test set
+2. **LLM Prompting**: Optimize prompts for "Business Coverage" > 90%
+3. **Error Handling**: Add retries for Ollama timeouts
 
 ### What Was Implemented
 
@@ -339,11 +384,6 @@ Since CMS-1500 is a **fixed-layout form**, we don't need ML to "discover" field 
 - **Brightness Control**: Slider (0.5x - 2.0x) for adjusting document brightness
 - **Use Case**: Helps with dark scans or poor lighting conditions
 - **Implementation**: Applied before OCR processing
-
-#### 7. **Field Counting Fix** ✅
-- **Issue**: Was showing "43/43" even when many fields had NULL values
-- **Fix**: Now only counts fields with actual non-empty values (excludes NULL, None, empty string, "none")
-- **Result**: Accurate coverage metrics (e.g., "28/43" instead of misleading "43/43")
 
 ### Technical Architecture Decisions
 
@@ -413,6 +453,89 @@ Full-page OCR → Get ALL text+boxes → LLM semantic extraction → Ground to O
    - Save user corrections
    - Retrain on corrected data
    - Improve over time
+
+---
+
+### ✅ **December 11, 2025 - YOLOv8 Fine-Tuning Pipeline**
+
+**Completed Today:**
+1. ✅ **Production Pipeline** (`src/pipelines/cms1500_production.py`)
+   - Complete 6-stage extraction: Identify → Align → Extract → Validate → QA → Feedback
+   - 60+ CMS-1500 field definitions with types, validators, and business mappings
+   - Tiered OCR: PaddleOCR → TrOCR (handwriting) → checkbox detection
+   - Field validators: date, phone, NPI, ICD-10, CPT, money, state, ZIP
+   - Cross-field validation (total charge vs line items)
+   - LLM-based QA check via Ollama
+
+2. ✅ **Dataset Preparation** (`training/prepare_dataset.py`)
+   - Auto-labeling from OCR detections (bootstrap)
+   - Schema-based labeling for blank forms
+   - Data augmentation (brightness, contrast, noise, rotation)
+   - Train/val split with configurable ratio
+   - YOLO-format output (dataset.yaml + images/labels)
+
+3. ✅ **Enhanced Training Script** (`training/train_yolo_cms1500.py`)
+   - Multi-scale training support
+   - Configurable augmentation (HSV, rotate, translate, scale, mosaic, mixup)
+   - Learning rate scheduling with warmup
+   - Model selection (yolov8n/s/m/l/x)
+   - ONNX export option
+
+4. ✅ **Fine-Tuning Workflow** (`training/finetune_workflow.py`)
+   - Complete orchestration: prepare → train → evaluate → deploy
+   - Dependency checking
+   - Automatic deployment script generation
+   - Summary JSON with metrics
+
+5. ✅ **Visualization Tool** (`training/visualize_labels.py`)
+   - Draw YOLO labels on images for verification
+   - Color-coded by class
+
+6. ✅ **Field Correction UI** (Streamlit)
+   - Editable field table with data_editor
+   - "Save Corrections" button logs to `data/corrections.jsonl`
+   - Auto-threshold tuning from corrections
+   - Download corrections log
+
+**Classes for YOLOv8:**
+| ID | Class | Description |
+|----|-------|-------------|
+| 0 | `field` | Text entry fields |
+| 1 | `table` | Service line tables |
+| 2 | `checkbox` | Checkbox fields |
+| 3 | `header` | Section headers |
+| 4 | `signature` | Signature lines |
+
+**Quick Start Fine-Tuning:**
+```bash
+# 1. Prepare dataset from CMS-1500 samples
+python training/prepare_dataset.py \
+  --input data/sample_docs/cms1500_test/ \
+  --output datasets/cms1500_yolo/ \
+  --augment
+
+# 2. Train YOLOv8 (or use full workflow)
+python training/finetune_workflow.py \
+  --input data/sample_docs/cms1500_test/ \
+  --epochs 100 \
+  --model yolov8m.pt
+
+# 3. Deploy
+source deploy_yolo.sh
+streamlit run app/streamlit_main.py
+```
+
+**Production Pipeline Usage:**
+```python
+from src.pipelines.cms1500_production import CMS1500ProductionPipeline
+
+pipeline = CMS1500ProductionPipeline(
+    use_trocr=True,      # Enable handwriting recognition
+    use_llm_qa=True,     # Enable LLM quality check
+)
+result = pipeline.extract("path/to/cms1500.pdf")
+print(result["business_fields"])
+```
 
 ---
 

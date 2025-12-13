@@ -41,34 +41,23 @@ class PaddleOCRWrapper:
         start_time = time.time()
         
         try:
-            # PaddleOCR 3.x uses 'device' parameter instead of 'use_gpu'
-            # device can be: 'gpu', 'cpu', 'gpu:0', etc.
-            init_kwargs = {
-                "use_angle_cls": self.use_angle_cls,
-                "lang": self.lang,
-            }
+            # Robust initialization logic
+            try:
+                # Try standard kwargs
+                self.ocr = PaddleOCR(
+                    lang=self.lang,
+                    use_angle_cls=self.use_angle_cls,
+                    use_gpu=self.use_gpu,
+                    show_log=False
+                )
+            except Exception:
+                # Fallback without optional kwargs
+                print("⚠️ Retrying PaddleOCR init with minimal args...")
+                self.ocr = PaddleOCR(
+                    lang=self.lang, 
+                    use_angle_cls=self.use_angle_cls
+                )
             
-            # Try new API first (device), fall back to old API (use_gpu)
-            if self.use_gpu:
-                # Try to detect which API version we have
-                import inspect
-                try:
-                    sig = inspect.signature(PaddleOCR.__init__)
-                    params = sig.parameters
-                    if 'device' in params:
-                        init_kwargs["device"] = "gpu"
-                        print("  Using PaddleOCR 3.x API (device='gpu')")
-                    elif 'use_gpu' in params:
-                        init_kwargs["use_gpu"] = True
-                        print("  Using PaddleOCR 2.x API (use_gpu=True)")
-                    else:
-                        # Neither parameter found, let PaddleOCR auto-detect
-                        print("  Using PaddleOCR auto-detection for device")
-                except Exception:
-                    # Fall back to not specifying device - let PaddleOCR auto-detect
-                    print("  Using PaddleOCR default device detection")
-            
-            self.ocr = PaddleOCR(**init_kwargs)
             init_time = time.time() - start_time
             print(f"✅ PaddleOCR initialized in {init_time:.2f}s")
             self._initialized = True

@@ -9,6 +9,7 @@ import numpy as np
 from utils.models import Block, BlockType, TableBlock, FigureBlock, WordBox
 from utils.config import Config
 from src.processing.postprocessing import postprocess_text
+from src.pipelines.yolo_layout import YOLOLayoutDetector
 
 
 DEFAULT_TEMPLATE_LAYOUTS: Dict[str, Dict[str, Any]] = {
@@ -179,6 +180,7 @@ class LayoutSegmenter:
         # Template alignment controls (disabled by default)
         self.enable_template_alignment: bool = False
         self.template_layouts: Dict[str, Dict[str, Any]] = dict(DEFAULT_TEMPLATE_LAYOUTS)
+        self.yolo_detector: Optional[YOLOLayoutDetector] = None
         self._initialize()
     
     def _layout_to_blocks(self, layout, page_id: int) -> List[Block]:
@@ -313,6 +315,19 @@ class LayoutSegmenter:
         self.use_heuristic = False
         self.model_backend = None
         self.model_config = None
+
+        # YOLO detector if provided
+        if Config.YOLO_MODEL_PATH:
+            try:
+                self.yolo_detector = YOLOLayoutDetector(
+                    Config.YOLO_MODEL_PATH,
+                    conf=Config.YOLO_CONFIDENCE,
+                    iou=Config.YOLO_IOU,
+                    use_sahi=False,
+                )
+                print(f"✓ YOLO detector active: {Config.YOLO_MODEL_PATH}")
+            except Exception as exc:
+                print(f"⚠ YOLO detector unavailable: {exc}")
         
         # Check device availability respecting Config.USE_GPU
         requested_gpu = Config.USE_GPU
@@ -3675,6 +3690,9 @@ class LayoutSegmenter:
             primary = self.detect_layout(image, page_id)
             paddle_blocks = self._detect_tables_with_model(image, page_id)
             blocks = self._merge_detection_ensembles(primary, paddle_blocks)
+        elif self.yolo_detector is not None:
+            blocks = self.yolo_detector.predict(image, page_id=page_id)
+            print(f"  📊 YOLO detection: {len(blocks)} blocks")
         else:
             blocks = self.detect_layout(image, page_id)
         analysis_layers = analysis_layers or {}

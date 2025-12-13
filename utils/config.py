@@ -25,6 +25,11 @@ class Config:
     MODEL_CACHE_DIR: Path = Path(os.getenv("MODEL_CACHE_DIR", "models/weights"))
     LAYOUT_MODEL: str = os.getenv("LAYOUT_MODEL", "publaynet")
     OCR_MODEL: str = os.getenv("OCR_MODEL", "paddleocr")
+    # Default to fine-tuned model if available
+    _YOLO_DEFAULT = "runs/detect/cms1500_yolo_run1/weights/best.pt"
+    YOLO_MODEL_PATH: Optional[str] = os.getenv("YOLO_MODEL_PATH", _YOLO_DEFAULT)
+    YOLO_CONFIDENCE: float = float(os.getenv("YOLO_CONFIDENCE", "0.25"))
+    YOLO_IOU: float = float(os.getenv("YOLO_IOU", "0.6"))
     
     # Processing Configuration
     DPI: int = int(os.getenv("DPI", "300"))

@@ -100,6 +100,79 @@ lsof -ti:8501 | xargs kill -9
   ```
 - Streamlit also provides a **Reducto JSON** tab to preview/download the same structure.
 
+### CMS-1500 Layout Fine-Tuning (YOLOv8)
+
+We provide a complete YOLOv8 fine-tuning pipeline for form-centric layout detection. Use it when PubLayNet layouts drift on form documents.
+
+#### Quick Start (3 steps)
+
+```bash
+# 1. Prepare dataset from your CMS-1500 PDFs (auto-labels using OCR)
+python training/prepare_dataset.py \
+  --input data/sample_docs/cms1500_test/ \
+  --output datasets/cms1500_yolo/ \
+  --augment
+
+# 2. Train YOLOv8 (50-100 epochs recommended)
+pip install ultralytics
+python training/train_yolo_cms1500.py \
+  --data datasets/cms1500_yolo/dataset.yaml \
+  --epochs 100 \
+  --model yolov8m.pt \
+  --imgsz 1280 \
+  --batch 8 \
+  --multi-scale \
+  --name cms1500_yolo
+
+# 3. Enable in app
+export YOLO_MODEL_PATH=runs/detect/cms1500_yolo/weights/best.pt
+export YOLO_CONFIDENCE=0.25
+export YOLO_IOU=0.6
+streamlit run app/streamlit_main.py
+```
+
+#### Dataset Preparation Options
+
+| Mode | Command | Use Case |
+|------|---------|----------|
+| **Auto-label (OCR)** | `--mode ocr` | Bootstrap from filled forms |
+| **Schema-based** | `--mode schema --schema cms-1500` | Use template schema boxes |
+| **With augmentation** | `--augment --num-augments 5` | Increase training data |
+
+#### Training Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--model` | `yolov8m.pt` | Base model (n/s/m/l/x) |
+| `--epochs` | `100` | Training epochs |
+| `--imgsz` | `1280` | Image size (higher = better for forms) |
+| `--multi-scale` | `False` | Enable multi-scale training |
+| `--batch` | `8` | Batch size |
+| `--lr` | `0.001` | Initial learning rate |
+
+#### Classes
+
+| ID | Class | Description |
+|----|-------|-------------|
+| 0 | `field` | Text entry fields |
+| 1 | `table` | Service line tables |
+| 2 | `checkbox` | Checkbox fields |
+| 3 | `header` | Section headers |
+| 4 | `signature` | Signature lines |
+
+#### Continuous Learning Loop
+
+1. **Edit fields** in Streamlit → Click "💾 Save Corrections"
+2. **Corrections logged** to `data/corrections.jsonl`
+3. **Thresholds auto-tune** from corrections (`data/thresholds.json`)
+4. **Re-train** periodically with correction-augmented data
+
+#### Notes
+
+- YOLO is used when `YOLO_MODEL_PATH` is set; otherwise defaults to PubLayNet/Detectron2
+- For small text/checkboxes, increase `imgsz` or enable SAHI tiling
+- Export to ONNX with `--export` flag for faster inference
+
 ---
 
 ## 📋 Features

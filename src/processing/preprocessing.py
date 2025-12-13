@@ -114,6 +114,51 @@ def denoise_image(image: np.ndarray, method: str = "median") -> np.ndarray:
     return denoised
 
 
+def enhance_camera_image(image: np.ndarray) -> np.ndarray:
+    """
+    Enhance image captured by camera (lighting correction, unsharp mask).
+    """
+    # 1. White balance / Lighting correction via morphological opening (background est)
+    if len(image.shape) == 3:
+        # Working in LAB space for brightness
+        lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+        l, a, b = cv2.split(lab)
+        
+        # Estimate background illumination
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+        bg = cv2.morphologyEx(l, cv2.MORPH_CLOSE, kernel)
+        
+        # Normalize brightness: (L / bg) * 200
+        # Avoid division by zero
+        bg = bg.astype(float)
+        bg[bg == 0] = 1
+        l_float = l.astype(float)
+        l_norm = (l_float / bg) * 220.0
+        l_norm = np.clip(l_norm, 0, 255).astype(np.uint8)
+        
+        # Merge back
+        lab_norm = cv2.merge((l_norm, a, b))
+        corrected = cv2.cvtColor(lab_norm, cv2.COLOR_LAB2RGB)
+    else:
+        # Grayscale approach
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+        bg = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel)
+        bg = bg.astype(float)
+        bg[bg == 0] = 1
+        norm = (image.astype(float) / bg) * 220.0
+        corrected = np.clip(norm, 0, 255).astype(np.uint8)
+
+    # 2. Denoise lightly
+    corrected = cv2.fastNlMeansDenoising(corrected, None, 10, 7, 21) if len(image.shape) != 3 else \
+                cv2.fastNlMeansDenoisingColored(corrected, None, 10, 10, 7, 21)
+
+    # 3. Unsharp mask for edge crispness
+    gaussian_3 = cv2.GaussianBlur(corrected, (0, 0), 2.0)
+    unsharp = cv2.addWeighted(corrected, 1.5, gaussian_3, -0.5, 0)
+    
+    return unsharp
+
+
 def preprocess_image(
     image: np.ndarray,
     deskew: bool = True,
@@ -141,6 +186,12 @@ def preprocess_image(
     
     processed = image.copy()
     hint = (doc_type or Config.DOC_TYPE_HINT or "generic").lower()
+    
+    # Camera image enhancement
+    if hint in {"camera", "photo", "mobile"}:
+        processed = enhance_camera_image(processed)
+        metadata["camera_enhanced"] = True
+
     # Adaptive upscaling for handwritten/low-res scans
     if hint in {"handwritten", "scan", "scanned"}:
         scale = 1.3

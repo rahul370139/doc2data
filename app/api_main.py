@@ -34,11 +34,33 @@ from src.pipelines.figure_processor import FigureProcessor
 from src.pipelines.assemble import DocumentAssembler
 
 # Import schema extraction functions
-from fill_schema import (
-    load_schema,
-    extract_from_pdf_text_layer,
-    extract_with_ocr
-)
+try:
+    from fill_schema import (
+        load_schema,
+        extract_from_pdf_text_layer,
+        extract_with_ocr
+    )
+except ImportError:
+    # fill_schema may not exist, provide stubs
+    def load_schema(*args, **kwargs): return {}
+    def extract_from_pdf_text_layer(*args, **kwargs): return {}
+    def extract_with_ocr(*args, **kwargs): return {}
+
+
+# Pydantic models for API responses
+class ExtractionStats(BaseModel):
+    total_fields: int
+    extracted_fields: int
+    high_confidence_fields: int
+    coverage_percent: float
+
+
+class CMS1500Response(BaseModel):
+    form_type: str
+    extraction_method: str
+    statistics: ExtractionStats
+    extracted_fields: Dict[str, Any]
+    field_details: List[Dict[str, Any]]
 
 
 app = FastAPI(
@@ -57,83 +79,101 @@ app.add_middleware(
 )
 
 
+from src.pipelines.multi_agent_pipeline import MultiAgentPipeline, PipelineConfig
+
 # Global instances
+pipeline = None
 segmenter = None
 ocr_pipeline = None
-slm_labeler = None
-table_processor = None
-figure_processor = None
-assembler = DocumentAssembler(
-    process_tables=True,
-    process_figures=True,
-    use_vlm=Config.ENABLE_VLM
-)
 
+# ... (inside extract_cms1500 or new endpoint)
 
-# Response Models
-class HealthResponse(BaseModel):
-    status: str
-    message: str
-    version: str
+@app.post("/extract/reducto")
+async def extract_reducto(
+    file: UploadFile = File(...)
+):
+    """
+    Extract data and return ONLY Reducto-style JSON.
+    Directly compatible with Reducto API consumers.
+    """
+    try:
+        # Save uploaded file temporarily
+        suffix = Path(file.filename).suffix
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        # Initialize pipeline
+        global pipeline
+        if pipeline is None:
+            config = PipelineConfig(
+                enable_form_detection=True,
+                enable_alignment=True,
+                enable_trocr=True,
+                enable_slm_labeling=Config.ENABLE_SLM
+            )
+            pipeline = MultiAgentPipeline(config)
+            
+        # Process
+        result = await pipeline.process(tmp_path)
+        
+        # Cleanup
+        Path(tmp_path).unlink(missing_ok=True)
+        
+        # Return only the Reducto format part
+        if "reducto_format" in result:
+            return JSONResponse(content=result["reducto_format"])
+        else:
+            raise HTTPException(status_code=500, detail="Failed to generate Reducto-style output")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-class ExtractionStats(BaseModel):
-    total_fields: int
-    extracted_fields: int
-    high_confidence_fields: int
-    coverage_percent: float
-
-
-class CMS1500Response(BaseModel):
-    form_type: str
-    extraction_method: str
-    statistics: ExtractionStats
-    extracted_fields: Dict[str, str]
-    field_details: List[Dict[str, Any]]
-
-
-@app.get("/", response_model=HealthResponse)
-async def root():
-    """Root endpoint with API info."""
-    return {
-        "status": "online",
-        "message": "Doc2Data API - Intelligent Document Extraction",
-        "version": "2.0.0"
-    }
-
-
-@app.get("/health", response_model=HealthResponse)
-async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "message": "API is running",
-        "version": "2.0.0"
-    }
-
-
-@app.get("/schemas")
-async def list_schemas():
-    """List available form schemas."""
-    schema_dir = project_root / "data" / "schemas"
-    schemas = []
+@app.post("/extract/v2", response_model=Dict[str, Any])
+async def extract_v2(
+    file: UploadFile = File(...),
+    form_type: Optional[str] = Form(default=None),
+    enable_ocr: bool = Form(default=True),
+    enable_layout: bool = Form(default=True)
+):
+    """
+    Next-Gen Extraction using Multi-Agent Pipeline.
+    Supports CMS-1500, General Forms, and Reducto-style output.
+    """
+    try:
+        # Save uploaded file temporarily
+        suffix = Path(file.filename).suffix
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        # Initialize pipeline
+        global pipeline
+        if pipeline is None:
+            # Load config from env or defaults
+            config = PipelineConfig(
+                enable_form_detection=True,
+                enable_alignment=True,
+                enable_trocr=True,
+                enable_slm_labeling=Config.ENABLE_SLM,
+                enable_vlm_figures=Config.ENABLE_VLM
+            )
+            pipeline = MultiAgentPipeline(config)
+            
+        # Process
+        result = await pipeline.process(tmp_path)
+        
+        # Cleanup
+        Path(tmp_path).unlink(missing_ok=True)
+        
+        return result
     
-    if schema_dir.exists():
-        for schema_file in schema_dir.glob("*.json"):
-            try:
-                with open(schema_file) as f:
-                    data = json.load(f)
-                schemas.append({
-                    "id": schema_file.stem,
-                    "name": data.get("form_type", schema_file.stem),
-                    "description": data.get("description", ""),
-                    "field_count": len(data.get("fields", []))
-                })
-            except Exception:
-                pass
-    
-    return {"schemas": schemas}
-
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/extract/cms1500", response_model=CMS1500Response)
 async def extract_cms1500(
@@ -143,20 +183,10 @@ async def extract_cms1500(
 ):
     """
     Extract data from a CMS-1500 health insurance claim form.
-    
-    Args:
-        file: PDF file of the CMS-1500 form
-        method: Extraction method - 'auto', 'pdf_text', or 'ocr'
-        dpi: DPI for rendering (150-400)
-    
-    Returns:
-        Extracted form data with field details
+    Uses the new Multi-Agent Pipeline for superior results.
     """
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
-    
-    if dpi < 150 or dpi > 400:
-        raise HTTPException(status_code=400, detail="DPI must be between 150 and 400")
     
     try:
         # Save uploaded file temporarily
@@ -164,46 +194,41 @@ async def extract_cms1500(
             content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
+            
+        # Initialize pipeline
+        global pipeline
+        if pipeline is None:
+            config = PipelineConfig(
+                enable_form_detection=True,
+                enable_alignment=True,
+                enable_trocr=True,
+                enable_slm_labeling=Config.ENABLE_SLM
+            )
+            pipeline = MultiAgentPipeline(config)
+            
+        # Process
+        result = await pipeline.process(tmp_path)
         
-        # Load schema
-        schema = load_schema("cms-1500")
-        
-        # Choose extraction method
-        if method == "ocr":
-            result = extract_with_ocr(tmp_path, schema, page_num=0, dpi=dpi)
-        elif method == "pdf_text":
-            result = extract_from_pdf_text_layer(tmp_path, schema, page_num=0, dpi=dpi)
-        else:
-            # Auto mode - try PDF text first, fallback to OCR
-            result = extract_from_pdf_text_layer(tmp_path, schema, page_num=0, dpi=dpi)
-            non_empty = sum(1 for v in result["extracted_fields"].values() if v)
-            if non_empty < 5:
-                result = extract_with_ocr(tmp_path, schema, page_num=0, dpi=dpi)
-        
-        # Calculate statistics
-        total_fields = len(schema.get("fields", []))
-        extracted_fields = sum(1 for v in result["extracted_fields"].values() if v)
-        high_confidence = sum(1 for d in result["field_details"] if d.get("confidence", 0) > 0.7)
-        coverage = (extracted_fields / total_fields * 100) if total_fields > 0 else 0
-        
-        # Cleanup temp file
+        # Cleanup
         Path(tmp_path).unlink(missing_ok=True)
+        
+        # Map MultiAgent result to CMS1500Response structure
+        # This maintains backward compatibility with the API contract
+        stats = ExtractionStats(
+            total_fields=len(result.get("field_details", [])),
+            extracted_fields=len(result.get("extracted_fields", {})),
+            high_confidence_fields=sum(1 for f in result.get("field_details", []) if f.get("confidence", 0) > 0.8),
+            coverage_percent=result.get("business_coverage", 0.0) * 100
+        )
         
         return CMS1500Response(
             form_type="CMS-1500",
-            extraction_method=result.get("extraction_method", "unknown"),
-            statistics=ExtractionStats(
-                total_fields=total_fields,
-                extracted_fields=extracted_fields,
-                high_confidence_fields=high_confidence,
-                coverage_percent=round(coverage, 1)
-            ),
-            extracted_fields=result["extracted_fields"],
-            field_details=result["field_details"]
+            extraction_method="multi_agent_v2",
+            statistics=stats,
+            extracted_fields=result.get("extracted_fields", {}),
+            field_details=result.get("field_details", [])
         )
     
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
 
@@ -351,7 +376,7 @@ async def segment_endpoint(file_hash: str):
             image = np.array(Image.open(io.BytesIO(img_data)))
             
             # Segment page
-                blocks = segmenter.segment_page(image, page_data["page_id"]) 
+            blocks = segmenter.segment_page(image, page_data["page_id"]) 
             all_blocks.extend([block.to_dict() for block in blocks])
         
         result = {

@@ -33,11 +33,11 @@ Architecture:
                                      │
                                      ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                      LAYOUT DETECTION AGENT                                  │
-│  CMS-1500:              │  General Forms:                                        │
+│                      LAYOUT DETECTION AGENT                                 │
+│  CMS-1500:              │  General Forms:                                   │
 │  - YOLOv8 (fine-tuned)  │  - LayoutLMv3 / Detectron2 (PubLayNet)            │
-│  - Template zones       │  - Donut (end-to-end)                                  │
-│  Returns: blocks with type (text, table, figure, form fields, checkbox)        │
+│  - Template zones       │  - Donut (end-to-end)                             │
+│  Returns: blocks with type (text, table, figure, form fields, checkbox)     │
 └─────────────────────────────────────────────────────────────────────────────┘
                                      │
                     ┌────────────────┼────────────────┐
@@ -126,6 +126,10 @@ class BlockType(Enum):
     CHECKBOX = "checkbox"
     SIGNATURE = "signature"
     HEADER = "header"
+    FOOTER = "footer"
+    TITLE = "title"
+    PAGE_NUM = "page_num"
+    LIST = "list"
     FORM_FIELD = "form_field"
 
 
@@ -178,9 +182,14 @@ class PipelineConfig:
     enable_trocr: bool = True
     ocr_confidence_threshold: float = 0.5
     handwriting_threshold: float = 0.35
+    # Schema-zone matching / OCR tuning
+    zone_padding_px: int = 12
+    zone_padding_ratio: float = 0.15
+    # If True, each OCR word box is assigned to at most one schema zone to avoid duplicates/overlaps
+    enforce_unique_word_assignment: bool = True
     
-    # Template alignment
-    enable_alignment: bool = True
+    # Template alignment - DISABLED BY DEFAULT (was making scanned forms worse)
+    enable_alignment: bool = False
     alignment_fallback_to_ml: bool = True
     
     # SLM/VLM
@@ -250,6 +259,10 @@ class FormIdentificationAgent(BaseAgent):
         FormType.NCPDP: [
             "ncpdp", "universal claim form",
             "pharmacy claim"
+        ],
+        FormType.GENERIC: [
+            "tactical combat casualty care", "tccc", "casualty",
+            "mechanism of injury", "evac category"
         ]
     }
     
@@ -269,7 +282,11 @@ class FormIdentificationAgent(BaseAgent):
             return
         try:
             from paddleocr import PaddleOCR
-            self._ocr = PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
+            try:
+                self._ocr = PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
+            except Exception:
+                # Fallback for newer/older versions
+                self._ocr = PaddleOCR(lang='en')
         except Exception as e:
             self.log(f"OCR init failed: {e}")
         self._initialized = True
@@ -283,13 +300,57 @@ class FormIdentificationAgent(BaseAgent):
         x0, y0, x1, y1 = region
         crop = image[int(y0*h):int(y1*h), int(x0*w):int(x1*w)]
         
+        if crop.size == 0:
+            return ""
+            
         try:
-            result = self._ocr.ocr(crop, cls=True)
-            if result and result[0]:
-                texts = [line[1][0] for line in result[0] if line]
-                return " ".join(texts).lower()
-        except:
-            pass
+            try:
+                result = self._ocr.ocr(crop, cls=True)
+            except TypeError:
+                result = self._ocr.ocr(crop)
+                
+            # Handle PaddleX OCRResult
+            first_item = result[0] if isinstance(result, list) and len(result) > 0 else result
+            if "OCRResult" in str(type(first_item)) or "OCRResult" in str(type(result)):
+                try:
+                    # Try to get text directly
+                    json_data = {}
+                    if hasattr(first_item, 'json'):
+                        j = first_item.json
+                        json_data = j() if callable(j) else j
+                    elif hasattr(result, 'json'):
+                        j = result.json
+                        json_data = j() if callable(j) else j
+                        
+                    if isinstance(json_data, str):
+                        json_data = json.loads(json_data)
+                    
+                    # PaddleX v3 wraps data under "res" key
+                    if isinstance(json_data, dict):
+                        res = json_data.get('res', json_data)
+                        texts = res.get('rec_texts', res.get('rec_text', []))
+                        if texts:
+                            text = " ".join(str(t) for t in texts).lower()
+                            return text
+                except Exception as e:
+                    self.log(f"OCRResult parse error: {e}")
+
+            # Handle list of results
+            if isinstance(result, list) and len(result) > 0:
+                lines = result[0] if isinstance(result[0], list) else result
+                texts = []
+                for line in lines:
+                    if isinstance(line, list) and len(line) >= 2:
+                        # line[1] is (text, conf)
+                        text_conf = line[1]
+                        if isinstance(text_conf, (list, tuple)):
+                            texts.append(text_conf[0])
+                        else:
+                            texts.append(str(text_conf))
+                text = " ".join(texts).lower()
+                return text
+        except Exception as e:
+            self.log(f"OCR region failed: {e}")
         return ""
     
     def _match_fingerprint(self, text: str) -> Tuple[FormType, float]:
@@ -301,11 +362,17 @@ class FormIdentificationAgent(BaseAgent):
         
         for form_type, patterns in self.FINGERPRINTS.items():
             matches = sum(1 for p in patterns if p in text_lower)
-            score = matches / len(patterns)
-            if score > best_score:
-                best_score = score
-                best_match = form_type
+            # Boost score if multiple unique patterns match
+            if matches > 0:
+                score = matches / len(patterns) + 0.2  # Base confidence boost
+                if score > best_score:
+                    best_score = score
+                    best_match = form_type
         
+        # Lower threshold for acceptance
+        if best_score < 0.15:
+            return FormType.GENERIC, best_score
+            
         return best_match, best_score
     
     def _detect_version(self, text: str) -> Optional[str]:
@@ -326,9 +393,11 @@ class FormIdentificationAgent(BaseAgent):
         footer_text = self._ocr_region(image, (0.0, 0.85, 1.0, 1.0))
         
         combined_text = header_text + " " + footer_text
+        print(f"[FormID] Detected text: {combined_text[:200]}...")
         
         # Match fingerprint
         form_type, confidence = self._match_fingerprint(combined_text)
+        print(f"[FormID] Matched: {form_type} (conf: {confidence:.2f})")
         
         # Detect version if CMS-1500
         version = None
@@ -379,83 +448,134 @@ class TemplateAlignmentAgent(BaseAgent):
         self._initialized = True
     
     def _compute_homography(self, image: np.ndarray, template: np.ndarray) -> Tuple[Optional[np.ndarray], float]:
-        """Compute homography matrix using ORB feature matching."""
+        """
+        Compute alignment using Hybrid Approach: SIFT/ORB (Global) + ECC (Fine).
+        This ensures robust alignment even for tilted/shifted scans.
+        """
         # Convert to grayscale
         if len(image.shape) == 3:
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         else:
             gray = image
+
+        # Build a "structure" image (mainly form ruling lines) to make alignment robust to handwriting.
+        def _structure_mask(g: np.ndarray) -> np.ndarray:
+            g = cv2.GaussianBlur(g, (3, 3), 0)
+            bw = cv2.adaptiveThreshold(g, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                       cv2.THRESH_BINARY_INV, 31, 11)
+            h, w = bw.shape[:2]
+            h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(50, w // 18), 1))
+            v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(50, h // 18)))
+            horiz = cv2.morphologyEx(bw, cv2.MORPH_OPEN, h_kernel, iterations=1)
+            vert = cv2.morphologyEx(bw, cv2.MORPH_OPEN, v_kernel, iterations=1)
+            mask = cv2.bitwise_or(horiz, vert)
+            mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
+            return mask
+
+        # Template is already grayscale; build structure masks for both
+        template_mask = _structure_mask(template)
+        image_mask = _structure_mask(gray)
         
-        # Resize template to match image aspect ratio
         h, w = gray.shape[:2]
         th, tw = template.shape[:2]
-        scale = min(w / tw, h / th)
-        template_resized = cv2.resize(template, (int(tw * scale), int(th * scale)))
         
-        # ORB detector
-        orb = cv2.ORB_create(nfeatures=5000)
+        # 1. Coarse Alignment using SIFT (Handles large rotation/scale)
+        kp1, des1 = [], None
+        kp2, des2 = [], None
         
-        # Find keypoints and descriptors
-        kp1, des1 = orb.detectAndCompute(gray, None)
-        kp2, des2 = orb.detectAndCompute(template_resized, None)
-        
+        # Try SIFT first (robust)
+        try:
+            sift = cv2.SIFT_create(nfeatures=8000)
+            kp1, des1 = sift.detectAndCompute(image_mask, None)
+            kp2, des2 = sift.detectAndCompute(template_mask, None)
+        except Exception as e:
+            print(f"[Alignment] SIFT failed: {e}")
+            
+        # Fallback to ORB if SIFT fails or returns few keypoints
+        if des1 is None or len(kp1) < 10:
+            try:
+                orb = cv2.ORB_create(nfeatures=8000)
+                kp1, des1 = orb.detectAndCompute(image_mask, None)
+                kp2, des2 = orb.detectAndCompute(template_mask, None)
+            except Exception as e:
+                print(f"[Alignment] ORB failed: {e}")
+
         if des1 is None or des2 is None or len(kp1) < 10 or len(kp2) < 10:
             return None, 0.0
-        
-        # Match features
-        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
-        matches = bf.knnMatch(des1, des2, k=2)
-        
-        # Apply ratio test
+            
+        bf = cv2.BFMatcher()
         good_matches = []
-        for m, n in matches:
-            if m.distance < 0.75 * n.distance:
-                good_matches.append(m)
+        try:
+            # Check descriptor type to choose norm
+            norm = cv2.NORM_L2
+            if des1.dtype == np.uint8: # ORB uses uint8 descriptors
+                norm = cv2.NORM_HAMMING
+                bf = cv2.BFMatcher(norm, crossCheck=False)
+            
+            matches = bf.knnMatch(des1, des2, k=2)
+            for m, n in matches:
+                if m.distance < 0.75 * n.distance:
+                    good_matches.append(m)
+        except Exception:
+            pass
         
         if len(good_matches) < 10:
             return None, 0.0
-        
-        # Compute homography
+            
         src_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
         dst_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
         
-        H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+        # Find Homography (Global)
+        H_coarse, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
         
-        if H is None:
-            return None, 0.0
+        # If Homography fails or is invalid, try Affine (simpler, more stable)
+        if H_coarse is None or not self._validate_homography(H_coarse, (h, w)):
+            try:
+                # estimateAffinePartial2D covers rotation, translation, scaling (no shear)
+                affine_matrix, inliers = cv2.estimateAffinePartial2D(src_pts, dst_pts)
+                if affine_matrix is not None:
+                    # Convert 2x3 affine to 3x3 homography
+                    H_coarse = np.vstack([affine_matrix, [0, 0, 1]])
+                else:
+                    return None, 0.0
+            except Exception:
+                return None, 0.0
+            
+        # Warp image to coarse alignment
+        aligned_coarse = cv2.warpPerspective(image_mask, H_coarse, (tw, th))
         
-        # Compute alignment quality (inlier ratio)
-        inliers = mask.sum() if mask is not None else 0
-        quality = inliers / len(good_matches)
-        
-        return H, quality
+        # 2. Fine Alignment using ECC
+        try:
+            warp_mode = cv2.MOTION_HOMOGRAPHY
+            warp_matrix = np.eye(3, 3, dtype=np.float32)
+            criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 50, 1e-3)
+            cc, warp_matrix = cv2.findTransformECC(template_mask, aligned_coarse, warp_matrix, warp_mode, criteria)
+            H_final = np.dot(warp_matrix, H_coarse)
+            quality = cc
+        except Exception:
+            H_final = H_coarse
+            quality = 0.5 # Default confidence if ECC fails but coarse worked
+            
+        return H_final, quality
     
     def _validate_homography(self, H: np.ndarray, img_shape: Tuple[int, int]) -> bool:
-        """Validate that homography doesn't produce unreasonable warps."""
+        """
+        STRICT VALIDATION: Reject any homography that causes significant warping.
+        We only want to correct minor rotation/translation, NOT perspective tilt.
+        """
         if H is None:
             return False
-        
-        h, w = img_shape[:2]
-        corners = np.float32([[0, 0], [w, 0], [w, h], [0, h]]).reshape(-1, 1, 2)
-        
-        try:
-            warped_corners = cv2.perspectiveTransform(corners, H)
             
-            # Check if corners are within reasonable bounds
-            for corner in warped_corners:
-                x, y = corner[0]
-                if x < -w * 0.5 or x > w * 1.5 or y < -h * 0.5 or y > h * 1.5:
-                    return False
-            
-            # Check if area is preserved (within 20%)
-            original_area = w * h
-            warped_area = cv2.contourArea(warped_corners)
-            if warped_area < original_area * 0.5 or warped_area > original_area * 2.0:
-                return False
-            
-            return True
-        except:
+        # Check determinant (should be close to 1 for rigid transform)
+        det = np.abs(np.linalg.det(H[:2, :2]))
+        if det < 0.8 or det > 1.2:
             return False
+            
+        # Check perspective components (should be close to 0)
+        if abs(H[2, 0]) > 0.001 or abs(H[2, 1]) > 0.001:
+            return False
+            
+        return True
     
     async def process(self, image: np.ndarray, form_type: FormType) -> AlignmentResult:
         """Align image to template."""
@@ -473,15 +593,17 @@ class TemplateAlignmentAgent(BaseAgent):
             )
         
         template = self._templates[form_type]
+        th, tw = template.shape[:2]
         
         # Compute homography
         H, quality = self._compute_homography(image, template)
         
         # Validate homography
         if H is not None and self._validate_homography(H, image.shape):
-            # Apply warp
-            h, w = image.shape[:2]
-            aligned = cv2.warpPerspective(image, H, (w, h))
+            # IMPORTANT:
+            # H is estimated in the *template pixel coordinate system* (dst points come from template).
+            # Therefore the aligned output should be rendered in (tw, th), not the original (w, h).
+            aligned = cv2.warpPerspective(image, H, (tw, th))
             
             return AlignmentResult(
                 success=True,
@@ -526,29 +648,63 @@ class LayoutDetectionAgent(BaseAgent):
             return
         
         # Initialize YOLO if available
+        print(f"[LayoutAgent] Config.YOLO_MODEL_PATH = {Config.YOLO_MODEL_PATH}")
+        
         if Config.YOLO_MODEL_PATH:
             try:
+                from pathlib import Path
                 from src.pipelines.yolo_layout import YOLOLayoutDetector
-                self._yolo = YOLOLayoutDetector(
-                    Config.YOLO_MODEL_PATH,
-                    conf=self.config.yolo_confidence,
-                    iou=Config.YOLO_IOU
-                )
-                self.log("YOLO detector initialized")
+                
+                # Resolve model path (could be relative or absolute)
+                model_path = Path(Config.YOLO_MODEL_PATH)
+                print(f"[LayoutAgent] model_path = {model_path}, exists = {model_path.exists()}")
+                
+                if not model_path.is_absolute():
+                    model_path = Config.PROJECT_ROOT / model_path
+                    print(f"[LayoutAgent] Resolved to {model_path}, exists = {model_path.exists()}")
+                
+                if model_path.exists():
+                    # Use lower confidence (0.1) to get more detections from fine-tuned model
+                    conf = min(self.config.yolo_confidence, 0.10)
+                    print(f"[LayoutAgent] Creating YOLO detector with conf={conf}")
+                    self._yolo = YOLOLayoutDetector(
+                        str(model_path),
+                        conf=conf,
+                        iou=Config.YOLO_IOU
+                    )
+                    print(f"[LayoutAgent] ✅ YOLO detector initialized from {model_path}")
+                else:
+                    print(f"[LayoutAgent] ❌ YOLO model not found at {model_path}")
             except Exception as e:
-                self.log(f"YOLO init failed: {e}")
+                import traceback
+                print(f"[LayoutAgent] ❌ YOLO init failed: {e}")
+                traceback.print_exc()
+        else:
+            print("[LayoutAgent] ❌ Config.YOLO_MODEL_PATH is None or empty")
         
         # Initialize Detectron2/LayoutParser
         try:
             import layoutparser as lp
+            # Try Detectron2 first (better quality)
+            # IMPORTANT: Use Detectron2 config, NOT PaddleDetection config
             self._detectron = lp.Detectron2LayoutModel(
-                'lp://PubLayNet/ppyolov2_r50vd_dcn_365e/config',
+                'lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config',
                 extra_config=["MODEL.ROI_HEADS.SCORE_THRESH_TEST", self.config.detectron_threshold],
                 label_map={0: "Text", 1: "Title", 2: "List", 3: "Table", 4: "Figure"}
             )
-            self.log("Detectron2 initialized")
+            self.log("✅ Detectron2 initialized with faster_rcnn_R_50_FPN_3x")
         except Exception as e:
-            self.log(f"Detectron2 init failed: {e}")
+            self.log(f"⚠️ Detectron2 init failed: {e}")
+            # Try PaddleDetection as fallback (easier install, comparable quality)
+            try:
+                import layoutparser as lp
+                self._detectron = lp.PaddleDetectionLayoutModel(
+                    config_path="lp://PubLayNet/ppyolov2_r50vd_dcn_365e/config",
+                    label_map={0: "Text", 1: "Title", 2: "List", 3: "Table", 4: "Figure"}
+                )
+                self.log("✅ PaddleDetectionLayoutModel initialized (fallback)")
+            except Exception as e2:
+                self.log(f"❌ PaddleDetection fallback failed: {e2}")
         
         self._initialized = True
     
@@ -656,20 +812,79 @@ class OCRAgent(BaseAgent):
         self._paddle = None
         self._trocr_model = None
         self._trocr_processor = None
+        self._templates: Dict[str, np.ndarray] = {}
     
     async def initialize(self):
         if self._initialized:
             return
         
-        # PaddleOCR
+        # Use our PaddleOCRWrapper which handles PaddleX properly
         try:
-            from paddleocr import PaddleOCR
-            self._paddle = PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
+            from src.ocr.paddle_ocr import PaddleOCRWrapper
+            self._paddle = PaddleOCRWrapper()
+            self.log("PaddleOCRWrapper initialized")
         except Exception as e:
             self.log(f"PaddleOCR init failed: {e}")
         
         # TrOCR (lazy load on first use)
         self._initialized = True
+
+    def _get_template_gray(self, form_type: Optional[str]) -> Optional[np.ndarray]:
+        """Load and cache a grayscale template image for template-diff OCR."""
+        if not form_type:
+            return None
+        key = str(form_type)
+        if key in self._templates:
+            return self._templates[key]
+        try:
+            from utils.config import Config
+            from pathlib import Path
+            tmpl_dir = Path(Config.PROJECT_ROOT) / "data" / "templates"
+            # We expect templates like cms-1500.png or cms1500.png
+            candidates = [
+                tmpl_dir / f"{key}.png",
+                tmpl_dir / f"{key.replace('_','-')}.png",
+                tmpl_dir / "cms-1500.png",
+                tmpl_dir / "cms1500.png",
+            ]
+            for p in candidates:
+                if p.exists():
+                    img = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
+                    if img is not None and img.size > 0:
+                        self._templates[key] = img
+                        return img
+        except Exception:
+            return None
+        return None
+
+    def _template_diff_crop(self, crop_rgb: np.ndarray, template_gray: np.ndarray, bbox: Tuple[float, float, float, float]) -> Optional[np.ndarray]:
+        """
+        Compute a template-diff image for a crop (aligned to template coordinate space).
+        Returns an RGB image emphasizing filled-in ink, suppressing printed form text/lines.
+        """
+        try:
+            x0, y0, x1, y1 = [int(round(v)) for v in bbox]
+            th, tw = template_gray.shape[:2]
+            if x0 < 0 or y0 < 0 or x1 > tw or y1 > th or x1 <= x0 or y1 <= y0:
+                return None
+            if crop_rgb.ndim == 3:
+                crop_gray = cv2.cvtColor(crop_rgb, cv2.COLOR_RGB2GRAY)
+            else:
+                crop_gray = crop_rgb
+            tmpl_crop = template_gray[y0:y1, x0:x1]
+            if tmpl_crop.shape[:2] != crop_gray.shape[:2]:
+                return None
+            diff = cv2.absdiff(crop_gray, tmpl_crop)
+            # Boost contrast of differences
+            diff = cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX)
+            # Binarize and invert to get black text on white background
+            _, bw = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            # Slight dilation to connect strokes
+            bw = cv2.dilate(bw, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)), iterations=1)
+            # Convert to RGB for OCR engines
+            return cv2.cvtColor(bw, cv2.COLOR_GRAY2RGB)
+        except Exception:
+            return None
     
     def _load_trocr(self):
         """Lazy load TrOCR."""
@@ -685,23 +900,25 @@ class OCRAgent(BaseAgent):
             self.log(f"TrOCR load failed: {e}")
     
     def _paddle_ocr(self, image: np.ndarray) -> Tuple[str, float, List[Dict]]:
-        """Run PaddleOCR."""
+        """Run PaddleOCR using new PaddleX API (predict instead of ocr)."""
         if self._paddle is None:
             return "", 0.0, []
         
         try:
-            result = self._paddle.ocr(image, cls=True)
-            if result and result[0]:
-                texts, confs, boxes = [], [], []
-                for line in result[0]:
-                    if line and len(line) >= 2:
-                        texts.append(line[1][0])
-                        confs.append(line[1][1])
-                        boxes.append({
-                            "text": line[1][0],
-                            "bbox": [p for point in line[0] for p in point],
-                            "confidence": line[1][1]
-                        })
+            # Use PaddleOCRWrapper which handles the new PaddleX API
+            word_boxes = self._paddle.extract_text(image)
+            
+            if word_boxes:
+                texts = [wb.text for wb in word_boxes]
+                confs = [wb.confidence for wb in word_boxes]
+                boxes = [
+                    {
+                        "text": wb.text,
+                        "bbox": list(wb.bbox),
+                        "confidence": wb.confidence
+                    }
+                    for wb in word_boxes
+                ]
                 avg_conf = sum(confs) / len(confs) if confs else 0.0
                 return " ".join(texts), avg_conf, boxes
         except Exception as e:
@@ -748,29 +965,67 @@ class OCRAgent(BaseAgent):
             return False, 0.0
         
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) if len(image.shape) == 3 else image
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        
-        density = np.count_nonzero(binary) / binary.size
-        is_checked = density > 0.18
-        confidence = min(1.0, abs(density - 0.18) / 0.15 + 0.5)
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
+        binary = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 9
+        )
+
+        # Ignore the checkbox border by using an inner crop (captures light X marks better)
+        h, w = binary.shape[:2]
+        pad_x = int(w * 0.18)
+        pad_y = int(h * 0.18)
+        inner = binary[pad_y:max(pad_y + 1, h - pad_y), pad_x:max(pad_x + 1, w - pad_x)]
+        if inner.size == 0:
+            inner = binary
+
+        ink = np.count_nonzero(inner)
+        area = max(inner.size, 1)
+        ink_ratio = ink / area
+
+        # Empirically: empty boxes have very low inner-ink; checked boxes have higher ink.
+        # Keep threshold low to catch thin hand-drawn X marks.
+        is_checked = ink_ratio > 0.020
+        confidence = float(min(1.0, max(0.0, (ink_ratio - 0.01) / 0.05)))
         
         return is_checked, confidence
     
-    def _is_handwritten(self, image: np.ndarray, paddle_conf: float) -> bool:
-        """Heuristic to detect if text is handwritten."""
-        if paddle_conf < self.config.handwriting_threshold:
+    def _is_handwritten(self, image: np.ndarray, paddle_conf: float, paddle_text: str) -> bool:
+        """Heuristic to detect if text is handwritten.
+        
+        Only use TrOCR if PaddleOCR completely failed (no text at all).
+        PaddleOCR handles handwriting reasonably well, TrOCR tends to hallucinate.
+        """
+        # Only try TrOCR if PaddleOCR found nothing
+        if not paddle_text or len(paddle_text.strip()) == 0:
             return True
         
-        # Additional heuristics could be added here
+        # Also try if confidence is very low AND text is very short
+        if paddle_conf < 0.3 and len(paddle_text) < 3:
+            return True
+        
         return False
     
     async def process(self, image: np.ndarray, block: DetectedBlock) -> DetectedBlock:
         """OCR a single block with appropriate method."""
         await self.initialize()
+
+        # If this block already has text from full-page OCR zone matching, do NOT re-OCR tiny crops.
+        # Per-field crop OCR often *reduces* quality (tight crops, partial words, missing context),
+        # and it also causes duplicates when overlapping zones exist.
+        src = (block.metadata or {}).get("source")
+        if src == "ocr_zone_matching" and block.block_type not in (BlockType.CHECKBOX, BlockType.SIGNATURE):
+            if block.text and len(str(block.text).strip()) > 0:
+                block.metadata["ocr_engine"] = "full_page_zone_matching"
+                return block
         
         h, w = image.shape[:2]
         x0, y0, x1, y1 = block.bbox
-        crop = image[int(y0):int(y1), int(x0):int(x1)]
+        
+        # Expand bbox to capture edges; controlled by config (UI slider `ocr_padding`)
+        pad = int(getattr(self.config, "zone_padding_px", 10))
+        x0_p, y0_p = max(0, x0 - pad), max(0, y0 - pad)
+        x1_p, y1_p = min(w, x1 + pad), min(h, y1 + pad)
+        crop = image[int(y0_p):int(y1_p), int(x0_p):int(x1_p)]
         
         if crop.size == 0:
             block.text = ""
@@ -778,7 +1033,10 @@ class OCRAgent(BaseAgent):
         
         # Checkbox detection
         if block.block_type == BlockType.CHECKBOX:
-            is_checked, conf = self._detect_checkbox(crop)
+            # If we have a template (aligned forms), prefer diff-based checkbox detection.
+            tmpl = self._get_template_gray((block.metadata or {}).get("form_type"))
+            diff_img = self._template_diff_crop(crop, tmpl, (x0_p, y0_p, x1_p, y1_p)) if tmpl is not None else None
+            is_checked, conf = self._detect_checkbox(diff_img if diff_img is not None else crop)
             block.text = "X" if is_checked else ""
             block.confidence = conf
             block.metadata["ocr_engine"] = "checkbox_detector"
@@ -802,20 +1060,66 @@ class OCRAgent(BaseAgent):
                 block.metadata["ocr_engine"] = "signature_detector"
             return block
         
-        # Standard text - tiered OCR
-        paddle_text, paddle_conf, paddle_boxes = self._paddle_ocr(crop)
+        # Standard text - for aligned scans, use template-diff crop to suppress printed labels/lines.
+        crop_for_ocr = crop
+        tmpl = self._get_template_gray((block.metadata or {}).get("form_type"))
+        if tmpl is not None and image.shape[0] == tmpl.shape[0] and image.shape[1] == tmpl.shape[1]:
+            diff_img = self._template_diff_crop(crop, tmpl, (x0_p, y0_p, x1_p, y1_p))
+            if diff_img is not None:
+                crop_for_ocr = diff_img
+                block.metadata["template_diff_used"] = True
+
+        # Tiered OCR (PaddleOCR first, TrOCR fallback)
+        # For small form fields, try extra sharpening/contrast
+        paddle_text, paddle_conf, paddle_boxes = self._paddle_ocr(crop_for_ocr)
+        
+        # Accuracy boost: If low confidence or very short text, try zoomed crop
+        if paddle_conf < 0.5 and paddle_text:
+            zoomed = cv2.resize(crop_for_ocr, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+            z_text, z_conf, z_boxes = self._paddle_ocr(zoomed)
+            if z_conf > paddle_conf:
+                paddle_text, paddle_conf, paddle_boxes = z_text, z_conf, z_boxes
+
         block.metadata["ocr_boxes"] = paddle_boxes
-        
-        # Try TrOCR if low confidence or likely handwritten
-        if self._is_handwritten(crop, paddle_conf):
-            trocr_text, trocr_conf = self._trocr_ocr(crop)
-            if trocr_text and (trocr_conf > paddle_conf or not paddle_text):
-                block.text = trocr_text
-                block.confidence = trocr_conf
-                block.metadata["ocr_engine"] = "trocr"
-                return block
-        
-        block.text = paddle_text
+
+        def _alnum_ratio(s: str) -> float:
+            s = (s or "").strip()
+            if not s:
+                return 0.0
+            an = sum(ch.isalnum() for ch in s)
+            return an / max(1, len(s))
+
+        def _looks_noisy(s: str) -> bool:
+            s = (s or "").strip()
+            if not s:
+                return True
+            if len(s) <= 2:
+                return True
+            return _alnum_ratio(s) < 0.55
+
+        # If PaddleOCR produced something but it's low-confidence / noisy, try TrOCR and pick the better result.
+        if self._is_handwritten(crop_for_ocr, paddle_conf, paddle_text) or (paddle_text and _looks_noisy(paddle_text)) or (paddle_conf < 0.60):
+            trocr_text, trocr_conf = self._trocr_ocr(crop_for_ocr)
+            if trocr_text and len(trocr_text.strip()) > 0:
+                # Pick by "looks less noisy" first, then longer text.
+                pt = (paddle_text or "").strip()
+                tt = (trocr_text or "").strip()
+                pick_trocr = False
+                if _looks_noisy(pt) and not _looks_noisy(tt):
+                    pick_trocr = True
+                elif _alnum_ratio(tt) >= _alnum_ratio(pt) + 0.10:
+                    pick_trocr = True
+                elif len(tt) > len(pt) + 3:
+                    pick_trocr = True
+
+                if pick_trocr:
+                    block.text = tt
+                    block.confidence = trocr_conf
+                    block.metadata["ocr_engine"] = "trocr"
+                    return block
+
+        # Default: PaddleOCR result (may be empty)
+        block.text = (paddle_text or "").strip()
         block.confidence = paddle_conf
         block.metadata["ocr_engine"] = "paddleocr"
         return block
@@ -902,19 +1206,63 @@ class LabelingAgent(BaseAgent):
         return ""
     
     async def label_text_block(self, block: DetectedBlock, context: str = "") -> DetectedBlock:
-        """Label a text block using SLM."""
+        """Label a text block and clean its value using SLM."""
         if not self.config.enable_slm_labeling or not block.text:
             return block
         
-        prompt = f"""Identify what field this text belongs to on a medical form.
-Text: "{block.text}"
+        # Enhanced prompt for semantic tagging and value extraction
+        prompt = f"""Analyze this text block from a medical form.
+Block Text: "{block.text}"
 Context: {context}
 
-Respond with just the field name (e.g., "Patient Name", "Date of Birth", "Insurance ID").
-If unsure, respond with "Unknown"."""
+1. Classify the Semantic Role: [Title, Section Header, Footer, Page Number, Key-Value Pair, List Item, Signature, Comment, Other]
+2. Identify the Field Name (if Key-Value Pair).
+3. Extract ONLY the Clean Value (remove printed labels, instructions).
+
+Respond in JSON format: 
+{{
+  "role": "...", 
+  "field_name": "...", 
+  "clean_value": "..."
+}}
+"""
         
-        label = self._call_slm(prompt)
-        block.metadata["semantic_label"] = label.strip()
+        response = self._call_slm(prompt)
+        try:
+            import json
+            clean_resp = response.replace("```json", "").replace("```", "").strip()
+            data = json.loads(clean_resp)
+            
+            # Store fine-grained semantic role
+            role = (data.get("role") or "text").lower()
+            field_name = data.get("field_name", "Unknown")
+            block.metadata["semantic_role"] = role
+            block.metadata["semantic_label"] = field_name
+
+            # Map semantic role to block type
+            if "title" in role:
+                block.block_type = BlockType.TITLE
+            elif "header" in role:
+                block.block_type = BlockType.HEADER
+            elif "footer" in role:
+                block.block_type = BlockType.FOOTER
+            elif "page" in role:
+                block.block_type = BlockType.PAGE_NUM
+            elif "signature" in role:
+                block.block_type = BlockType.SIGNATURE
+            elif "list" in role:
+                block.block_type = BlockType.LIST
+            else:
+                # keep as text/form_field; semantic label captured in metadata
+                pass
+
+            cleaned = data.get("clean_value")
+            if cleaned and cleaned.lower() not in ["null", "none", ""]:
+                block.metadata["original_text"] = block.text
+                block.text = cleaned
+        except Exception:
+            pass
+            
         return block
     
     async def process_table(self, image: np.ndarray, block: DetectedBlock) -> Dict[str, Any]:
@@ -1094,26 +1442,516 @@ class MultiAgentPipeline:
         self.labeling_agent = LabelingAgent(self.config)
         self.validation_agent = ValidationAgent(self.config)
     
-    def _load_image(self, path: str) -> Tuple[np.ndarray, int, int]:
-        """Load document image."""
+    def _load_image(self, path: str) -> Tuple[np.ndarray, int, int, Optional[List[Any]]]:
+        """Load document image.
+        
+        CRITICAL CHANGE: Ignoring digital text layer to prevent 'hallucinations' from 
+        underlying PDF templates. We MUST OCR what we see visually.
+        """
         path = Path(path)
+        digital_word_boxes = None
         
         if path.suffix.lower() == ".pdf":
             import fitz
             doc = fitz.open(str(path))
             page = doc[0]
-            mat = fitz.Matrix(300 / 72, 300 / 72)
+            zoom = 300 / 72
+            mat = fitz.Matrix(zoom, zoom)
             pix = page.get_pixmap(matrix=mat)
             img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
             if pix.n == 4:
                 img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
+            
+            # FORCE DISABLE DIGITAL TEXT EXTRACTION
+            # This was causing the "Rahul" issue where it read hidden text layers instead of the visible pixels.
+            digital_word_boxes = None 
+            
             doc.close()
         else:
             img = cv2.imread(str(path))
+            if img is None:
+                raise ValueError(f"Failed to load image: {path}")
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         
-        return img, img.shape[1], img.shape[0]
+        return img, img.shape[1], img.shape[0], digital_word_boxes
     
+    def _get_block_label(self, block: DetectedBlock) -> str:
+        """Get display label for a block (shows block TYPE, not field name)."""
+        # Priority 1: YOLO class name
+        class_name = block.metadata.get("class_name", "")
+        if class_name:
+            return class_name.upper()
+        
+        # Priority 2: Block type enum
+        btype = block.block_type.value if hasattr(block.block_type, 'value') else str(block.block_type)
+        return btype.upper()
+    
+    def _clean_field_value(self, raw_text: str, field_label: str, field_id: str) -> str:
+        """
+        Strip pre-printed labels from OCR text to get just the filled-in value.
+        
+        CMS-1500 forms have pre-printed labels like "PATIENT'S NAME" that get captured
+        by OCR along with the actual values. This method removes them.
+        """
+        import re
+        
+        if not raw_text:
+            return ""
+        
+        text = raw_text
+        
+        # Common CMS-1500 pre-printed patterns to remove
+        patterns_to_remove = [
+            # Field numbers and labels
+            r"^\d+[a-z]?\.\s*",  # "1.", "2.", "1a.", etc.
+            
+            # Common field labels (case-insensitive)
+            r"PATIENT'?S?\s*(NAME|BIRTH|ADDRESS|SEX|PHONE|RELATIONSHIP)",
+            r"INSURED'?S?\s*(NAME|I\.?D\.?\s*N|ADDRESS|DATE|POLICY|GROUP)",
+            r"OTHER\s+INSURED'?S?\s*(NAME|POLICY)",
+            r"INSURANCE\s+PLAN\s+NAME",
+            r"EMPLOYER'?S?\s*NAME",
+            r"REFERRING\s+PROVIDER",
+            r"SIGNATURE\s+OF",
+            r"BILLING\s+PROVIDER",
+            r"SERVICE\s+FACILITY",
+            r"DATE\s+OF\s+CURRENT",
+            r"DIAGNOSIS\s+OR\s+NATURE",
+            
+            # Date format labels
+            r"\(?\s*MM\s+DD\s+Y+\s*\)?",
+            r"MM\s*DD\s*YY",
+            
+            # Common suffixes/noise
+            r"\(Last.*?(First|Name)\)",
+            r"\(No\.,?\s*S.*?\)",
+            r"\(Include\s+Area\s+Code\)",
+            r"OR\s+PROGR\s*AM\s+NAME",
+            r"\(For\s+Program.*?\)",
+            
+            # Box labels
+            r"CITY(?:\s|$)",
+            r"STATE(?:\s|$)",
+            r"ZIP\s*CODE",
+            r"TELEPHONE",
+            r"SEX\s*[MF]?",
+        ]
+        
+        # Also try to remove the specific field label
+        if field_label:
+            # Escape special regex chars and make flexible
+            label_pattern = re.escape(field_label).replace(r"\ ", r"\s*")
+            patterns_to_remove.append(label_pattern)
+        
+        # Apply patterns
+        for pattern in patterns_to_remove:
+            text = re.sub(pattern, " ", text, flags=re.IGNORECASE)
+        
+        # Clean up extra whitespace
+        text = re.sub(r"\s+", " ", text).strip()
+        
+        # Remove leading/trailing punctuation and junk
+        text = re.sub(r"^[\s\(\)\[\]\.,\-:]+", "", text)
+        text = re.sub(r"[\s\(\)\[\]\.,\-:]+$", "", text)
+        
+        return text.strip()
+    
+    async def _match_ocr_to_zones(
+        self, 
+        word_boxes: List, 
+        fields: List[dict], 
+        width: int, 
+        height: int,
+        image: np.ndarray,
+        word_level: bool = False
+    ) -> List[DetectedBlock]:
+        """
+        Match OCR word boxes to schema field zones.
+        This is more robust than cropping regions because it handles misalignment.
+        
+        Strategy:
+        1. For each schema field, calculate expected pixel coordinates
+        2. Find all OCR words that overlap with the field region
+        3. Concatenate overlapping text as the field value
+        """
+        blocks = []
+
+        # Precompute zones
+        zones = []
+        for field_def in fields:
+            field_id = field_def.get("id")
+            if not field_id:
+                continue
+            bbox_norm = field_def.get("bbox_norm")
+            if not bbox_norm or len(bbox_norm) != 4:
+                continue
+
+            x0 = int(bbox_norm[0] * width)
+            y0 = int(bbox_norm[1] * height)
+            x1 = int(bbox_norm[2] * width)
+            y1 = int(bbox_norm[3] * height)
+
+            # Expand matching region (ratio + px padding)
+            pad_x = max(int((x1 - x0) * float(self.config.zone_padding_ratio)), int(self.config.zone_padding_px))
+            pad_y = max(int((y1 - y0) * float(self.config.zone_padding_ratio)), int(self.config.zone_padding_px))
+            x0_exp = max(0, x0 - pad_x)
+            y0_exp = max(0, y0 - pad_y)
+            x1_exp = min(width, x1 + pad_x)
+            y1_exp = min(height, y1 + pad_y)
+
+            field_type = field_def.get("field_type", "text")
+            label = field_def.get("label", field_id)
+
+            zones.append({
+                "field_id": field_id,
+                "label": label,
+                "field_type": field_type,
+                "bbox": (x0, y0, x1, y1),
+                "bbox_exp": (x0_exp, y0_exp, x1_exp, y1_exp),
+                "words": []
+            })
+
+        # Helper: intersection area
+        def _inter_area(a, b) -> float:
+            ax0, ay0, ax1, ay1 = a
+            bx0, by0, bx1, by1 = b
+            ox = max(0.0, min(ax1, bx1) - max(ax0, bx0))
+            oy = max(0.0, min(ay1, by1) - max(ay0, by0))
+            return ox * oy
+
+        # Assign each OCR "word" box to the best zone (prevents duplicates when zones overlap).
+        # Only safe when we truly have word-level boxes (e.g. digital PDF text layer).
+        # OCR detectors often output *line-level* boxes that span multiple fields, and forcing unique
+        # assignment on those will mis-route text.
+        unique_ok = bool(self.config.enforce_unique_word_assignment and word_level)
+        if unique_ok:
+            for wb in word_boxes:
+                wx0, wy0, wx1, wy1 = wb.bbox
+                word_bbox = (float(wx0), float(wy0), float(wx1), float(wy1))
+                cx = (word_bbox[0] + word_bbox[2]) / 2.0
+                cy = (word_bbox[1] + word_bbox[3]) / 2.0
+                # Use a top-anchored point for assignment. OCR sometimes returns tall word boxes
+                # that span multiple adjacent fields (e.g., patient name + address rows).
+                # Using the center can mis-assign such boxes to the lower field.
+                word_h = max(word_bbox[3] - word_bbox[1], 1.0)
+                anchor_y = word_bbox[1] + min(2.0, word_h * 0.2)
+                anchor_x = cx
+
+                def _contains(b, x, y) -> bool:
+                    x0, y0, x1, y1 = b
+                    return (x0 <= x <= x1) and (y0 <= y <= y1)
+
+                def _area(b) -> float:
+                    x0, y0, x1, y1 = b
+                    return max((x1 - x0) * (y1 - y0), 1.0)
+
+                # Prefer original bbox containment (more precise), fall back to expanded bbox containment.
+                candidates = []
+                for i, z in enumerate(zones):
+                    if _contains(z["bbox"], anchor_x, anchor_y):
+                        candidates.append((i, _area(z["bbox"])))
+
+                if not candidates:
+                    for i, z in enumerate(zones):
+                        if _contains(z["bbox_exp"], anchor_x, anchor_y):
+                            candidates.append((i, _area(z["bbox_exp"])))
+
+                if candidates:
+                    # Choose smallest containing zone (most specific) to avoid bleeding into neighbors
+                    candidates.sort(key=lambda t: t[1])
+                    best_idx = candidates[0][0]
+                    zones[best_idx]["words"].append({
+                        "text": wb.text,
+                        "confidence": wb.confidence,
+                        "x": cx,
+                        "y": cy
+                    })
+                # NOTE: In word-level mode we do NOT perform an “intersection fallback”.
+                # If a word doesn't land in (bbox or bbox_exp), leaving it unassigned is safer
+                # than contaminating a neighboring field.
+        else:
+            # Legacy behavior: each zone collects any overlapping words
+            for z in zones:
+                x0_exp, y0_exp, x1_exp, y1_exp = z["bbox_exp"]
+                for wb in word_boxes:
+                    wx0, wy0, wx1, wy1 = wb.bbox
+                    inter = _inter_area((float(wx0), float(wy0), float(wx1), float(wy1)), (x0_exp, y0_exp, x1_exp, y1_exp))
+                    if inter > 0:
+                        cx = (wx0 + wx1) / 2.0
+                        cy = (wy0 + wy1) / 2.0
+                        z["words"].append({"text": wb.text, "confidence": wb.confidence, "x": cx, "y": cy})
+
+        # Build blocks from zones
+        for z in zones:
+            field_id = z["field_id"]
+            label = z["label"]
+            field_type = z["field_type"]
+            x0, y0, x1, y1 = z["bbox"]
+
+            # Sort words by position (top-to-bottom, left-to-right)
+            words = sorted(z["words"], key=lambda w: (w["y"], w["x"]))
+
+            raw_text = " ".join([w["text"] for w in words]).strip()
+            avg_conf = sum(w["confidence"] for w in words) / len(words) if words else 0.0
+
+            # For machine-filled forms, remove printed label noise now.
+            cleaned_text = self._clean_field_value(raw_text, label, field_id)
+
+            if field_type == "checkbox":
+                block_type = BlockType.CHECKBOX
+            elif field_type == "signature":
+                block_type = BlockType.SIGNATURE
+            elif "table" in field_id.lower():
+                block_type = BlockType.TABLE
+            else:
+                block_type = BlockType.FORM_FIELD
+
+            blocks.append(DetectedBlock(
+                id=field_id,
+                block_type=block_type,
+                bbox=(x0, y0, x1, y1),
+                text=cleaned_text,
+                confidence=avg_conf,
+                metadata={
+                    "label": label,
+                    "semantic_label": field_id,
+                    "source": "ocr_zone_matching",
+                    "field_type": field_type,
+                    "num_matched_words": len(words),
+                    "raw_ocr_text": raw_text,
+                    "zone_padding_px": int(self.config.zone_padding_px),
+                    "zone_padding_ratio": float(self.config.zone_padding_ratio),
+                    "unique_word_assignment": bool(unique_ok),
+                }
+            ))
+        
+        # Filter out empty fields (optional - keep for completeness)
+        # blocks = [b for b in blocks if b.text]
+        
+        return blocks
+    
+    def _group_words_into_blocks(self, word_boxes: List, width: int, height: int) -> List[DetectedBlock]:
+        """
+        Group OCR word boxes into logical text blocks based on spatial proximity.
+        This provides meaningful structure instead of one giant text block.
+        
+        Algorithm:
+        1. Sort words by Y position (top to bottom)
+        2. Group words into lines based on Y proximity
+        3. Each line becomes a block
+        """
+        if not word_boxes:
+            return []
+        
+        # Sort by Y position (top to bottom), then X (left to right)
+        sorted_words = sorted(word_boxes, key=lambda w: (w.bbox[1], w.bbox[0]))
+        
+        blocks = []
+        current_line_words = []
+        current_y = None
+        line_threshold = 15  # Pixels - words within this Y range are same line
+        
+        for word in sorted_words:
+            word_y = (word.bbox[1] + word.bbox[3]) / 2  # Center Y
+            
+            if current_y is None:
+                current_y = word_y
+                current_line_words = [word]
+            elif abs(word_y - current_y) <= line_threshold:
+                # Same line
+                current_line_words.append(word)
+            else:
+                # New line - save current line as block
+                if current_line_words:
+                    blocks.append(self._words_to_block(current_line_words, len(blocks)))
+                current_line_words = [word]
+                current_y = word_y
+        
+        # Don't forget last line
+        if current_line_words:
+            blocks.append(self._words_to_block(current_line_words, len(blocks)))
+        
+        return blocks
+    
+    def _words_to_block(self, words: List, block_idx: int) -> DetectedBlock:
+        """Convert a list of word boxes into a DetectedBlock."""
+        # Sort words left to right
+        words = sorted(words, key=lambda w: w.bbox[0])
+        
+        # Compute bounding box
+        x0 = min(w.bbox[0] for w in words)
+        y0 = min(w.bbox[1] for w in words)
+        x1 = max(w.bbox[2] for w in words)
+        y1 = max(w.bbox[3] for w in words)
+        
+        # Concatenate text
+        text = " ".join(w.text for w in words)
+        avg_conf = sum(w.confidence for w in words) / len(words)
+        
+        return DetectedBlock(
+            id=f"line_{block_idx}",
+            block_type=BlockType.TEXT,
+            bbox=(x0, y0, x1, y1),
+            text=text,
+            confidence=avg_conf,
+            metadata={
+                "source": "full_page_ocr",
+                "word_count": len(words),
+                "ocr_engine": "paddleocr"
+            }
+        )
+
+    async def _load_schema_zones(self, image: np.ndarray, width: int, height: int) -> List[DetectedBlock]:
+        """Load CMS-1500 schema zones as fallback layout detection."""
+        import json
+        from pathlib import Path
+        
+        schema_path = Path(__file__).parent.parent.parent / "data" / "schemas" / "cms-1500.json"
+        if not schema_path.exists():
+            print(f"[Pipeline] Schema not found: {schema_path}")
+            return []
+        
+        try:
+            with open(schema_path) as f:
+                schema = json.load(f)
+            
+            blocks = []
+            for field in schema.get("fields", []):
+                bbox_norm = field.get("bbox_norm")
+                if not bbox_norm or len(bbox_norm) != 4:
+                    continue
+                
+                # Convert normalized bbox to pixels
+                x0 = int(bbox_norm[0] * width)
+                y0 = int(bbox_norm[1] * height)
+                x1 = int(bbox_norm[2] * width)
+                y1 = int(bbox_norm[3] * height)
+                
+                # Determine block type from field_type
+                field_type = field.get("field_type", "text")
+                if field_type == "checkbox":
+                    block_type = BlockType.CHECKBOX
+                elif field_type == "signature":
+                    block_type = BlockType.SIGNATURE
+                elif "table" in field.get("id", "").lower():
+                    block_type = BlockType.TABLE
+                else:
+                    block_type = BlockType.FORM_FIELD
+                
+                blocks.append(DetectedBlock(
+                    id=field.get("id", f"field_{len(blocks)}"),
+                    block_type=block_type,
+                    bbox=(x0, y0, x1, y1),
+                    confidence=0.9,
+                    metadata={
+                        "label": block_type.value.upper(),  # Use block type as label
+                        "field_name": field.get("label", ""),  # Keep original field name
+                        "source": "schema_zones",
+                        "field_type": field_type,
+                        "class_name": block_type.value  # For consistent display
+                    }
+                ))
+            
+            print(f"[Pipeline] Loaded {len(blocks)} zones from schema")
+            return blocks
+        except Exception as e:
+            print(f"[Pipeline] Failed to load schema: {e}")
+            return []
+    
+    def _to_reducto_format(self, result: Dict[str, Any], width: int, height: int) -> Dict[str, Any]:
+        """Convert pipeline result to Reducto-like JSON format with full enrichment."""
+        import uuid
+        
+        field_details = result.get("field_details", [])
+        page_w = float(width) if width > 0 else 1.0
+        page_h = float(height) if height > 0 else 1.0
+        
+        # 1. Build Blocks (fine-grained regions)
+        blocks = []
+        all_text_lines = []  # Collect all text for content
+        
+        for field in field_details:
+            x0, y0, x1, y1 = field.get("bbox", [0, 0, 0, 0])
+            fid = str(field.get("id", "")).lower()
+            text = str(field.get("value") or field.get("text") or "").strip()
+            
+            if not text:
+                continue
+                
+            # Collect text for content
+            all_text_lines.append(text)
+            
+            # Reducto Type Mapping
+            block_type = "Text"
+            source = field.get("metadata", {}).get("source", "")
+            if "table" in fid or field.get("type") == "table":
+                block_type = "Table"
+            elif "figure" in fid or field.get("type") == "figure":
+                block_type = "Figure"
+            elif "title" in fid or field.get("type") == "title":
+                block_type = "Title"
+            elif "header" in fid or field.get("type") == "header":
+                block_type = "Header"
+            elif source == "full_page_ocr":
+                block_type = "Text"
+            elif ":" in text or "=" in text:
+                block_type = "Key Value"
+            
+            conf_score = field.get("confidence", 0.0)
+            conf_str = "high" if conf_score > 0.85 else ("medium" if conf_score > 0.6 else "low")
+            
+            blocks.append({
+                "type": block_type,
+                "bbox": {
+                    "left": x0 / page_w,
+                    "top": y0 / page_h,
+                    "width": (x1 - x0) / page_w,
+                    "height": (y1 - y0) / page_h,
+                    "page": 1,
+                    "original_page": 1
+                },
+                "content": text,
+                "image_url": None,
+                "chart_data": None,
+                "confidence": conf_str,
+                "granular_confidence": {
+                    "extract_confidence": None,
+                    "parse_confidence": conf_score
+                }
+            })
+
+        # 2. Build the Main Content (Reducto returns the full OCR text organized by reading order)
+        form_name = result.get("form_type", "Document").upper().replace("-", " ")
+        
+        # For full-page OCR, just return the text in reading order
+        if all_text_lines:
+            full_content = f"# {form_name}\n\n" + "\n".join(all_text_lines)
+        else:
+            full_content = f"# {form_name}\n\n(No text extracted)"
+
+        # 3. Assemble Reducto-like structure
+        return {
+            "job_id": str(uuid.uuid4()),
+            "duration": result.get("processing_time", 0.0),
+            "pdf_url": None,
+            "studio_link": None,
+            "usage": {"num_pages": 1, "credits": 4},
+            "result": {
+                "type": "full",
+                "chunks": [
+                    {
+                        "content": full_content,
+                        "embed": full_content,
+                        "enriched": full_content,
+                        "enrichment_success": True,
+                        "blocks": blocks
+                    }
+                ],
+                "ocr": None,
+                "custom": None
+            }
+        }
+
     async def process(self, path: str) -> Dict[str, Any]:
         """
         Process a document through the full pipeline.
@@ -1121,13 +1959,24 @@ class MultiAgentPipeline:
         Returns comprehensive extraction result.
         """
         start_time = time.time()
+        print(f"[Pipeline] Processing {path}")
         
-        # Load image
-        image, width, height = self._load_image(path)
+        # Load image (+ optional digital text layer boxes)
+        image, width, height, digital_words = self._load_image(path)
+        digital_words_present = bool(digital_words) if digital_words is not None else False
+        pre_meta = {}
         
         # Step 1: Form Identification
         if self.config.enable_form_detection and not self.config.form_type_override:
             form_id = await self.form_id_agent.process(image)
+            
+            # Fallback: check filename if detection failed
+            if form_id.form_type == FormType.GENERIC:
+                fname = Path(path).name.lower()
+                if "cms1500" in fname or "cms-1500" in fname:
+                    print(f"[Pipeline] Filename hint override: {fname} -> CMS-1500")
+                    form_id.form_type = FormType.CMS1500
+                    form_id.confidence = 0.8
         else:
             form_id = FormIdentification(
                 form_type=self.config.form_type_override or FormType.GENERIC,
@@ -1135,20 +1984,116 @@ class MultiAgentPipeline:
                 detection_method="override"
             )
         
-        # Step 2: Template Alignment (if applicable)
+        print(f"[Pipeline] Detected Form Type: {form_id.form_type}")
+
+        # Decide whether to use digital text layer (only for CMS-1500).
+        # FORCE DISABLE: We found this causes hallucinations (reading "Rahul" instead of "Rohit")
+        # because PDF text layers often contain template data that doesn't match the image.
+        use_digital_text = False
+        
+        # Preprocess (Deskew, Denoise, Enhance)
+        from src.processing.preprocessing import preprocess_image
+        image, pre_meta = preprocess_image(
+            image,
+            doc_type="cms1500" if "cms" in path.lower() else "generic"
+        )
+        # Update width/height after preprocessing (e.g. if resized)
+        height, width = image.shape[:2]
+        
+        # Step 2: Template Alignment
+        # DISABLED by default to prevent "tilting" issues.
+        # Simple deskew in preprocessing is enough.
         aligned_image = image
         alignment_result = None
-        
-        if self.config.enable_alignment and form_id.form_type != FormType.GENERIC:
-            alignment_result = await self.alignment_agent.process(image, form_id.form_type)
-            if alignment_result.success:
-                aligned_image = alignment_result.aligned_image
-        
+
         # Step 3: Layout Detection
-        blocks = await self.layout_agent.process(aligned_image, form_id.form_type)
+        # Try YOLO first (if available), then fallback to schema zones
+        blocks = []
+        
+        if form_id.form_type == FormType.CMS1500:
+            # CMS-1500 PATH:
+            # Always use Full-Page OCR + Line Grouping.
+            # Do NOT use hardcoded schema zones (they break on scans).
+            print(f"[Pipeline] CMS-1500: Using Full-Page OCR (robust to scans)")
+            
+            # Preprocess: remove form lines to improve OCR
+            try:
+                from src.processing.preprocessing import remove_form_lines
+                ocr_image = remove_form_lines(aligned_image)
+            except Exception:
+                ocr_image = aligned_image
+            
+            # Full-page OCR with word-level boxes
+            from src.ocr.paddle_ocr import PaddleOCRWrapper
+            paddle = PaddleOCRWrapper()
+            word_boxes = paddle.extract_text(ocr_image)
+            
+            if word_boxes:
+                # Group words into logical lines/blocks based on Y position
+                blocks = self._group_words_into_blocks(word_boxes, width, height)
+                print(f"[Pipeline] Full-page OCR: {len(word_boxes)} words grouped into {len(blocks)} blocks")
+        else:
+            # GENERAL FORM PATH:
+            # Try Detectron2, but if it returns junk (1 big block), use Full-Page OCR.
+            print("[Pipeline] Running layout detection for general form...")
+            try:
+                blocks = await self.layout_agent.process(aligned_image, form_id.form_type)
+                print(f"[Pipeline] Detected {len(blocks)} blocks")
+                
+                # If layout detection fails (returns 0 or 1 giant block), use Full-Page OCR
+                if len(blocks) <= 1:
+                    print("[Pipeline] ⚠️ Layout detection failed (<=1 block), using Full-Page OCR fallback")
+                    from src.ocr.paddle_ocr import PaddleOCRWrapper
+                    paddle = PaddleOCRWrapper()
+                    word_boxes = paddle.extract_text(aligned_image)
+                    if word_boxes:
+                        blocks = self._group_words_into_blocks(word_boxes, width, height)
+                        print(f"[Pipeline] Full-page OCR: {len(word_boxes)} words grouped into {len(blocks)} blocks")
+            except Exception as e:
+                print(f"[Pipeline] Layout detection failed: {e}")
+                # Fallback to OCR
+                from src.ocr.paddle_ocr import PaddleOCRWrapper
+                paddle = PaddleOCRWrapper()
+                word_boxes = paddle.extract_text(aligned_image)
+                if word_boxes:
+                    blocks = self._group_words_into_blocks(word_boxes, width, height)
+        
+        # If still no blocks, use full-page OCR
+        if not blocks:
+            print("[Pipeline] No layout blocks detected, using full-page OCR")
+            from src.ocr.paddle_ocr import PaddleOCRWrapper
+            paddle = PaddleOCRWrapper()
+            word_boxes = paddle.extract_text(aligned_image)
+            
+            if word_boxes:
+                all_text = " ".join([wb.text for wb in word_boxes])
+                blocks = [DetectedBlock(
+                    id="full_page",
+                    block_type=BlockType.TEXT,
+                    bbox=(0, 0, width, height),
+                    text=all_text,
+                    confidence=sum(wb.confidence for wb in word_boxes) / len(word_boxes)
+                )]
         
         # Step 4: OCR
-        blocks = await self.ocr_agent.process_blocks(aligned_image, blocks)
+        # Attach form_type to block metadata for OCR routing (template-diff, etc.)
+        for b in blocks:
+            if b.metadata is None:
+                b.metadata = {}
+            b.metadata.setdefault("form_type", form_id.form_type.value if hasattr(form_id.form_type, "value") else str(form_id.form_type))
+        
+        # Accuracy boost for CMS-1500: remove red lines from the aligned image before OCR
+        if form_id.form_type == FormType.CMS1500 and not use_digital_text:
+            try:
+                from src.processing.preprocessing import remove_form_lines
+                ocr_image = remove_form_lines(aligned_image)
+                print("[Pipeline] Applied red-line removal for superior CMS-1500 OCR")
+            except Exception:
+                ocr_image = aligned_image
+        else:
+            ocr_image = aligned_image
+
+        blocks = await self.ocr_agent.process_blocks(ocr_image, blocks)
         
         # Step 5: SLM/VLM Labeling
         if self.config.enable_slm_labeling:
@@ -1164,23 +2109,48 @@ class MultiAgentPipeline:
         # Step 7: Validation
         validation = await self.validation_agent.process(blocks, extracted_fields)
         
-        # Build result
-        processing_time = time.time() - start_time
+        # Step 8: Business Mapping (Canonical Schema)
+        from src.pipelines.business_schema import map_to_business_schema, merge_business_with_ocr
         
-        return {
-            "success": True,
-            "form_type": form_id.form_type.value,
-            "form_confidence": form_id.confidence,
-            "form_version": form_id.version,
-            "alignment_quality": alignment_result.alignment_quality if alignment_result else 0.0,
+        # Prepare intermediate result for mapping
+        temp_result = {
             "extracted_fields": extracted_fields,
             "field_details": [
                 {
                     "id": b.id,
-                    "type": b.block_type.value,
                     "bbox": list(b.bbox),
-                    "text": b.text,
                     "confidence": b.confidence,
+                    "metadata": b.metadata
+                }
+                for b in blocks
+            ],
+            "page_width": width,
+            "page_height": height
+        }
+        
+        # Map to business schema
+        business_result = map_to_business_schema(temp_result, form_id.form_type.value)
+        
+        # Build final result dict
+        processing_time = time.time() - start_time
+        
+        final_result = {
+            "success": True,
+            "form_type": form_id.form_type.value,
+            "form_confidence": form_id.confidence,
+            "form_version": form_id.version,
+            "alignment_quality": 1.0 if use_digital_text else (alignment_result.alignment_quality if alignment_result else 0.0),
+            "extracted_fields": extracted_fields,
+            "field_details": [
+                {
+                    "id": b.id,
+                    "label": self._get_block_label(b),  # Block type label for visualization
+                    "type": b.block_type.value if hasattr(b.block_type, 'value') else str(b.block_type),
+                    "bbox": list(b.bbox),
+                    "value": b.text or "",
+                    "text": b.text or "",
+                    "confidence": b.confidence,
+                    "detected_by": b.metadata.get("source", "yolo"),
                     "metadata": b.metadata
                 }
                 for b in blocks
@@ -1199,8 +2169,24 @@ class MultiAgentPipeline:
                 "enable_trocr": self.config.enable_trocr,
                 "enable_slm": self.config.enable_slm_labeling,
                 "enable_vlm": self.config.enable_vlm_figures
-            }
+            },
+            "debug": {
+                "alignment_used": bool(self.config.enable_alignment),
+                "alignment_success": bool(alignment_result.success) if alignment_result else False,
+                "aligned_image_shape": list(aligned_image.shape[:2]) if aligned_image is not None else None,
+                "aligned_preview_path": str(aligned_preview_path) if aligned_preview_path else None,
+                "digital_text_used": bool(use_digital_text),
+                "digital_words_count": int(len(digital_words)) if digital_words is not None else 0,
+            },
         }
+        
+        # Merge business data
+        final_merged = merge_business_with_ocr(final_result, business_result)
+        
+        # Add Reducto-style output
+        final_merged["reducto_format"] = self._to_reducto_format(final_merged, width, height)
+        
+        return final_merged
     
     def process_sync(self, path: str) -> Dict[str, Any]:
         """Synchronous wrapper for process()."""
@@ -1247,4 +2233,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

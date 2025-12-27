@@ -5,6 +5,13 @@
   "notes": "Bounding boxes calibrated from actual PDF text layer positions. Normalized [0-1] for 2550x3300 pixels at 300 DPI.",
   "fields": [
     {
+      "id": "header_top_right_notes",
+      "label": "TOP RIGHT NOTES",
+      "field_type": "text",
+      "bbox_norm": [0.52, 0.02, 0.95, 0.11],
+      "description": "Top-right header notes (e.g., Accessible Medicare, etc.)"
+    },
+    {
       "id": "1a_insured_id",
       "label": "INSURED'S I.D. NUMBER",
       "field_type": "text",
@@ -22,7 +29,7 @@
       "id": "3_patient_dob",
       "label": "PATIENT'S BIRTH DATE",
       "field_type": "date",
-      "bbox_norm": [0.385, 0.155, 0.48, 0.185],
+      "bbox_norm": [0.345, 0.155, 0.48, 0.185],
       "description": "Patient DOB (MM DD YY)"
     },
     {
@@ -31,6 +38,20 @@
       "field_type": "checkbox",
       "bbox_norm": [0.295, 0.155, 0.32, 0.185],
       "description": "Patient sex M/F"
+    },
+    {
+      "id": "3_patient_sex_m",
+      "label": "SEX_M",
+      "field_type": "checkbox",
+      "bbox_norm": [0.270, 0.155, 0.295, 0.185],
+      "description": "Patient sex checkbox (Male)"
+    },
+    {
+      "id": "3_patient_sex_f",
+      "label": "SEX_F",
+      "field_type": "checkbox",
+      "bbox_norm": [0.320, 0.155, 0.345, 0.185],
+      "description": "Patient sex checkbox (Female)"
     },
     {
       "id": "4_insured_name",
@@ -134,7 +155,7 @@
       "id": "11a_insured_dob",
       "label": "INSURED'S DATE OF BIRTH",
       "field_type": "date",
-      "bbox_norm": [0.60, 0.305, 0.75, 0.335],
+      "bbox_norm": [0.56, 0.305, 0.75, 0.335],
       "description": "Insured DOB"
     },
     {
@@ -143,6 +164,20 @@
       "field_type": "checkbox",
       "bbox_norm": [0.75, 0.305, 0.78, 0.335],
       "description": "Insured sex M/F"
+    },
+    {
+      "id": "11a_insured_sex_m",
+      "label": "SEX_M",
+      "field_type": "checkbox",
+      "bbox_norm": [0.720, 0.305, 0.750, 0.335],
+      "description": "Insured sex checkbox (Male)"
+    },
+    {
+      "id": "11a_insured_sex_f",
+      "label": "SEX_F",
+      "field_type": "checkbox",
+      "bbox_norm": [0.780, 0.305, 0.810, 0.335],
+      "description": "Insured sex checkbox (Female)"
     },
     {
       "id": "11c_insurance_plan_name",
@@ -225,7 +260,7 @@
       "id": "26_patient_account",
       "label": "PATIENT'S ACCOUNT NO.",
       "field_type": "text",
-      "bbox_norm": [0.15, 0.820, 0.26, 0.850],
+      "bbox_norm": [0.29, 0.860, 0.39, 0.875],
       "description": "Patient account number"
     },
     {

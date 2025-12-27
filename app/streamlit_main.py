@@ -287,58 +287,101 @@ def get_sample_documents():
 
 
 def draw_bounding_boxes(image, fields, highlight_id=None, ocr_blocks=None, 
-                       source_width=None, source_height=None, confidence_threshold=0.3):
-    """Draw bounding boxes on image with confidence-based coloring."""
+                       source_width=None, source_height=None, confidence_threshold=0.3,
+                       show_labels=True):
+    """Draw bounding boxes on image with semantic labels (Reducto-style)."""
     img = image.copy()
     h, w = img.shape[:2]
     
-    # Scale factors
     scale_x = w / source_width if source_width else 1
     scale_y = h / source_height if source_height else 1
+    
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.35
+    font_thickness = 1
     
     for field in fields:
         conf = field.get("confidence", 0)
         if conf < confidence_threshold:
-            continue
+                continue
         
         bbox = field.get("bbox", [])
         if not bbox or len(bbox) < 4:
             continue
         
-        # Scale coordinates
         x0, y0, x1, y1 = bbox
-        if all(0 <= v <= 1 for v in bbox):  # Normalized
-            x0, y0, x1, y1 = int(x0*w), int(y0*h), int(x1*w), int(y1*h)
+        # Support both bbox formats:
+        # - xyxy: [x0, y0, x1, y1]
+        # - ltwh: [left, top, width, height]  (common in Reducto-style outputs)
+        is_normalized = all(0 <= v <= 1 for v in bbox)
+        is_ltwh = (x1 < x0) or (y1 < y0)  # width/height smaller than left/top is a strong signal
+        if is_normalized:
+            if is_ltwh:
+                left, top, bw, bh = bbox
+                x0, y0 = int(left * w), int(top * h)
+                x1, y1 = int((left + bw) * w), int((top + bh) * h)
+            else:
+                x0, y0, x1, y1 = int(x0*w), int(y0*h), int(x1*w), int(y1*h)
         else:
-            x0, y0, x1, y1 = int(x0*scale_x), int(y0*scale_y), int(x1*scale_x), int(y1*scale_y)
+            if is_ltwh:
+                left, top, bw, bh = bbox
+                x0, y0 = int(left * scale_x), int(top * scale_y)
+                x1, y1 = int((left + bw) * scale_x), int((top + bh) * scale_y)
+            else:
+                x0, y0, x1, y1 = int(x0*scale_x), int(y0*scale_y), int(x1*scale_x), int(y1*scale_y)
         
-        # Clamp
         x0, y0 = max(0, x0), max(0, y0)
         x1, y1 = min(w, x1), min(h, y1)
         
-        # Color by confidence
+        if x1 - x0 < 5 or y1 - y0 < 5:
+            continue
+        
         if conf >= 0.8:
-            color = (34, 197, 94)  # Green
+            color = (34, 197, 94)
         elif conf >= 0.5:
-            color = (251, 191, 36)  # Yellow
+            color = (251, 191, 36)
         else:
-            color = (239, 68, 68)  # Red
+            color = (239, 68, 68)
         
-        # Highlight selected
         thickness = 3 if field.get("id") == highlight_id else 2
-        
         cv2.rectangle(img, (x0, y0), (x1, y1), color, thickness)
+        
+        if show_labels:
+            label = field.get("label", field.get("id", ""))
+            if label and len(label) > 20:
+                label = label[:18] + ".."
+            if label:
+                (text_w, text_h), _ = cv2.getTextSize(label, font, font_scale, font_thickness)
+                label_y = y0 - 4 if y0 > text_h + 4 else y0 + text_h + 4
+                cv2.rectangle(img, (x0, label_y - text_h - 2), (x0 + text_w + 4, label_y + 2), color, -1)
+                cv2.putText(img, label, (x0 + 2, label_y - 2), font, font_scale, (255, 255, 255), font_thickness, cv2.LINE_AA)
     
-    # Draw OCR blocks in blue
     if ocr_blocks:
         for block in ocr_blocks:
             bbox = block.get("bbox", [])
             if len(bbox) >= 4:
-                x0, y0, x1, y1 = [int(v * scale_x if i % 2 == 0 else v * scale_y) 
-                                 for i, v in enumerate(bbox[:4])]
-                x0, y0 = max(0, x0), max(0, y0)
-                x1, y1 = min(w, x1), min(h, y1)
-                cv2.rectangle(img, (x0, y0), (x1, y1), (59, 130, 246), 1)  # Blue
+                bx0, by0, bx1, by1 = bbox[:4]
+                is_normalized = all(0 <= v <= 1 for v in [bx0, by0, bx1, by1])
+                is_ltwh = (bx1 < bx0) or (by1 < by0)
+                if is_normalized:
+                    if is_ltwh:
+                        left, top, bw, bh = bbox[:4]
+                        bx0, by0 = int(left * w), int(top * h)
+                        bx1, by1 = int((left + bw) * w), int((top + bh) * h)
+                    else:
+                        bx0, by0, bx1, by1 = int(bx0*w), int(by0*h), int(bx1*w), int(by1*h)
+                else:
+                    if is_ltwh:
+                        left, top, bw, bh = bbox[:4]
+                        bx0, by0 = int(left * scale_x), int(top * scale_y)
+                        bx1, by1 = int((left + bw) * scale_x), int((top + bh) * scale_y)
+                    else:
+                        bx0, by0 = int(bx0 * scale_x), int(by0 * scale_y)
+                        bx1, by1 = int(bx1 * scale_x), int(by1 * scale_y)
+                bx0, by0 = max(0, bx0), max(0, by0)
+                bx1, by1 = min(w, bx1), min(h, by1)
+                if bx1 - bx0 > 2 and by1 - by0 > 2:
+                    cv2.rectangle(img, (bx0, by0), (bx1, by1), (59, 130, 246), 1)
     
     return img
 
@@ -351,7 +394,16 @@ def draw_bounding_boxes(image, fields, highlight_id=None, ocr_blocks=None,
 def get_pipeline(pipeline_type: str, config: dict):
     """Get cached pipeline instance."""
     if pipeline_type == "multi_agent":
-        from src.pipelines.multi_agent_pipeline import MultiAgentPipeline, PipelineConfig
+        from src.pipelines.multi_agent_pipeline import MultiAgentPipeline, PipelineConfig, FormType
+        
+        # Parse form type override
+        form_type_override = None
+        if config.get("form_type"):
+            try:
+                form_type_override = FormType(config.get("form_type"))
+            except ValueError:
+                pass
+        
         pconfig = PipelineConfig(
             enable_trocr=config.get("enable_trocr", True),
             enable_slm_labeling=config.get("enable_slm", True),
@@ -359,6 +411,8 @@ def get_pipeline(pipeline_type: str, config: dict):
             enable_alignment=config.get("enable_alignment", True),
             ocr_confidence_threshold=config.get("confidence_threshold", 0.5),
             handwriting_threshold=config.get("handwriting_threshold", 0.35),
+            zone_padding_px=int(config.get("ocr_padding", 12)),
+            form_type_override=form_type_override
         )
         return MultiAgentPipeline(pconfig)
     elif pipeline_type == "cms1500_production":
@@ -380,13 +434,11 @@ def run_extraction(file_path: str, pipeline_type: str, config: dict) -> dict:
     """Run extraction pipeline."""
     try:
         if pipeline_type == "multi_agent":
+            # Multi-Agent orchestrated pipeline (end-to-end)
             pipeline = get_pipeline(pipeline_type, config)
             return pipeline.process_sync(file_path)
-        elif pipeline_type == "cms1500_production":
-            pipeline = get_pipeline(pipeline_type, config)
-            return pipeline.extract(file_path)
         elif pipeline_type == "agentic":
-            # FIX: Actually call the agentic CMS-1500 pipeline!
+            # CMS-1500 Agentic pipeline with template alignment + LLM
             from src.pipelines.agentic_cms1500 import run_cms1500_agentic
             return run_cms1500_agentic(
                 file_path,
@@ -397,7 +449,7 @@ def run_extraction(file_path: str, pipeline_type: str, config: dict) -> dict:
         else:
             # General/Full-page LLM fallback
             from src.pipelines.form_extractor import extract_with_full_pipeline
-            schema = load_form_schema("cms-1500") if "cms" in pipeline_type.lower() else None
+            schema = load_form_schema("cms-1500") if "cms" in file_path.lower() else None
             return extract_with_full_pipeline(file_path, schema=schema, 
                                               use_vlm=config.get("enable_vlm", True))
     except Exception as e:
@@ -438,9 +490,9 @@ def main():
         
         # File upload
         uploaded_file = st.file_uploader(
-            "Upload PDF/Image",
-            type=["pdf", "png", "jpg", "jpeg"],
-            help="Upload a CMS-1500, UB-04, or other medical form"
+        "Upload PDF/Image",
+                type=["pdf", "png", "jpg", "jpeg"],
+        help="Upload a CMS-1500, UB-04, or other medical form"
         )
         
         # Sample documents dropdown
@@ -455,11 +507,11 @@ def main():
         # Determine file path
         file_path = None
         if uploaded_file:
-            temp_path = Path("cache") / uploaded_file.name
-            temp_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(temp_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            file_path = str(temp_path)
+                temp_path = Path("cache") / uploaded_file.name
+                temp_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(temp_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                    file_path = str(temp_path)
         elif selected_sample != "Select sample...":
             file_path = str(project_root / "data" / "sample_docs" / selected_sample)
         
@@ -468,13 +520,25 @@ def main():
         # Display document
         if file_path and Path(file_path).exists():
             try:
-                import fitz
-                pdf = fitz.open(file_path)
-                page = pdf[0]
-                pix = page.get_pixmap(dpi=150)
-                img_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
-                if pix.n == 4:
-                    img_np = cv2.cvtColor(img_np, cv2.COLOR_RGBA2RGB)
+                # If we have an aligned preview from the pipeline, display it so overlays line up.
+                img_np = None
+                if st.session_state.extraction_result:
+                    dbg = (st.session_state.extraction_result or {}).get("debug") or {}
+                    aligned_path = dbg.get("aligned_preview_path")
+                    if aligned_path and Path(aligned_path).exists():
+                        bgr = cv2.imread(aligned_path, cv2.IMREAD_COLOR)
+                        if bgr is not None:
+                            img_np = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                
+                # Fallback: render raw PDF page for preview
+                if img_np is None:
+                    import fitz
+                    pdf = fitz.open(file_path)
+                    page = pdf[0]
+                    pix = page.get_pixmap(dpi=150)
+                    img_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+                    if pix.n == 4:
+                        img_np = cv2.cvtColor(img_np, cv2.COLOR_RGBA2RGB)
                 
                 # Draw boxes if results exist
                 if st.session_state.extraction_result:
@@ -519,29 +583,28 @@ def main():
                 "Select Pipeline",
                 [
                     "Multi-Agent (Recommended)",
-                    "CMS-1500 Production",
-                    "Full-page LLM",
-                    "Agentic CMS-1500"
+                    "CMS-1500 (Agentic)",
+                    "General Pipeline"
                 ],
-                help="Choose the processing pipeline based on document type"
+                help="Multi-Agent = Full orchestrated pipeline, Agentic = Template + LLM, General = Layout-based"
             )
             
             # Form type detection
             col_form, col_auto = st.columns([2, 1])
             with col_form:
-                form_type = st.selectbox(
+                form_type_sel = st.selectbox(
                     "Form Type",
                     ["Auto-detect", "CMS-1500", "UB-04", "NCPDP", "Generic"],
                     help="Manually specify form type or let the system detect"
                 )
             with col_auto:
                 st.markdown("<br>", unsafe_allow_html=True)
-                if form_type == "Auto-detect":
+                if form_type_sel == "Auto-detect":
                     st.markdown('<span class="form-badge form-badge-generic">AUTO</span>', 
                                unsafe_allow_html=True)
                 else:
-                    badge_class = "form-badge-cms1500" if "CMS" in form_type else "form-badge-generic"
-                    st.markdown(f'<span class="form-badge {badge_class}">{form_type}</span>', 
+                    badge_class = "form-badge-cms1500" if "CMS" in form_type_sel else "form-badge-generic"
+                    st.markdown(f'<span class="form-badge {badge_class}">{form_type_sel}</span>', 
                                unsafe_allow_html=True)
         
         # Model Selection
@@ -655,11 +718,14 @@ def main():
                 # Map pipeline mode
                 pipeline_map = {
                     "Multi-Agent (Recommended)": "multi_agent",
-                    "CMS-1500 Production": "cms1500_production",
-                    "Full-page LLM": "full_page_llm",
-                    "Agentic CMS-1500": "agentic",
+                    "CMS-1500 (Agentic)": "agentic",
+                    "General Pipeline": "full_page_llm",
                 }
                 pipeline_type = pipeline_map.get(pipeline_mode, "multi_agent")
+                
+                # Pass explicit form type if selected
+                if form_type_sel != "Auto-detect":
+                    config["form_type"] = form_type_sel.lower().replace(" ", "-")
                 
                 with st.spinner("🔄 Processing..."):
                     result = run_extraction(file_path, pipeline_type, config)

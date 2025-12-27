@@ -70,7 +70,8 @@ def deskew_image(image: np.ndarray) -> Tuple[np.ndarray, float]:
     angle = float(np.median(angles))
 
     # If angle is tiny or too large (likely wrong), do nothing
-    if abs(angle) < 0.3 or abs(angle) > 3.0:
+    # Relaxed for scanned docs: allow up to 15 degrees
+    if abs(angle) < 0.2 or abs(angle) > 15.0:
         return image, 0.0
 
     # Rotate by the negative of the skew angle to deskew
@@ -215,4 +216,54 @@ def preprocess_image(
         gray = clahe.apply(gray)
         processed = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
 
+    # NOTE:
+    # We intentionally do NOT remove form lines here for CMS-1500.
+    # De-lining before template alignment can destroy SIFT/ECC keypoints and ruin alignment.
+    # De-lining is applied later in the pipeline *after alignment* and *before OCR*.
+
     return processed, metadata
+
+
+def remove_form_lines(image: np.ndarray) -> np.ndarray:
+    """
+    Remove CMS-1500 ruling lines (especially red grid) to improve OCR.
+    Approach:
+      1) Mask red pixels in HSV and whiten them.
+      2) Extract long horizontal/vertical lines from a binary image and inpaint.
+    """
+    img = image.copy()
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+
+    # 1) Remove red lines (CMS-1500 grid is commonly red)
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    lower1 = np.array([0, 70, 70], dtype=np.uint8)
+    upper1 = np.array([10, 255, 255], dtype=np.uint8)
+    lower2 = np.array([170, 70, 70], dtype=np.uint8)
+    upper2 = np.array([180, 255, 255], dtype=np.uint8)
+    mask1 = cv2.inRange(hsv, lower1, upper1)
+    mask2 = cv2.inRange(hsv, lower2, upper2)
+    red_mask = cv2.bitwise_or(mask1, mask2)
+    if np.count_nonzero(red_mask) > 0:
+        img[red_mask > 0] = (255, 255, 255)
+
+    # 2) Remove long ruling lines (any color) via morphology + inpaint
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    # Invert binarization so lines/text become white on black for morphology ops
+    bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                               cv2.THRESH_BINARY_INV, 31, 11)
+
+    h, w = bw.shape[:2]
+    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(40, w // 25), 1))
+    v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(40, h // 25)))
+    horiz = cv2.morphologyEx(bw, cv2.MORPH_OPEN, h_kernel, iterations=1)
+    vert = cv2.morphologyEx(bw, cv2.MORPH_OPEN, v_kernel, iterations=1)
+    line_mask = cv2.bitwise_or(horiz, vert)
+
+    # Slight dilation so we inpaint full stroke width
+    line_mask = cv2.dilate(line_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
+    if np.count_nonzero(line_mask) > 0:
+        # inpaint expects 8-bit 1-channel mask
+        img = cv2.inpaint(img, line_mask, 3, cv2.INPAINT_TELEA)
+
+    return img

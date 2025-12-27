@@ -15,7 +15,7 @@ class PaddleOCRWrapper:
     def __init__(
         self,
         lang: str = 'en',
-        use_angle_cls: bool = False,
+        use_angle_cls: bool = True,
         use_gpu: Optional[bool] = None
     ):
         """
@@ -27,7 +27,23 @@ class PaddleOCRWrapper:
         """
         self.lang = lang
         self.use_angle_cls = use_angle_cls
-        self.use_gpu = Config.USE_GPU if use_gpu is None else use_gpu
+        # Auto-detect GPU when not explicitly specified.
+        # This avoids the common footgun where USE_GPU is unset/false on a GPU box.
+        if use_gpu is None:
+            detected = False
+            try:
+                import paddle
+                detected = bool(getattr(paddle, "is_compiled_with_cuda", lambda: False)())
+                if detected:
+                    try:
+                        detected = paddle.device.cuda.device_count() > 0
+                    except Exception:
+                        detected = True
+            except Exception:
+                detected = False
+            self.use_gpu = bool(detected or Config.USE_GPU)
+        else:
+            self.use_gpu = use_gpu
         self.ocr = None
         self._initialized = False
     
@@ -53,10 +69,11 @@ class PaddleOCRWrapper:
             except Exception:
                 # Fallback without optional kwargs
                 print("⚠️ Retrying PaddleOCR init with minimal args...")
-                self.ocr = PaddleOCR(
-                    lang=self.lang, 
-                    use_angle_cls=self.use_angle_cls
-                )
+                # Still attempt GPU usage if available; PaddleOCR will ignore if not supported.
+                try:
+                    self.ocr = PaddleOCR(lang=self.lang, use_angle_cls=self.use_angle_cls, use_gpu=self.use_gpu)
+                except Exception:
+                    self.ocr = PaddleOCR(lang=self.lang, use_angle_cls=self.use_angle_cls)
             
             init_time = time.time() - start_time
             print(f"✅ PaddleOCR initialized in {init_time:.2f}s")
@@ -114,8 +131,12 @@ class PaddleOCRWrapper:
             if not image.flags['C_CONTIGUOUS']:
                 image = np.ascontiguousarray(image)
                 
-            # Run OCR (new API doesn't use cls parameter)
-            result = self.ocr.ocr(image)
+            # Run OCR using new PaddleX API (predict instead of deprecated ocr)
+            try:
+                result = self.ocr.predict(image)
+            except AttributeError:
+                # Fallback to legacy API if predict not available
+                result = self.ocr.ocr(image)
             
             # Debug: print result type
             if result is None:
@@ -133,22 +154,65 @@ class PaddleOCRWrapper:
             
             # Process results - handle modern PaddleOCR (PaddleX) objects or legacy lists
             # Result can be a list of page results or a single result
-            if not isinstance(result, list):
-                result = [result]
             
-            # Debug: Check what we got
-            print(f"🔍 PaddleOCR result type: {type(result)}, length: {len(result) if isinstance(result, list) else 'N/A'}")
+            # Convert OCRResult to dict via .json property if available
+            processed_results = []
+            
+            # Normalize to list
+            raw_list = result if isinstance(result, list) else [result]
+            
+            for item in raw_list:
+                if item is None:
+                    continue
+                    
+                # PaddleX OCRResult object support
+                if "OCRResult" in str(type(item)):
+                    try:
+                        # Try json property/method
+                        json_data = {}
+                        if hasattr(item, 'json'):
+                            j = item.json
+                            json_data = j() if callable(j) else j
+                        elif hasattr(item, '__getitem__'):
+                            # Fallback if it behaves like dict
+                            processed_results.append(item)
+                            continue
+                            
+                        if isinstance(json_data, str):
+                            json_data = json.loads(json_data)
+                            
+                        # Normalize keys for downstream processing
+                        if isinstance(json_data, dict):
+                            # PaddleX v3 wraps data under "res" key
+                            res = json_data.get('res', json_data)
+                            
+                            # Get the actual data from res
+                            if isinstance(res, dict):
+                                json_data = {
+                                    'rec_texts': res.get('rec_texts', res.get('rec_text', [])),
+                                    'rec_boxes': res.get('dt_polys', res.get('rec_polys', [])),
+                                    'rec_scores': res.get('rec_scores', res.get('rec_score', []))
+                                }
+                            processed_results.append(json_data)
+                    except Exception as e:
+                        print(f"⚠️ Failed to parse OCRResult: {e}")
+                else:
+                    processed_results.append(item)
+            
+            # Use processed results
+            result = processed_results if processed_results else raw_list
             
             for page_idx, page_result in enumerate(result):
                 if page_result is None:
-                    print(f"⚠️ Page result {page_idx} is None")
                     continue
                 
-                print(f"🔍 Page {page_idx} result type: {type(page_result)}")
+                # Check for Mapping (dict-like)
+                is_mapping = isinstance(page_result, (dict, Mapping))
                 
-                # New PaddleX-style result is a dict-like OCRResult
-                if isinstance(page_result, Mapping):
+                if is_mapping:
+                    # Dict-based result (PaddleX or standardized)
                     texts = list(page_result.get("rec_texts") or [])
+                    # ... rest of dict handling ...
                     print(f"🔍 Found {len(texts)} texts in Mapping format")
                     
                     # Handle scores
@@ -169,8 +233,9 @@ class PaddleOCRWrapper:
                             scores = [1.0] * len(texts)
                     
                     # Handle boxes - properly check for empty numpy arrays
+                    # New PaddleX returns dt_polys, legacy uses rec_polys/rec_boxes
                     boxes = None
-                    for key in ["text_word_boxes", "rec_polys", "rec_boxes"]:
+                    for key in ["dt_polys", "rec_polys", "rec_boxes", "text_word_boxes"]:
                         box_data = page_result.get(key)
                         if box_data is not None:
                             # Check if it's a numpy array

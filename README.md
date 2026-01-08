@@ -11,6 +11,59 @@ A production-ready document processing pipeline that converts PDFs and images in
 
 ## 🏛 Architecture Overview
 
+flowchart LR
+    A["Document ingestion
+PDF or image to 300 DPI RGB array"] --> B["Form identification agent
+OCR header for CMS1500 UB04 etc
+Layout fingerprint matching
+Outputs form type confidence version"]
+    B -- CMS1500 --> C_CMS["CMS1500 path
+Template based"]
+    B -- Other forms --> C_GEN["General form path
+ML detection"]
+    C_CMS --> D_ALIGN["Template alignment agent
+ORB or SIFT feature matching
+Homography warp to reference template"]
+    D_ALIGN --> F_LAYOUT_CMS["Layout detection agent CMS1500
+YOLOv8 fine tuned
+Template zones"]
+    D_ALIGN -. alignment fails .-> G_LAYOUT_GEN["Layout detection agent general
+LayoutLMv3 or Detectron2 PubLayNet
+Donut style end to end"]
+    C_GEN --> G_LAYOUT_GEN
+    F_LAYOUT_CMS --> D_LAYOUT["Layout detection agent unified
+CMS1500 uses YOLOv8 and template zones
+General forms use layout models
+Returns blocks with type text table figure form field checkbox"]
+    G_LAYOUT_GEN --> D_LAYOUT
+    D_LAYOUT --> E_TEXT["Text blocks"] & E_TABLE["Table blocks"] & E_FIG["Figure blocks"] & E_FORM["Form field blocks"] & E_CHECK["Checkbox blocks"]
+    E_TEXT --> F_OCR["OCR agent tiered
+PaddleOCR for printed text
+TrOCR for handwriting and signatures
+Checkbox density for check marks"]
+    E_FORM --> F_OCR
+    E_CHECK --> F_OCR
+    F_OCR --> G_SLM["SLM labeling agent for text and form
+Llama or Qwen adds semantic field labels"]
+    E_TABLE --> H_TABLE["Table agent
+TATR plus SLM for rows and columns"]
+    E_FIG --> I_FIG["Figure agent
+VLM for charts and images"]
+    G_SLM --> J_MERGE["Merge agent
+Combine text fields tables figures and checkboxes"]
+    H_TABLE --> J_MERGE
+    I_FIG --> J_MERGE
+    J_MERGE --> K_VALID["Validation agent
+Field validators NPI date phone ICD codes
+Cross field consistency checks
+LLM QA sanity review"]
+    K_VALID --> L_ASM["Assembly agent
+OCR schema raw extraction
+Business schema mapped fields
+Reducto style JSON export"]
+
+
+
 ```mermaid
 flowchart LR
     A[Ingest & Preprocess]

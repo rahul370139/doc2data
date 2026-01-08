@@ -249,6 +249,7 @@ class FormIdentificationAgent(BaseAgent):
     """
     
     # Form fingerprints (text patterns to identify forms)
+    # Each pattern has a weight (higher = more discriminative)
     FINGERPRINTS = {
         FormType.CMS1500: [
             "cms-1500", "cms 1500", "health insurance claim form",
@@ -267,6 +268,13 @@ class FormIdentificationAgent(BaseAgent):
             "tactical combat casualty care", "tccc", "casualty",
             "mechanism of injury", "evac category"
         ]
+    }
+    
+    # High-confidence discriminative tokens (if found, strongly indicates that form)
+    STRONG_TOKENS = {
+        FormType.UB04: ["ub-04", "ub04", "uniform bill", "ub 04"],
+        FormType.CMS1500: ["cms-1500", "cms 1500", "cms1500", "hcfa-1500"],
+        FormType.NCPDP: ["ncpdp"],
     }
     
     # Version fingerprints for CMS-1500
@@ -357,8 +365,15 @@ class FormIdentificationAgent(BaseAgent):
         return ""
     
     def _match_fingerprint(self, text: str) -> Tuple[FormType, float]:
-        """Match text against form fingerprints."""
+        """Match text against form fingerprints with strong-token priority."""
         text_lower = text.lower()
+        
+        # First check strong discriminative tokens (override generic matches)
+        for form_type, strong_tokens in self.STRONG_TOKENS.items():
+            for token in strong_tokens:
+                if token in text_lower:
+                    # Strong token match: high confidence
+                    return form_type, 0.70
         
         best_match = FormType.UNKNOWN
         best_score = 0.0
@@ -367,13 +382,14 @@ class FormIdentificationAgent(BaseAgent):
             matches = sum(1 for p in patterns if p in text_lower)
             # Boost score if multiple unique patterns match
             if matches > 0:
-                score = matches / len(patterns) + 0.2  # Base confidence boost
+                score = matches / len(patterns) + 0.15  # Reduced base boost
                 if score > best_score:
                     best_score = score
                     best_match = form_type
         
-        # Lower threshold for acceptance
-        if best_score < 0.15:
+        # Raised threshold for acceptance (0.45 instead of 0.15)
+        # Prevents "CLAIM FORM" alone from matching CMS-1500
+        if best_score < 0.45:
             return FormType.GENERIC, best_score
             
         return best_match, best_score
@@ -2253,6 +2269,13 @@ class MultiAgentPipeline:
                 fields_list = schema.get("fields", [])
                 blocks = await self._match_ocr_to_zones(digital_words or [], fields_list, width, height, aligned_image, word_level=True)
                 print(f"[Pipeline] CMS-1500 digital: matched {len(blocks)} fields")
+                
+                # REALITY CHECK: If too few zones have meaningful text, template is wrong
+                filled_zones = sum(1 for b in blocks if (b.text or '').strip() and len((b.text or '').strip()) >= 3)
+                if filled_zones < 10:  # < ~20% of 48 zones
+                    print(f"[Pipeline] ⚠️ Template mismatch (digital): only {filled_zones}/48 zones have text - falling back to layout model")
+                    blocks = []  # Force fallback
+                    use_digital_text = False  # Disable digital path
             else:
                 # SCANNED CMS-1500: ONLY use schema zones if alignment succeeded (template space).
                 if alignment_result is not None and alignment_result.success and float(alignment_result.alignment_quality) >= float(self.config.alignment_quality_threshold):
@@ -2274,6 +2297,13 @@ class MultiAgentPipeline:
                         # PaddleOCRWrapper returns word-level boxes -> enable unique assignment to reduce zone bleed.
                         blocks = await self._match_ocr_to_zones(scan_words or [], fields_list, width, height, aligned_image, word_level=True)
                         print(f"[Pipeline] CMS-1500 scan: aligned -> zone-matched from full-page OCR ({len(scan_words or [])} words) into {len(blocks)} fields")
+                        
+                        # REALITY CHECK: If too few zones have meaningful text, template is wrong
+                        # (e.g., UB-04 misclassified as CMS-1500)
+                        filled_zones = sum(1 for b in blocks if (b.text or '').strip() and len((b.text or '').strip()) >= 3)
+                        if filled_zones < 10:  # < ~20% of 48 zones
+                            print(f"[Pipeline] ⚠️ Template mismatch: only {filled_zones}/48 zones have text - falling back to layout model")
+                            blocks = []  # Force fallback to general layout path
                     else:
                         blocks = await self._load_schema_zones(aligned_image, width, height)
                         print(f"[Pipeline] CMS-1500 scan: aligned -> loaded {len(blocks)} schema zones")

@@ -25,8 +25,8 @@ docker run --gpus all \
     -p 8501:8501 \
     -p 8000:8000 \
     --add-host=host.docker.internal:host-gateway \
-    -v $(pwd)/models_cache:/root/.paddlex \
-    -v $(pwd)/data:/app/data \
+    -v "$(pwd)/models_cache:/root/.paddlex" \
+    -v "$(pwd)/data:/app/data" \
     --name doc2data-gpu-container \
     doc2data-gpu
 

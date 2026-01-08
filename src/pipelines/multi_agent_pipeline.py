@@ -176,21 +176,24 @@ class PipelineConfig:
     # Layout detection
     layout_model: str = "auto"  # auto, yolo, layoutlm, detectron2, donut
     yolo_confidence: float = 0.25
-    detectron_threshold: float = 0.5
+    # PubLayNet models often need a lower threshold to avoid returning only 1 giant region.
+    detectron_threshold: float = 0.30
     
     # OCR
     enable_trocr: bool = True
     ocr_confidence_threshold: float = 0.5
     handwriting_threshold: float = 0.35
     # Schema-zone matching / OCR tuning
-    zone_padding_px: int = 12
+    zone_padding_px: int = 8
     zone_padding_ratio: float = 0.15
     # If True, each OCR word box is assigned to at most one schema zone to avoid duplicates/overlaps
     enforce_unique_word_assignment: bool = True
     
-    # Template alignment - DISABLED BY DEFAULT (was making scanned forms worse)
-    enable_alignment: bool = False
+    # Template alignment - ENABLED for CMS-1500 scans (safe alignment implementation below)
+    enable_alignment: bool = True
     alignment_fallback_to_ml: bool = True
+    # Only trust schema zones for scans if alignment is strong
+    alignment_quality_threshold: float = 0.85
     
     # SLM/VLM
     enable_slm_labeling: bool = True
@@ -446,11 +449,96 @@ class TemplateAlignmentAgent(BaseAgent):
                 except:
                     pass
         self._initialized = True
+
+    @staticmethod
+    def _order_quad_points(pts: np.ndarray) -> np.ndarray:
+        """
+        Order 4 points as: top-left, top-right, bottom-right, bottom-left.
+        pts: shape (4,2)
+        """
+        pts = np.asarray(pts, dtype=np.float32).reshape(4, 2)
+        s = pts.sum(axis=1)
+        diff = np.diff(pts, axis=1).reshape(-1)
+        tl = pts[np.argmin(s)]
+        br = pts[np.argmax(s)]
+        tr = pts[np.argmin(diff)]
+        bl = pts[np.argmax(diff)]
+        return np.array([tl, tr, br, bl], dtype=np.float32)
+
+    def _detect_form_quad(self, gray: np.ndarray) -> Tuple[Optional[np.ndarray], float]:
+        """
+        Detect the outer form rectangle as a quadrilateral.
+        Returns (quad_points, score) where score is 0..1.
+        This is a stable alignment primitive that will not "tilt" a straight scan
+        if the quad is detected correctly.
+        """
+        try:
+            g = gray
+            if g.dtype != np.uint8:
+                g = g.astype(np.uint8)
+            g = cv2.GaussianBlur(g, (5, 5), 0)
+            # Strong edges
+            edges = cv2.Canny(g, 50, 150)
+            edges = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=2)
+
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if not contours:
+                return None, 0.0
+
+            h, w = g.shape[:2]
+            img_area = float(h * w)
+
+            best = None
+            best_score = 0.0
+            for cnt in contours:
+                area = float(cv2.contourArea(cnt))
+                if area < img_area * 0.15:
+                    continue
+                peri = cv2.arcLength(cnt, True)
+                approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+                if len(approx) != 4:
+                    continue
+
+                quad = approx.reshape(4, 2).astype(np.float32)
+                quad = self._order_quad_points(quad)
+                # Score: large area + rectangular-ish shape
+                area_ratio = area / img_area
+
+                # Angle score: corners should be near 90 deg
+                def _angle(a, b, c) -> float:
+                    ba = a - b
+                    bc = c - b
+                    denom = (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
+                    cosang = float(np.clip(np.dot(ba, bc) / denom, -1.0, 1.0))
+                    return float(np.degrees(np.arccos(cosang)))
+
+                angs = [
+                    _angle(quad[3], quad[0], quad[1]),
+                    _angle(quad[0], quad[1], quad[2]),
+                    _angle(quad[1], quad[2], quad[3]),
+                    _angle(quad[2], quad[3], quad[0]),
+                ]
+                ang_err = float(np.mean([abs(a - 90.0) for a in angs]))
+                angle_score = float(max(0.0, 1.0 - (ang_err / 25.0)))  # 25deg avg error -> 0
+
+                score = 0.7 * min(1.0, area_ratio / 0.60) + 0.3 * angle_score
+                if score > best_score:
+                    best_score = score
+                    best = quad
+
+            return best, float(best_score)
+        except Exception:
+            return None, 0.0
     
     def _compute_homography(self, image: np.ndarray, template: np.ndarray) -> Tuple[Optional[np.ndarray], float]:
         """
-        Compute alignment using Hybrid Approach: SIFT/ORB (Global) + ECC (Fine).
-        This ensures robust alignment even for tilted/shifted scans.
+        Compute alignment from input image -> template space.
+
+        IMPORTANT:
+        - We DO NOT use ECC refinement here. ECC is powerful but can introduce "tilt"/shear
+          when the input has handwriting/noise (exactly the issue you reported).
+        - We first try a stable quad-based perspective warp (outer form boundary).
+        - If that fails, we fall back to feature matching (SIFT/ORB) WITHOUT ECC.
         """
         # Convert to grayscale
         if len(image.shape) == 3:
@@ -472,12 +560,21 @@ class TemplateAlignmentAgent(BaseAgent):
             mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
             return mask
 
-        # Template is already grayscale; build structure masks for both
+        th, tw = template.shape[:2]
+
+        # 0) Stable primary: detect outer form quad and warp directly to template corners
+        quad, q_score = self._detect_form_quad(gray)
+        if quad is not None and q_score >= 0.55:
+            dst = np.array([[0, 0], [tw - 1, 0], [tw - 1, th - 1], [0, th - 1]], dtype=np.float32)
+            H = cv2.getPerspectiveTransform(quad.astype(np.float32), dst)
+            if H is not None:
+                return H, float(q_score)
+
+        # Template is already grayscale; build structure masks for both (feature fallback)
         template_mask = _structure_mask(template)
         image_mask = _structure_mask(gray)
         
         h, w = gray.shape[:2]
-        th, tw = template.shape[:2]
         
         # 1. Coarse Alignment using SIFT (Handles large rotation/scale)
         kp1, des1 = [], None
@@ -541,41 +638,33 @@ class TemplateAlignmentAgent(BaseAgent):
             except Exception:
                 return None, 0.0
             
-        # Warp image to coarse alignment
-        aligned_coarse = cv2.warpPerspective(image_mask, H_coarse, (tw, th))
-        
-        # 2. Fine Alignment using ECC
-        try:
-            warp_mode = cv2.MOTION_HOMOGRAPHY
-            warp_matrix = np.eye(3, 3, dtype=np.float32)
-            criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 50, 1e-3)
-            cc, warp_matrix = cv2.findTransformECC(template_mask, aligned_coarse, warp_matrix, warp_mode, criteria)
-            H_final = np.dot(warp_matrix, H_coarse)
-            quality = cc
-        except Exception:
-            H_final = H_coarse
-            quality = 0.5 # Default confidence if ECC fails but coarse worked
-            
-        return H_final, quality
+        # No ECC refinement (prevents tilt)
+        return H_coarse, 0.55
     
     def _validate_homography(self, H: np.ndarray, img_shape: Tuple[int, int]) -> bool:
         """
-        STRICT VALIDATION: Reject any homography that causes significant warping.
-        We only want to correct minor rotation/translation, NOT perspective tilt.
+        Validate homography is sane.
+        We ALLOW mild perspective (scans), but we reject wild warps that tilt/flip the page.
         """
         if H is None:
             return False
-            
-        # Check determinant (should be close to 1 for rigid transform)
-        det = np.abs(np.linalg.det(H[:2, :2]))
-        if det < 0.8 or det > 1.2:
+        try:
+            h, w = img_shape[:2]
+            corners = np.float32([[0, 0], [w, 0], [w, h], [0, h]]).reshape(-1, 1, 2)
+            warped = cv2.perspectiveTransform(corners, H).reshape(-1, 2)
+            if not np.isfinite(warped).all():
+                return False
+            # Reject if warped polygon area is too small/huge
+            area = float(cv2.contourArea(warped.astype(np.float32)))
+            orig = float(w * h)
+            if area < orig * 0.20 or area > orig * 5.0:
+                return False
+            # Reject flips (polygon should be convex)
+            if not cv2.isContourConvex(warped.astype(np.float32)):
+                return False
+            return True
+        except Exception:
             return False
-            
-        # Check perspective components (should be close to 0)
-        if abs(H[2, 0]) > 0.001 or abs(H[2, 1]) > 0.001:
-            return False
-            
-        return True
     
     async def process(self, image: np.ndarray, form_type: FormType) -> AlignmentResult:
         """Align image to template."""
@@ -992,17 +1081,24 @@ class OCRAgent(BaseAgent):
     def _is_handwritten(self, image: np.ndarray, paddle_conf: float, paddle_text: str) -> bool:
         """Heuristic to detect if text is handwritten.
         
-        Only use TrOCR if PaddleOCR completely failed (no text at all).
-        PaddleOCR handles handwriting reasonably well, TrOCR tends to hallucinate.
+        TrOCR is prone to hallucinating on blank/noisy crops.
+        Only consider TrOCR if there is visible ink AND PaddleOCR is low-quality.
         """
-        # Only try TrOCR if PaddleOCR found nothing
-        if not paddle_text or len(paddle_text.strip()) == 0:
+        def _has_ink(img: np.ndarray) -> bool:
+            if img is None or img.size == 0:
+                return False
+            g = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if img.ndim == 3 else img
+            g = cv2.GaussianBlur(g, (3, 3), 0)
+            bw = cv2.adaptiveThreshold(g, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 9)
+            ink_ratio = float(np.count_nonzero(bw) / max(1, bw.size))
+            return ink_ratio > 0.015  # very low threshold, but filters blank boxes
+
+        if not _has_ink(image):
+            return False
+        if paddle_conf < 0.35:
             return True
-        
-        # Also try if confidence is very low AND text is very short
-        if paddle_conf < 0.3 and len(paddle_text) < 3:
+        if (not paddle_text) or len(paddle_text.strip()) < 2:
             return True
-        
         return False
     
     async def process(self, image: np.ndarray, block: DetectedBlock) -> DetectedBlock:
@@ -1441,12 +1537,74 @@ class MultiAgentPipeline:
         self.ocr_agent = OCRAgent(self.config)
         self.labeling_agent = LabelingAgent(self.config)
         self.validation_agent = ValidationAgent(self.config)
+
+    def _extract_pdf_digital_words(self, page, zoom: float) -> Optional[List[Any]]:
+        """Extract word-level boxes from a PDF text layer and scale into rendered pixel space."""
+        try:
+            from utils.models import WordBox
+            words = page.get_text("words")  # x0,y0,x1,y1,word,block,line,word_no (PDF points)
+            if not words or len(words) < 30:
+                return None
+            scaled = []
+            for w in words:
+                if len(w) < 5:
+                    continue
+                x0, y0, x1, y1, text = w[:5]
+                text = str(text or "").strip()
+                if len(text) < 1:
+                    continue
+                sx0 = float(x0) * zoom
+                sy0 = float(y0) * zoom
+                sx1 = float(x1) * zoom
+                sy1 = float(y1) * zoom
+                scaled.append(WordBox(text=text, bbox=(sx0, sy0, sx1, sy1), confidence=1.0))
+            return scaled if len(scaled) >= 30 else None
+        except Exception:
+            return None
+
+    def _digital_layer_matches_visual(self, image_rgb: np.ndarray, word_boxes: List[Any], max_samples: int = 40) -> bool:
+        """
+        Validate that the PDF text layer matches visible pixels.
+        This prevents the "Rahul vs Rohit" bug caused by hidden/incorrect OCR layers.
+        """
+        if image_rgb is None or image_rgb.size == 0 or not word_boxes:
+            return False
+        try:
+            gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY) if image_rgb.ndim == 3 else image_rgb
+            h, w = gray.shape[:2]
+            # Sample medium-length words (more reliable)
+            candidates = [wb for wb in word_boxes if 3 <= len(getattr(wb, "text", "") or "") <= 20]
+            if len(candidates) < 15:
+                candidates = list(word_boxes)
+            # Uniform sampling
+            step = max(1, len(candidates) // max_samples)
+            samples = candidates[::step][:max_samples]
+
+            ink_scores = []
+            for wb in samples:
+                x0, y0, x1, y1 = [int(round(v)) for v in wb.bbox]
+                x0, y0 = max(0, x0), max(0, y0)
+                x1, y1 = min(w, x1), min(h, y1)
+                if x1 <= x0 + 2 or y1 <= y0 + 2:
+                    continue
+                crop = gray[y0:y1, x0:x1]
+                if crop.size < 50:
+                    continue
+                # Ink-ness: fraction of dark pixels
+                thr = int(np.clip(np.median(crop) - 15, 100, 210))
+                dark = np.count_nonzero(crop < thr)
+                ink = dark / float(crop.size)
+                ink_scores.append(float(ink))
+            if len(ink_scores) < 10:
+                return False
+            med = float(np.median(ink_scores))
+            # If median ink in word boxes is too low, those words are not actually visible.
+            return med >= 0.015
+        except Exception:
+            return False
     
     def _load_image(self, path: str) -> Tuple[np.ndarray, int, int, Optional[List[Any]]]:
         """Load document image.
-        
-        CRITICAL CHANGE: Ignoring digital text layer to prevent 'hallucinations' from 
-        underlying PDF templates. We MUST OCR what we see visually.
         """
         path = Path(path)
         digital_word_boxes = None
@@ -1461,10 +1619,12 @@ class MultiAgentPipeline:
             img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
             if pix.n == 4:
                 img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
-            
-            # FORCE DISABLE DIGITAL TEXT EXTRACTION
-            # This was causing the "Rahul" issue where it read hidden text layers instead of the visible pixels.
-            digital_word_boxes = None 
+
+            # Extract digital text layer, but only keep it if it matches visible pixels.
+            # This prevents using hidden/incorrect layers (the "Rahul vs Rohit" bug).
+            maybe_words = self._extract_pdf_digital_words(page, zoom)
+            if maybe_words and self._digital_layer_matches_visual(img, maybe_words):
+                digital_word_boxes = maybe_words
             
             doc.close()
         else:
@@ -1502,12 +1662,13 @@ class MultiAgentPipeline:
         
         # Common CMS-1500 pre-printed patterns to remove
         patterns_to_remove = [
-            # Field numbers and labels
-            r"^\d+[a-z]?\.\s*",  # "1.", "2.", "1a.", etc.
+            # Field numbers and labels (with or without dot; OCR often drops the dot)
+            r"^\s*\d+\s*[a-z]?\s*\.?\s*",  # "1", "1.", "1a", "1a.", etc.
             
             # Common field labels (case-insensitive)
-            r"PATIENT'?S?\s*(NAME|BIRTH|ADDRESS|SEX|PHONE|RELATIONSHIP)",
-            r"INSURED'?S?\s*(NAME|I\.?D\.?\s*N|ADDRESS|DATE|POLICY|GROUP)",
+            # More robust: allow missing leading letters due to OCR errors (P?ATIENT, I?NSURED)
+            r"P?ATIENT'?S?\s*(NAME|BIRTH|ADDRESS|SEX|PHONE|RELATIONSHIP)",
+            r"I?NSURED'?S?\s*(NAME|I\.?D\.?\s*N|ADDRESS|DATE|POLICY|GROUP)",
             r"OTHER\s+INSURED'?S?\s*(NAME|POLICY)",
             r"INSURANCE\s+PLAN\s+NAME",
             r"EMPLOYER'?S?\s*NAME",
@@ -1986,69 +2147,174 @@ class MultiAgentPipeline:
         
         print(f"[Pipeline] Detected Form Type: {form_id.form_type}")
 
-        # Decide whether to use digital text layer (only for CMS-1500).
-        # FORCE DISABLE: We found this causes hallucinations (reading "Rahul" instead of "Rohit")
-        # because PDF text layers often contain template data that doesn't match the image.
+        # Decide whether to use digital text layer:
+        # - Only available for PDFs
+        # - Only trust it when it contains *real filled values*, not just the pre-printed template layer.
         use_digital_text = False
-        
-        # Preprocess (Deskew, Denoise, Enhance)
-        from src.processing.preprocessing import preprocess_image
-        image, pre_meta = preprocess_image(
-            image,
-            doc_type="cms1500" if "cms" in path.lower() else "generic"
-        )
-        # Update width/height after preprocessing (e.g. if resized)
-        height, width = image.shape[:2]
-        
-        # Step 2: Template Alignment
-        # DISABLED by default to prevent "tilting" issues.
-        # Simple deskew in preprocessing is enough.
+        if digital_words_present and form_id.form_type == FormType.CMS1500:
+            try:
+                schema_path = Config.PROJECT_ROOT / "data" / "schemas" / "cms-1500.json"
+                if schema_path.exists():
+                    import json
+                    with open(schema_path) as f:
+                        schema = json.load(f)
+                    fields_list = schema.get("fields", [])
+                    candidate_blocks = await self._match_ocr_to_zones(
+                        digital_words or [], fields_list, width, height, image, word_level=True
+                    )
+                    by_id = {b.id: ((b.metadata or {}).get("raw_ocr_text") or b.text or "").strip() for b in candidate_blocks}
+                    insured_id = by_id.get("1a_insured_id", "")
+                    patient_name = by_id.get("2_patient_name", "")
+                    patient_dob = by_id.get("3_patient_dob", "")
+
+                    import re
+                    def looks_like_member_id(s: str) -> bool:
+                        s = (s or "").strip()
+                        return bool(re.search(r"[A-Za-z]{0,4}\d{4,}", s)) and len(s) >= 5
+                    def looks_like_name(s: str) -> bool:
+                        s = (s or "").strip()
+                        return bool(re.search(r"[A-Za-z]{2,}", s)) and ("," in s or " " in s)
+                    def looks_like_dob(s: str) -> bool:
+                        s = (s or "").strip()
+                        nums = re.findall(r"\d{2,4}", s)
+                        return len(nums) >= 3
+
+                    score = sum([
+                        1 if looks_like_member_id(insured_id) else 0,
+                        1 if looks_like_name(patient_name) else 0,
+                        1 if looks_like_dob(patient_dob) else 0,
+                    ])
+                    print(f"[Pipeline] Digital QA: insured_id='{insured_id[:40]}', patient_name='{patient_name[:40]}', dob='{patient_dob[:40]}', score={score}/3")
+                    # Require at least 2/3 anchor fields to look sane; otherwise treat as scan.
+                    use_digital_text = score >= 2
+                    if use_digital_text:
+                        print("[Pipeline] ✅ Digital text layer validated - using it (skip preprocess/alignment).")
+                    else:
+                        print("[Pipeline] ⚠️ Digital text layer present but looks like template-only; using scan OCR path.")
+            except Exception as e:
+                print(f"[Pipeline] Digital layer validation error: {e}")
+                use_digital_text = False
+
+        # Preprocess ONLY for scan/camera path.
+        # IMPORTANT for CMS-1500:
+        # - If we plan to template-align, DO NOT deskew first (deskew can mis-rotate handwritten scans).
+        #   Alignment will rectify rotation in a more stable way using the form boundary.
+        if not use_digital_text:
+            from src.processing.preprocessing import preprocess_image
+            will_align = bool(self.config.enable_alignment and form_id.form_type == FormType.CMS1500)
+            image, pre_meta = preprocess_image(
+                image,
+                deskew=(not will_align),
+                doc_type="cms1500" if form_id.form_type == FormType.CMS1500 else "generic"
+            )
+            height, width = image.shape[:2]
+
+        # Step 2: Template Alignment (scan path only)
         aligned_image = image
         alignment_result = None
+        aligned_preview_path = None
+        if (not use_digital_text) and self.config.enable_alignment and form_id.form_type == FormType.CMS1500:
+            try:
+                alignment_result = await self.alignment_agent.process(image, form_id.form_type)
+                if alignment_result.success and alignment_result.aligned_image is not None:
+                    aligned_image = alignment_result.aligned_image
+                    height, width = aligned_image.shape[:2]
+                    print(f"[Pipeline] Alignment succeeded, quality: {alignment_result.alignment_quality:.2f}")
+                else:
+                    print("[Pipeline] Alignment failed; will NOT use schema zones on raw scan.")
+            except Exception as e:
+                print(f"[Pipeline] Alignment exception: {e}")
+
+        # Write an aligned preview image for UI overlays (optional but very useful for debugging)
+        try:
+            import uuid
+            cache_dir = Config.PROJECT_ROOT / "cache" / "previews"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            aligned_preview_path = cache_dir / f"aligned_{uuid.uuid4().hex}.png"
+            # cv2.imwrite expects BGR; our pipeline images are RGB
+            if aligned_image is not None and aligned_image.ndim == 3 and aligned_image.shape[2] == 3:
+                bgr = cv2.cvtColor(aligned_image, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(str(aligned_preview_path), bgr)
+            elif aligned_image is not None:
+                cv2.imwrite(str(aligned_preview_path), aligned_image)
+        except Exception:
+            aligned_preview_path = None
 
         # Step 3: Layout Detection
-        # Try YOLO first (if available), then fallback to schema zones
         blocks = []
         
         if form_id.form_type == FormType.CMS1500:
-            # CMS-1500 PATH:
-            # Always use Full-Page OCR + Line Grouping.
-            # Do NOT use hardcoded schema zones (they break on scans).
-            print(f"[Pipeline] CMS-1500: Using Full-Page OCR (robust to scans)")
-            
-            # Preprocess: remove form lines to improve OCR
-            try:
-                from src.processing.preprocessing import remove_form_lines
-                ocr_image = remove_form_lines(aligned_image)
-            except Exception:
-                ocr_image = aligned_image
-            
-            # Full-page OCR with word-level boxes
-            from src.ocr.paddle_ocr import PaddleOCRWrapper
-            paddle = PaddleOCRWrapper()
-            word_boxes = paddle.extract_text(ocr_image)
-            
-            if word_boxes:
-                # Group words into logical lines/blocks based on Y position
-                blocks = self._group_words_into_blocks(word_boxes, width, height)
-                print(f"[Pipeline] Full-page OCR: {len(word_boxes)} words grouped into {len(blocks)} blocks")
-        else:
-            # GENERAL FORM PATH:
-            # Try Detectron2, but if it returns junk (1 big block), use Full-Page OCR.
-            print("[Pipeline] Running layout detection for general form...")
-            try:
-                blocks = await self.layout_agent.process(aligned_image, form_id.form_type)
-                print(f"[Pipeline] Detected {len(blocks)} blocks")
-                
-                # If layout detection fails (returns 0 or 1 giant block), use Full-Page OCR
-                if len(blocks) <= 1:
-                    print("[Pipeline] ⚠️ Layout detection failed (<=1 block), using Full-Page OCR fallback")
+            schema_path = Config.PROJECT_ROOT / "data" / "schemas" / "cms-1500.json"
+            if use_digital_text and schema_path.exists():
+                # DIGITAL CMS-1500: zone match using validated digital words (best quality)
+                import json
+                with open(schema_path) as f:
+                    schema = json.load(f)
+                fields_list = schema.get("fields", [])
+                blocks = await self._match_ocr_to_zones(digital_words or [], fields_list, width, height, aligned_image, word_level=True)
+                print(f"[Pipeline] CMS-1500 digital: matched {len(blocks)} fields")
+            else:
+                # SCANNED CMS-1500: ONLY use schema zones if alignment succeeded (template space).
+                if alignment_result is not None and alignment_result.success and float(alignment_result.alignment_quality) >= float(self.config.alignment_quality_threshold):
+                    # Remove red lines AFTER alignment for OCR quality
+                    try:
+                        from src.processing.preprocessing import remove_form_lines
+                        aligned_image = remove_form_lines(aligned_image)
+                    except Exception:
+                        pass
+                    # Full-page OCR once, then zone-match word boxes (more accurate than per-field crop OCR).
+                    if schema_path.exists():
+                        import json
+                        with open(schema_path) as f:
+                            schema = json.load(f)
+                        fields_list = schema.get("fields", [])
+                        from src.ocr.paddle_ocr import PaddleOCRWrapper
+                        paddle = PaddleOCRWrapper()
+                        scan_words = paddle.extract_text(aligned_image)
+                        # PaddleOCRWrapper returns word-level boxes -> enable unique assignment to reduce zone bleed.
+                        blocks = await self._match_ocr_to_zones(scan_words or [], fields_list, width, height, aligned_image, word_level=True)
+                        print(f"[Pipeline] CMS-1500 scan: aligned -> zone-matched from full-page OCR ({len(scan_words or [])} words) into {len(blocks)} fields")
+                    else:
+                        blocks = await self._load_schema_zones(aligned_image, width, height)
+                        print(f"[Pipeline] CMS-1500 scan: aligned -> loaded {len(blocks)} schema zones")
+                else:
+                    # If we can't align reliably, do full-page OCR line grouping (no fake boxes).
+                    print("[Pipeline] CMS-1500 scan: alignment not reliable -> full-page OCR fallback")
                     from src.ocr.paddle_ocr import PaddleOCRWrapper
                     paddle = PaddleOCRWrapper()
                     word_boxes = paddle.extract_text(aligned_image)
                     if word_boxes:
                         blocks = self._group_words_into_blocks(word_boxes, width, height)
-                        print(f"[Pipeline] Full-page OCR: {len(word_boxes)} words grouped into {len(blocks)} blocks")
+                        print(f"[Pipeline] Full-page OCR: {len(word_boxes)} words -> {len(blocks)} blocks")
+        else:
+            # GENERAL FORM PATH:
+            # Try Detectron2/PaddleDetection. Drop giant blocks; fallback to OCR line grouping.
+            print("[Pipeline] Running layout detection for general form...")
+            try:
+                blocks = await self.layout_agent.process(aligned_image, form_id.form_type)
+                print(f"[Pipeline] Detected {len(blocks)} blocks")
+                
+                # Drop blocks that are basically "the whole page"
+                page_area = float(width * height) if width > 0 and height > 0 else 1.0
+                filtered = []
+                for b in blocks:
+                    x0, y0, x1, y1 = b.bbox
+                    area = float(max(0.0, x1 - x0) * max(0.0, y1 - y0))
+                    if area / page_area > 0.85:
+                        continue
+                    filtered.append(b)
+                if len(filtered) != len(blocks):
+                    print(f"[Pipeline] Dropped {len(blocks) - len(filtered)} giant blocks")
+                blocks = filtered
+
+                if len(blocks) < 3:
+                    print("[Pipeline] ⚠️ Layout too coarse (<3 blocks), using OCR line grouping fallback")
+                    from src.ocr.paddle_ocr import PaddleOCRWrapper
+                    paddle = PaddleOCRWrapper()
+                    word_boxes = paddle.extract_text(aligned_image)
+                    if word_boxes:
+                        blocks = self._group_words_into_blocks(word_boxes, width, height)
+                        print(f"[Pipeline] Full-page OCR: {len(word_boxes)} words -> {len(blocks)} blocks")
             except Exception as e:
                 print(f"[Pipeline] Layout detection failed: {e}")
                 # Fallback to OCR
@@ -2094,6 +2360,26 @@ class MultiAgentPipeline:
             ocr_image = aligned_image
 
         blocks = await self.ocr_agent.process_blocks(ocr_image, blocks)
+
+        # Post-clean CMS-1500 zone OCR: remove printed labels that leak into the crop.
+        if form_id.form_type == FormType.CMS1500:
+            for b in blocks:
+                try:
+                    src = (b.metadata or {}).get("source")
+                    if src not in ("schema_zones", "ocr_zone_matching"):
+                        continue
+                    if not b.text:
+                        continue
+                    # Prefer human label from schema if present
+                    field_label = (b.metadata or {}).get("field_name") or (b.metadata or {}).get("label") or b.id
+                    cleaned = self._clean_field_value(str(b.text), str(field_label), str(b.id))
+                    # Keep cleaned if it materially improves
+                    if cleaned and len(cleaned) <= len(str(b.text)) + 2:
+                        b.metadata["raw_ocr_text"] = b.metadata.get("raw_ocr_text") or b.text
+                        b.text = cleaned
+                        b.metadata["post_cleaned"] = True
+                except Exception:
+                    continue
         
         # Step 5: SLM/VLM Labeling
         if self.config.enable_slm_labeling:

@@ -15,6 +15,108 @@ import os
 # Cache for template features to avoid re-computing
 _TEMPLATE_CACHE: Dict[str, Dict[str, Any]] = {}
 
+
+def _order_quad_points(pts: np.ndarray) -> np.ndarray:
+    """Order quad points as [tl, tr, br, bl]."""
+    pts = np.asarray(pts, dtype=np.float32).reshape(4, 2)
+    s = pts.sum(axis=1)
+    diff = np.diff(pts, axis=1).reshape(-1)
+    tl = pts[np.argmin(s)]
+    br = pts[np.argmax(s)]
+    tr = pts[np.argmin(diff)]
+    bl = pts[np.argmax(diff)]
+    return np.array([tl, tr, br, bl], dtype=np.float32)
+
+
+def _detect_form_quad(gray: np.ndarray) -> Tuple[Optional[np.ndarray], float]:
+    """
+    Detect outer form boundary as a quadrilateral for stable perspective alignment.
+    Returns (quad, score 0..1).
+    """
+    try:
+        g = gray
+        if g.dtype != np.uint8:
+            g = g.astype(np.uint8)
+        g = cv2.GaussianBlur(g, (5, 5), 0)
+        edges = cv2.Canny(g, 50, 150)
+        edges = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=2)
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None, 0.0
+        h, w = g.shape[:2]
+        img_area = float(h * w)
+        best = None
+        best_score = 0.0
+
+        def _angle(a, b, c) -> float:
+            ba = a - b
+            bc = c - b
+            denom = (np.linalg.norm(ba) * np.linalg.norm(bc) + 1e-6)
+            cosang = float(np.clip(np.dot(ba, bc) / denom, -1.0, 1.0))
+            return float(np.degrees(np.arccos(cosang)))
+
+        for cnt in contours:
+            area = float(cv2.contourArea(cnt))
+            if area < img_area * 0.15:
+                continue
+            peri = cv2.arcLength(cnt, True)
+            approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+            if len(approx) != 4:
+                continue
+            quad = _order_quad_points(approx.reshape(4, 2))
+            area_ratio = area / img_area
+            angs = [
+                _angle(quad[3], quad[0], quad[1]),
+                _angle(quad[0], quad[1], quad[2]),
+                _angle(quad[1], quad[2], quad[3]),
+                _angle(quad[2], quad[3], quad[0]),
+            ]
+            ang_err = float(np.mean([abs(a - 90.0) for a in angs]))
+            angle_score = float(max(0.0, 1.0 - (ang_err / 25.0)))
+            score = 0.7 * min(1.0, area_ratio / 0.60) + 0.3 * angle_score
+            if score > best_score:
+                best_score = score
+                best = quad
+        return (best, float(best_score)) if best is not None else (None, 0.0)
+    except Exception:
+        return None, 0.0
+
+
+def _validate_homography_ref_to_input(H: np.ndarray, ref_shape: Tuple[int, int], input_shape: Tuple[int, int]) -> bool:
+    """
+    Validate a homography that maps REFERENCE -> INPUT.
+    Reject wild warps but allow mild perspective (scans).
+    """
+    if H is None:
+        return False
+    try:
+        ref_h, ref_w = ref_shape[:2]
+        in_h, in_w = input_shape[:2]
+
+        ref_corners = np.float32([[0, 0], [ref_w, 0], [ref_w, ref_h], [0, ref_h]]).reshape(-1, 1, 2)
+        warped = cv2.perspectiveTransform(ref_corners, H).reshape(-1, 2)
+        if not np.isfinite(warped).all():
+            return False
+
+        # Area sanity (in input space)
+        area = float(cv2.contourArea(warped.astype(np.float32)))
+        in_area = float(in_w * in_h)
+        if area < in_area * 0.15 or area > in_area * 1.10:
+            return False
+
+        # Keep corners within a reasonable padded boundary
+        pad_x = in_w * 0.15
+        pad_y = in_h * 0.15
+        if (warped[:, 0].min() < -pad_x or warped[:, 0].max() > in_w + pad_x or
+            warped[:, 1].min() < -pad_y or warped[:, 1].max() > in_h + pad_y):
+            return False
+
+        if not cv2.isContourConvex(warped.astype(np.float32)):
+            return False
+        return True
+    except Exception:
+        return False
+
 def get_reference_image_path(template_name: str) -> Optional[str]:
     """Resolve path to reference image for a template."""
     # Assuming standard location in data/sample_docs
@@ -113,6 +215,20 @@ def compute_alignment_matrix(
         gray = cv2.cvtColor(input_image, cv2.COLOR_RGB2GRAY)
     else:
         gray = input_image
+
+    # 0) Stable primary: outer quad -> compute input->ref then invert to ref->input
+    try:
+        quad, q_score = _detect_form_quad(gray)
+        ref_h, ref_w = ref_data["shape"][:2]
+        if quad is not None and q_score >= 0.55:
+            dst = np.array([[0, 0], [ref_w - 1, 0], [ref_w - 1, ref_h - 1], [0, ref_h - 1]], dtype=np.float32)
+            H_in_to_ref = cv2.getPerspectiveTransform(quad.astype(np.float32), dst)
+            if H_in_to_ref is not None:
+                H_ref_to_in = np.linalg.inv(H_in_to_ref)
+                if _validate_homography_ref_to_input(H_ref_to_in, (ref_h, ref_w), gray.shape):
+                    return H_ref_to_in
+    except Exception:
+        pass
         
     # Detect features in input image
     orb = cv2.ORB_create(nfeatures=5000)
@@ -141,13 +257,17 @@ def compute_alignment_matrix(
     src_pts = np.float32([ref_data["keypoints"][m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
     dst_pts = np.float32([kp_img[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
     
-    # Find Homography
+    # Find Homography (feature fallback)
     # H maps Reference(src) -> Input(dst)
     # This means: Input_Coord = H * Reference_Coord
     # This is exactly what we need to transform Schema BBoxes (Reference) to Input Image
-    H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-    
-    return H
+    H_ref_to_in, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+    if H_ref_to_in is None:
+        return None
+    ref_h, ref_w = ref_data["shape"][:2]
+    if not _validate_homography_ref_to_input(H_ref_to_in, (ref_h, ref_w), gray.shape):
+        return None
+    return H_ref_to_in
 
 def transform_bbox(bbox: Tuple[float, float, float, float], H: np.ndarray) -> Tuple[float, float, float, float]:
     """

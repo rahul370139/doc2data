@@ -28,6 +28,10 @@ timm>=0.9.0  # Required for Table Transformer backbone
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 streamlit>=1.28.0
+python-multipart>=0.0.6  # Required for FastAPI file uploads
+
+# YOLOv8 (required to actually run the fine-tuned model)
+ultralytics>=8.2.0
 
 # Utilities
 numpy>=1.24.0

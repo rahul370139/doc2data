@@ -42,10 +42,13 @@ class YOLOLayoutDetector:
             "figure": BlockType.FIGURE,
             "text": BlockType.TEXT,
             "title": BlockType.TITLE,
-            "form": BlockType.FORM,
-            "field": BlockType.FORM,
-            "checkbox": BlockType.FORM,
+            "form": BlockType.FORM_FIELD,
+            "field": BlockType.FORM_FIELD,
+            "checkbox": BlockType.CHECKBOX,
             "section": BlockType.LIST,
+            "header": BlockType.HEADER,
+            "signature": BlockType.SIGNATURE,
+            "footer": BlockType.FOOTER,
         }
 
     def _predict_single(self, image: np.ndarray):

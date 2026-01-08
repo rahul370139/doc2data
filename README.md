@@ -3,7 +3,7 @@
 **Version:** 1.1.0-beta (CMS-1500 Focus)  
 **Status:** ✅ Production-Ready (GPU-Accelerated)  
 **Last Updated:** December 10, 2025  
-**Live Demo:** http://100.126.216.92:8501  
+**Live Demo:** http://100.126.216.92:8501
 **Scrum Report:** [View Full Status & Roadmap](SCRUM_REPORT.md)
 
 Goal:

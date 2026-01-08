@@ -35,15 +35,29 @@ def _normalize_bbox(bbox: List[float], page_w: float, page_h: float) -> Dict[str
 
 def _field_to_block(field: Dict[str, Any], page_w: float, page_h: float) -> Dict[str, Any]:
     value = field.get("value", "")
-    label = field.get("label", field.get("id", ""))
+    # Priority: Semantic Label -> Schema Field Name -> ID -> "Field"
+    metadata = field.get("metadata", {})
+    label = metadata.get("semantic_label") or metadata.get("field_name") or field.get("id") or "Field"
+    
+    # If label is "Unknown" or generic, fall back to ID
+    if label in ["Unknown", "FORM_FIELD", "text"]:
+        label = field.get("id", "Field")
+
     block_type = _infer_block_type(field)
     bbox = field.get("bbox") or [0.0, 0.0, 0.0, 0.0]
     conf = float(field.get("confidence", 0.0) or 0.0)
     section = _infer_section(field)
+    
+    # Format content cleanly
+    if value:
+        content = f"{label}: {value}"
+    else:
+        content = label # Just the label if no value
+        
     block: Dict[str, Any] = {
         "type": block_type,
         "bbox": _normalize_bbox(bbox, page_w, page_h),
-        "content": f"{label}: {value}".strip(": "),
+        "content": content,
         "image_url": None,
         "chart_data": None,
         "confidence": _confidence_band(conf),

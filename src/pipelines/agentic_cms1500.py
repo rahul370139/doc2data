@@ -389,17 +389,7 @@ class OCRAgent:
             if handwriting_score > 0.3 and icr_model:
                 icr_text = icr_model.predict(crop)
                 if icr_text:
-                    return ZonePrediction(
-                        zone.field_id,
-                        zone.label,
-                        icr_text,
-                        zone.bbox,
-                        0.65,
-                        "trocr",
-                        [],
-                        zone.field_type,
-                        notes=f"handwriting={handwriting_score:.2f}",
-                    )
+                    return ZonePrediction(zone.field_id, zone.label, icr_text, zone.bbox, 0.65, "trocr", [], zone.field_type, notes=f"handwriting={handwriting_score:.2f}")
 
         return ZonePrediction(zone.field_id, zone.label, "", zone.bbox, 0.0, "none", [], zone.field_type, notes="no_text_found")
 
@@ -613,6 +603,7 @@ def run_cms1500_agentic(
             all_word_boxes.append({"text": wb.text, "bbox": list(wb.bbox), "confidence": wb.confidence})
 
     ocr_result = {
+        "success": True,
         "form_type": "CMS-1500",
         "extraction_method": "agentic_template",
         "extracted_fields": extracted_fields,
@@ -624,6 +615,11 @@ def run_cms1500_agentic(
         "llm_used": use_llm,
         "total_blocks_detected": len(zone_preds),
         "blocks_with_text": sum(1 for p in zone_preds if p.value),
+        "metadata": {
+            "alignment_success": bool(H is not None),
+            "alignment_matrix_present": bool(H is not None),
+            "ref_size": list(ref_size) if ref_size else None,
+        },
     }
 
     business = map_to_business_schema(ocr_result, form_type="cms1500")

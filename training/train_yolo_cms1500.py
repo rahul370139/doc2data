@@ -9,11 +9,11 @@ This script provides comprehensive training options:
 - Export to multiple formats
 
 Dataset structure (YOLO format):
-    dataset/
-      images/train/*.jpg|png
-      images/val/*.jpg|png
-      labels/train/*.txt
-      labels/val/*.txt
+dataset/
+  images/train/*.jpg|png
+  images/val/*.jpg|png
+  labels/train/*.txt
+  labels/val/*.txt
 
 Each label file: <class_id> <cx> <cy> <w> <h> (normalized 0-1).
 
@@ -101,7 +101,7 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
     
     args = parser.parse_args()
-    
+
     # Check ultralytics
     try:
         from ultralytics import YOLO
@@ -111,7 +111,7 @@ def main():
             "Install with: pip install ultralytics\n"
             "Or for full support: pip install ultralytics[export]"
         ) from exc
-    
+
     # Generate run name
     if args.name is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

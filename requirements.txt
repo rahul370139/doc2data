@@ -9,7 +9,9 @@ opencv-python>=4.8.0
 
 # Layout detection
 layoutparser>=0.3.4
-# detectron2>=0.6  # Optional - LayoutParser works with PaddleDetection backend
+# detectron2 is required for high-quality layout detection
+# pip install 'git+https://github.com/facebookresearch/detectron2.git'
+detectron2>=0.6
 torch>=2.0.0,<2.3.0
 torchvision>=0.15.0,<0.18.0
 

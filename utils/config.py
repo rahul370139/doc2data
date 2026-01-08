@@ -25,9 +25,35 @@ class Config:
     MODEL_CACHE_DIR: Path = Path(os.getenv("MODEL_CACHE_DIR", "models/weights"))
     LAYOUT_MODEL: str = os.getenv("LAYOUT_MODEL", "publaynet")
     OCR_MODEL: str = os.getenv("OCR_MODEL", "paddleocr")
-    # Default to fine-tuned model if available
-    _YOLO_DEFAULT = "runs/detect/cms1500_yolo_run1/weights/best.pt"
-    YOLO_MODEL_PATH: Optional[str] = os.getenv("YOLO_MODEL_PATH", _YOLO_DEFAULT)
+    # YOLO model paths - check container path first, then local
+    @staticmethod
+    def _get_yolo_path() -> Optional[str]:
+        """Find YOLO model in container or local paths."""
+        # Environment override takes priority
+        env_path = os.getenv("YOLO_MODEL_PATH")
+        if env_path and Path(env_path).exists():
+            return env_path
+        
+        # Container path (Docker)
+        container_path = Path("/app/models/yolo/cms1500_best.pt")
+        if container_path.exists():
+            return str(container_path)
+        
+        # Local development paths
+        local_paths = [
+            "runs/detect/cms1500_reducto_v1/weights/best.pt",
+            "models/yolo/cms1500_reducto_v1.pt",
+            "runs/detect/cms1500_yolo_run13/weights/best.pt",
+            "runs/detect/cms1500_yolo_run1/weights/best.pt",
+            "models/yolo/cms1500_best.pt",
+        ]
+        for p in local_paths:
+            if Path(p).exists():
+                return p
+        
+        return None
+    
+    YOLO_MODEL_PATH: Optional[str] = None  # Set dynamically
     YOLO_CONFIDENCE: float = float(os.getenv("YOLO_CONFIDENCE", "0.25"))
     YOLO_IOU: float = float(os.getenv("YOLO_IOU", "0.6"))
     
@@ -37,7 +63,7 @@ class Config:
     DENOISE_ENABLED: bool = os.getenv("DENOISE_ENABLED", "true").lower() == "true"
     
     # Cache Configuration
-    CACHE_ENABLED: bool = os.getenv("CACHE_ENABLED", "true").lower() == "true"
+    CACHE_ENABLED: bool = os.getenv("CACHE_ENABLED", "false").lower() == "true"
     CACHE_DIR: Path = Path(os.getenv("CACHE_DIR", "cache"))
     
     # Logging
@@ -80,5 +106,7 @@ class Config:
         return f"http://{cls.OLLAMA_HOST}"
 
 
-# Initialize directories
+# Initialize directories and dynamic config
 Config.ensure_directories()
+Config.YOLO_MODEL_PATH = Config._get_yolo_path()
+print(f"[Config] YOLO model path: {Config.YOLO_MODEL_PATH}")

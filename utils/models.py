@@ -14,6 +14,11 @@ class BlockType(str, Enum):
     TABLE = "table"
     FIGURE = "figure"
     FORM = "form"
+    FORM_FIELD = "form_field"
+    CHECKBOX = "checkbox"
+    SIGNATURE = "signature"
+    HEADER = "header"
+    FOOTER = "footer"
     UNKNOWN = "unknown"
 
 

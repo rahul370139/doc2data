@@ -42,7 +42,9 @@ RUN curl -fsSL https://ollama.ai/install.sh | sh || echo "Ollama install failed"
 COPY . .
 
 # Pre-download models at build time
-RUN python3 -c "import layoutparser as lp; lp.PaddleDetectionLayoutModel('lp://PubLayNet/ppyolov2_r50vd_dcn_365e/config')" || echo "Model pre-download skipped"
+# Download both Detectron2 and PaddleDetection models for fallback support
+RUN python3 -c "import layoutparser as lp; print('Downloading Detectron2 model...'); lp.Detectron2LayoutModel('lp://PubLayNet/faster_rcnn_R_50_FPN_3x/config')" || echo "Detectron2 model pre-download skipped"
+RUN python3 -c "import layoutparser as lp; print('Downloading PaddleDetection model...'); lp.PaddleDetectionLayoutModel('lp://PubLayNet/ppyolov2_r50vd_dcn_365e/config')" || echo "PaddleDetection model pre-download skipped"
 
 # Download Detectron2 PubLayNet model to avoid iopath caching issues
 RUN mkdir -p /root/.detectron2/models && \
@@ -70,29 +72,13 @@ ENV ENABLE_SLM=true
 ENV ENABLE_VLM=true
 ENV TATR_MODEL_PATH=microsoft/table-transformer-structure-recognition
 
-# Create startup script
-RUN printf '#!/bin/bash\n\
-set -e\n\
-\n\
-# Start Ollama in background if available\n\
-if command -v ollama > /dev/null 2>&1; then\n\
-    echo "Starting Ollama server..."\n\
-    nohup ollama serve > /tmp/ollama.log 2>&1 &\n\
-    sleep 5\n\
-    echo "Pulling qwen2.5:7b-instruct (SLM) model..."\n\
-    ollama pull qwen2.5:7b-instruct 2>&1 || echo "SLM model pull failed"\n\
-    if [ "$ENABLE_VLM" = "true" ]; then\n\
-        echo "Pulling qwen2-vl:7b (VLM) model..."\n\
-        ollama pull qwen2-vl:7b 2>&1 || echo "VLM model pull skipped"\n\
-    fi\n\
-    echo "Ollama ready"\n\
-else\n\
-    echo "Ollama not installed, SLM/VLM features disabled"\n\
-fi\n\
-\n\
-echo "Starting Streamlit on port 8501..."\n\
-exec streamlit run app/streamlit_main.py --server.address 0.0.0.0 --server.port 8501\n\
-' > /app/start.sh && chmod +x /app/start.sh
+# Copy and prepare startup script
+COPY start_services.sh /app/start_services.sh
+RUN chmod +x /app/start_services.sh
+
+# Health check to ensure services are running
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/ || curl -f http://localhost:8501/ || exit 1
 
 # Default command
-CMD ["/bin/bash", "/app/start.sh"]
+CMD ["/bin/bash", "/app/start_services.sh"]

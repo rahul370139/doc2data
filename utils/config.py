@@ -18,8 +18,9 @@ class Config:
     OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "localhost:11434")
     OLLAMA_MODEL_SLM: str = os.getenv("OLLAMA_MODEL_SLM", "llama3.2:3b")  # Fast, good for structured extraction
     OLLAMA_MODEL_VLM: str = os.getenv("OLLAMA_MODEL_VLM", "llama3.2:3b")  # Fallback to SLM if no VLM
-    ENABLE_SLM: bool = os.getenv("ENABLE_SLM", "true").lower() == "true"  # Enabled by default
-    ENABLE_VLM: bool = os.getenv("ENABLE_VLM", "true").lower() == "true"  # Enabled by default
+    # SLM/VLM disabled by default - they cause hallucinated garbage text in results
+    ENABLE_SLM: bool = os.getenv("ENABLE_SLM", "false").lower() == "true"
+    ENABLE_VLM: bool = os.getenv("ENABLE_VLM", "false").lower() == "true"
     
     # Model Paths
     MODEL_CACHE_DIR: Path = Path(os.getenv("MODEL_CACHE_DIR", "models/weights"))
@@ -34,13 +35,19 @@ class Config:
         if env_path and Path(env_path).exists():
             return env_path
         
-        # Container path (Docker)
-        container_path = Path("/app/models/yolo/cms1500_best.pt")
-        if container_path.exists():
-            return str(container_path)
+        # Container path (Docker) - check new trained model first
+        container_paths = [
+            Path("/app/models/cms1500_yolo_v1.pt"),  # New trained model (mAP50=34.9%)
+            Path("/app/models/yolo/cms1500_best.pt"),
+        ]
+        for container_path in container_paths:
+            if container_path.exists():
+                return str(container_path)
         
         # Local development paths
         local_paths = [
+            "models/cms1500_yolo_v1.pt",  # New trained model
+            "runs/detect/cms1500_cpu_final/weights/best.pt",  # Training output
             "runs/detect/cms1500_reducto_v1/weights/best.pt",
             "models/yolo/cms1500_reducto_v1.pt",
             "runs/detect/cms1500_yolo_run13/weights/best.pt",

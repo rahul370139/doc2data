@@ -127,6 +127,16 @@ class DocumentAssembler:
                     enriched.append(b)
         return enriched
     
+    def _reading_order_key(self, block: Block) -> Tuple[int, int, float, float]:
+        """
+        Compute a stable reading-order key.
+        Uses column_id when available, otherwise falls back to simple top-left order.
+        """
+        meta = getattr(block, "metadata", {}) or {}
+        column_id = meta.get("column_id")
+        column_rank = int(column_id) if isinstance(column_id, int) else 999
+        return (block.page_id, column_rank, block.bbox[1], block.bbox[0])
+
     def build_hierarchy(self, blocks: List[Block]) -> List[Block]:
         """
         Build parent-child hierarchy based on headers and spatial relationships.
@@ -138,7 +148,7 @@ class DocumentAssembler:
             Blocks with children populated
         """
         # Sort blocks by page and reading order
-        sorted_blocks = sorted(blocks, key=lambda b: (b.page_id, b.bbox[1], b.bbox[0]))
+        sorted_blocks = sorted(blocks, key=self._reading_order_key)
         
         # Build header stack
         header_stack = []
@@ -519,8 +529,8 @@ class DocumentAssembler:
         Returns:
             List of block IDs in reading order
         """
-        # Sort by page, then by y-position (top to bottom), then by x-position (left to right)
-        sorted_blocks = sorted(blocks, key=lambda b: (b.page_id, b.bbox[1], b.bbox[0]))
+        # Sort by page and computed reading order (column-aware when available)
+        sorted_blocks = sorted(blocks, key=self._reading_order_key)
         return [block.id for block in sorted_blocks]
     
     def _enhance_page_blocks(
@@ -666,7 +676,7 @@ class DocumentAssembler:
         blocks = self.build_hierarchy(document.blocks)
         
         # Sort blocks by page and reading order
-        sorted_blocks = sorted(blocks, key=lambda b: (b.page_id, b.bbox[1], b.bbox[0]))
+        sorted_blocks = sorted(blocks, key=self._reading_order_key)
         
         markdown_lines = []
         current_page = -1

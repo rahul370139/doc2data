@@ -1,0 +1,17 @@
+[Unit]
+Description=Doc2Data API Server
+After=network.target
+
+[Service]
+Type=simple
+User=<YOUR_USER>
+WorkingDirectory=/path/to/doc2data
+Environment="PATH=/path/to/doc2data/venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/path/to/doc2data/venv/bin/uvicorn app.api_main:app --host 0.0.0.0 --port 8000 --workers 4
+Restart=always
+RestartSec=5
+StandardOutput=append:/path/to/doc2data/logs/api.log
+StandardError=append:/path/to/doc2data/logs/api.error.log
+
+[Install]
+WantedBy=multi-user.target

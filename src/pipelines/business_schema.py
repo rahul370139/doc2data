@@ -23,35 +23,148 @@ US_STATE_CODES = {
 
 
 # Mapping from business field -> schema field ids (ordered by preference)
+# Field names aligned with gold label format for grading
 CMS1500_BUSINESS_MAPPING: Dict[str, Dict[str, Any]] = {
+    # Patient info
     "patient_name": {"sources": ["2_patient_name"]},
     "patient_dob": {"sources": ["3_patient_dob"], "validator": "date"},
     "patient_sex": {"sources": ["3_patient_sex_m", "3_patient_sex_f", "3_patient_sex"], "composer": "sex"},
-    "patient_address": {
-        "sources": ["5_patient_address", "5_patient_city", "5_patient_state", "5_patient_zip"],
-        "composer": "address",
-    },
+    "patient_address": {"sources": ["5_patient_address"]},
+    "patient_city": {"sources": ["5_patient_city"]},
+    "patient_state": {"sources": ["5_patient_state"]},
+    "patient_zip": {"sources": ["5_patient_zip"]},
     "patient_phone": {"sources": ["5_patient_phone"], "validator": "phone"},
+    
+    # Insured info  
     "insured_name": {"sources": ["4_insured_name"]},
     "insured_id": {"sources": ["1a_insured_id"], "validator": "member_id"},
     "insured_dob": {"sources": ["11a_insured_dob"], "validator": "date"},
     "insured_sex": {"sources": ["11a_insured_sex_m", "11a_insured_sex_f", "11a_insured_sex"], "composer": "sex"},
-    "insured_address": {
-        "sources": ["7_insured_address", "7_insured_city", "7_insured_state", "7_insured_zip"],
-        "composer": "address",
-    },
+    "insured_address": {"sources": ["7_insured_address"]},
+    "insured_city": {"sources": ["7_insured_city"]},
+    "insured_state": {"sources": ["7_insured_state"]},
+    "insured_zip": {"sources": ["7_insured_zip"]},
     "insured_phone": {"sources": ["7_insured_phone"], "validator": "phone"},
-    "insurance_plan_name": {"sources": ["11c_insurance_plan_name"]},
-    "claim_number": {"sources": ["26_patient_account"]},
-    "service_facility_name": {"sources": ["32_service_facility_name"]},
+    
+    # Insurance/Policy
+    "insurance_plan": {"sources": ["11c_insurance_plan_name", "11c_insurance_plan"]},
+    "policy_number": {"sources": ["11_insured_policy_group", "11_policy_group_number", "11_group_number"]},
+    
+    # Account/Claim
+    "patient_account": {"sources": ["26_patient_account"]},
+    "tax_id": {"sources": ["25_federal_tax_id", "25_tax_id"]},
+    
+    # Diagnosis codes (individual fields for grading)
+    "diagnosis_code_1": {"sources": ["21_diagnosis_a", "21_diagnosis_1"], "validator": "icd"},
+    "diagnosis_code_2": {"sources": ["21_diagnosis_b", "21_diagnosis_2"], "validator": "icd"},
+    "diagnosis_code_3": {"sources": ["21_diagnosis_c", "21_diagnosis_3"], "validator": "icd"},
+    "diagnosis_code_4": {"sources": ["21_diagnosis_d", "21_diagnosis_4"], "validator": "icd"},
+    
+    # Service facility
+    "service_facility": {"sources": ["32_service_facility_name", "32_service_facility"]},
     "service_facility_address": {"sources": ["32_service_facility_address"], "composer": "address"},
-    "billing_provider_name": {"sources": ["33_billing_provider_name"]},
+    
+    # Billing provider
+    "billing_provider": {"sources": ["33_billing_provider_name", "33_billing_provider"]},
     "billing_provider_address": {"sources": ["33_billing_provider_address"], "composer": "address"},
     "billing_provider_phone": {"sources": ["33_billing_provider_phone"], "validator": "phone"},
     "billing_npi": {"sources": ["33a_npi", "32a_npi"], "validator": "npi"},
+    
+    # Charges
     "total_charge": {"sources": ["28_total_charge"], "validator": "money"},
     "amount_paid": {"sources": ["29_amount_paid"], "validator": "money"},
-    "diagnosis_codes": {"sources": ["21_diagnosis_a", "21_diagnosis_b"], "validator": "icd"},
+}
+
+
+# UB-04 Business Field Mapping
+UB04_BUSINESS_MAPPING: Dict[str, Dict[str, Any]] = {
+    # Provider info
+    "provider_name": {"sources": ["fl1_provider_name"]},
+    "provider_address": {"sources": ["fl1_provider_address1", "fl1_provider_city_state_zip"], "composer": "join"},
+    
+    # Patient info
+    "patient_name": {"sources": ["fl8a_patient_id"]},
+    "patient_dob": {"sources": ["fl10_patient_dob"], "validator": "date"},
+    "patient_sex": {"sources": ["fl11_patient_sex"]},
+    "patient_address": {"sources": ["fl9_patient_address"]},
+    "patient_city": {"sources": ["fl9_patient_city"]},
+    "patient_state": {"sources": ["fl9_patient_state"]},
+    "patient_zip": {"sources": ["fl9_patient_zip"]},
+    
+    # Claim info
+    "patient_control_number": {"sources": ["fl3a_patient_control"]},
+    "type_of_bill": {"sources": ["fl4_type_of_bill"]},
+    "federal_tax_id": {"sources": ["fl5_federal_tax_id"]},
+    "statement_from_date": {"sources": ["fl6_from_date"], "validator": "date"},
+    "statement_thru_date": {"sources": ["fl6_thru_date"], "validator": "date"},
+    
+    # Admission info
+    "admission_date": {"sources": ["fl12_admission_date"], "validator": "date"},
+    "admission_hour": {"sources": ["fl13_admission_hour"]},
+    "admission_type": {"sources": ["fl14_admission_type"]},
+    "admission_source": {"sources": ["fl15_admission_source"]},
+    "discharge_status": {"sources": ["fl17_patient_status"]},
+    
+    # Payer info
+    "payer_name": {"sources": ["fl50_payer_name_a"]},
+    "health_plan_id": {"sources": ["fl51_health_plan_id_a"]},
+    "prior_payments": {"sources": ["fl54_prior_payments_a"], "validator": "money"},
+    "estimated_amount_due": {"sources": ["fl55_estimated_due_a"], "validator": "money"},
+    "billing_npi": {"sources": ["fl56_npi_a"], "validator": "npi"},
+    
+    # Insured info
+    "insured_name": {"sources": ["fl58_insured_name_a"]},
+    "insured_id": {"sources": ["fl60_insured_id_a"]},
+    "group_name": {"sources": ["fl61_group_name_a"]},
+    "group_number": {"sources": ["fl62_group_number_a"]},
+    "patient_relationship": {"sources": ["fl59_patient_rel_a"]},
+    
+    # Treatment/Employer
+    "treatment_auth_code": {"sources": ["fl63_treatment_auth_a"]},
+    "employer_name": {"sources": ["fl65_employer_name_a"]},
+    
+    # Diagnosis codes (FL 67-72)
+    "principal_diagnosis": {"sources": ["fl67_principal_diagnosis"], "validator": "icd"},
+    "diagnosis_code_2": {"sources": ["fl67a_diagnosis_a"], "validator": "icd"},
+    "diagnosis_code_3": {"sources": ["fl67b_diagnosis_b"], "validator": "icd"},
+    "diagnosis_code_4": {"sources": ["fl67c_diagnosis_c"], "validator": "icd"},
+    "admitting_diagnosis": {"sources": ["fl69_admitting_diagnosis"], "validator": "icd"},
+    "pps_code": {"sources": ["fl71_pps_code"]},
+    "eci_code": {"sources": ["fl72_eci_code"]},
+    "admitting_dx_code": {"sources": ["fl79_admitting_dx_code"]},
+    
+    # Procedure codes
+    "principal_procedure": {"sources": ["fl74_principal_procedure"]},
+    "principal_procedure_date": {"sources": ["fl74_principal_proc_date"], "validator": "date"},
+    "other_procedure_1": {"sources": ["fl74a_other_procedure_1"]},
+    
+    # Service line 1
+    "revenue_code_1": {"sources": ["fl42_revenue_code_1"]},
+    "service_description_1": {"sources": ["fl43_description_1"]},
+    "hcpcs_code_1": {"sources": ["fl44_hcpcs_1"]},
+    "service_date_1": {"sources": ["fl45_service_date_1"], "validator": "date"},
+    "charges_1": {"sources": ["fl47_charges_1"], "validator": "money"},
+    
+    # Service line 2
+    "revenue_code_2": {"sources": ["fl42_revenue_code_2"]},
+    "service_description_2": {"sources": ["fl43_description_2"]},
+    "hcpcs_code_2": {"sources": ["fl44_hcpcs_2"]},
+    "service_date_2": {"sources": ["fl45_service_date_2"], "validator": "date"},
+    "charges_2": {"sources": ["fl47_charges_2"], "validator": "money"},
+    
+    # Totals
+    "total_charges": {"sources": ["fl47_total_charges"], "validator": "money"},
+    
+    # Attending physician
+    "attending_npi": {"sources": ["fl76_attending_npi"], "validator": "npi"},
+    "attending_physician_last": {"sources": ["fl76_attending_last"]},
+    "attending_physician_first": {"sources": ["fl76_attending_first"]},
+    
+    # Responsible party
+    "responsible_party": {"sources": ["fl38_responsible_party"]},
+    
+    # Remarks
+    "remarks": {"sources": ["fl80_remarks"]},
 }
 
 
@@ -104,8 +217,9 @@ def _extract_value_from_labeled_text(text: str, field_type: str = "") -> str:
     
     result = text
     
-    # Phase 1: Remove field numbers at start
-    result = re.sub(r"^\d+\s*[a-z]?\.\s*", "", result, flags=re.IGNORECASE)
+    # Phase 1: Remove short field numbers at start (avoid stripping real values like 3000.78)
+    # Examples to remove: "1.", "1a.", "24." when followed by whitespace
+    result = re.sub(r"^\s*\d{1,2}\s*[a-z]?\s*\.?\s+", "", result, flags=re.IGNORECASE)
     
     # Phase 2: Remove specific CMS-1500 labels (non-greedy, careful patterns)
     label_patterns = [
@@ -224,8 +338,17 @@ def _pick_value_from_sources(
         if raw_value is None or raw_value == "":
             continue
         
-        # Clean the value - extract actual data from labeled text
-        value = _extract_value_from_labeled_text(str(raw_value))
+        # Determine if this value came from AcroForm widgets (already clean)
+        # or from OCR (needs label stripping)
+        meta = (detail.get("metadata") or {}) if detail else {}
+        source_type = meta.get("source", "")
+        skip_cleaning = bool(meta.get("skip_label_cleaning") or meta.get("digital_text"))
+        if source_type == "acroform_widget" or skip_cleaning:
+            # Widget values and clean digital values are ground truth — don't strip anything
+            value = str(raw_value).strip()
+        else:
+            # Clean the value - extract actual data from labeled text (OCR cleanup)
+            value = _extract_value_from_labeled_text(str(raw_value))
         
         if not value:
             continue
@@ -268,7 +391,14 @@ def map_to_business_schema(
     extracted_fields: Dict[str, Any] = ocr_result.get("extracted_fields", {}) or {}
     field_details: List[Dict[str, Any]] = ocr_result.get("field_details", []) or []
 
-    mapping = CMS1500_BUSINESS_MAPPING if form_type.lower().startswith("cms") else {}
+    # Select mapping based on form type
+    form_lower = form_type.lower().replace("-", "").replace("_", "")
+    if form_lower.startswith("cms") or "1500" in form_lower:
+        mapping = CMS1500_BUSINESS_MAPPING
+    elif "ub04" in form_lower or "ub" in form_lower:
+        mapping = UB04_BUSINESS_MAPPING
+    else:
+        mapping = {}
     business_fields: Dict[str, Any] = {}
     details: List[BusinessFieldDetail] = []
 

@@ -11,9 +11,15 @@ from src.processing.gpu_utils import GPUUtils
 
 def deskew_image(image: np.ndarray) -> Tuple[np.ndarray, float]:
     """
-    De-skew image. Robustly estimate small skew (±3° max) and correct it.
-    Returns the original image if the estimated angle is tiny (<0.3°) or
-    implausibly large (>3°), which usually indicates a bad estimate.
+    De-skew image. Robustly estimate small skew and correct it.
+    Returns the original image if:
+    - The estimated angle is tiny (<0.5°)
+    - The angle is too large (>5°) - likely a bad estimate from grid lines
+    - There's not enough consensus among detected lines
+    
+    IMPORTANT: This function should NOT be applied to digital PDFs or forms
+    with complex grid structures (like UB-04) as the grid lines can cause
+    false skew detection.
     
     Args:
         image: Input image as numpy array
@@ -39,20 +45,18 @@ def deskew_image(image: np.ndarray) -> Tuple[np.ndarray, float]:
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 8
     )
 
-    # Emphasize text lines
-    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 1))
-    v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 30))
+    # Emphasize text lines (focus on horizontal text lines, not grid)
+    h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (50, 1))  # Longer kernel to favor text lines
     horiz = cv2.morphologyEx(binary, cv2.MORPH_OPEN, h_kernel, iterations=1)
-    vert = cv2.morphologyEx(binary, cv2.MORPH_OPEN, v_kernel, iterations=1)
-    mask = cv2.bitwise_or(horiz, vert)
 
     # Hough transform to detect predominant line angles
-    lines = cv2.HoughLines(mask, 1, np.pi / 180.0, threshold=160)
-    if lines is None or len(lines) < 5:
+    lines = cv2.HoughLines(horiz, 1, np.pi / 180.0, threshold=200)  # Higher threshold
+    if lines is None or len(lines) < 10:  # Require more lines for confidence
         # No reliable skew
         return image, 0.0
 
     # Convert angles to degrees around horizontal axis [-90, 90]
+    # Focus only on near-horizontal lines (±10° from 0 or 180)
     angles = []
     for rho_theta in lines:
         theta = rho_theta[0][1]
@@ -60,20 +64,28 @@ def deskew_image(image: np.ndarray) -> Tuple[np.ndarray, float]:
         # Map to [-90, 90]
         if deg > 90:
             deg -= 180
-        if -89 <= deg <= 89:
+        # Only consider angles close to horizontal
+        if -10 <= deg <= 10:
             angles.append(deg)
 
-    if not angles:
+    if len(angles) < 5:  # Need minimum consensus
         return image, 0.0
 
     # Use median to be robust to outliers
     angle = float(np.median(angles))
-
-    # If angle is tiny or too large (likely wrong), do nothing
-    # Relaxed for scanned docs: allow up to 15 degrees
-    if abs(angle) < 0.2 or abs(angle) > 15.0:
+    
+    # Check standard deviation - high variance means unreliable estimate
+    std = float(np.std(angles))
+    if std > 2.0:  # Too much variance, lines are not aligned
         return image, 0.0
 
+    # If angle is tiny or too large (likely wrong), do nothing
+    # Be VERY conservative: only correct clear skew between 0.5° and 5°
+    if abs(angle) < 0.5 or abs(angle) > 5.0:
+        return image, 0.0
+
+    print(f"[Deskew] Detected skew angle: {angle:.2f}° (std: {std:.2f}°) - applying correction")
+    
     # Rotate by the negative of the skew angle to deskew
     h, w = image.shape[:2]
     center = (w // 2, h // 2)
@@ -224,32 +236,53 @@ def preprocess_image(
     return processed, metadata
 
 
+def remove_red_template_text(image: np.ndarray) -> np.ndarray:
+    """
+    Safe red removal for CMS-1500 per-field crops.
+    
+    Designed to be safe on small crops where handwriting may touch red grid lines.
+    Rules:
+    - HSV only, high saturation (S >= 70) to catch only true dropout reds
+    - NO low-saturation ranges (would catch brown ink, shadows, paper yellowing)
+    - NO RGB dominance check (would catch warm-toned handwriting)
+    - NO dilation (would eat into adjacent handwriting strokes)
+    - Never binarize — preserve grayscale strokes for OCR
+    - Only whiten strongly-red pixels, leave everything else untouched
+    """
+    img = image.copy()
+    if img.ndim == 2:
+        return img
+    
+    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    
+    # Only strongly saturated reds (S >= 70). This catches the CMS-1500
+    # dropout-red ink but NOT dark handwriting, brown ink, or scan artifacts.
+    # Red hue wraps around 0/180 in OpenCV HSV.
+    mask1 = cv2.inRange(hsv, np.array([0, 70, 50], dtype=np.uint8),
+                              np.array([12, 255, 255], dtype=np.uint8))
+    mask2 = cv2.inRange(hsv, np.array([168, 70, 50], dtype=np.uint8),
+                              np.array([180, 255, 255], dtype=np.uint8))
+    red_mask = cv2.bitwise_or(mask1, mask2)
+    
+    # NO dilation — do not expand mask into adjacent handwriting
+    # NO binarization — keep original pixel values for non-red areas
+    
+    img[red_mask > 0] = [255, 255, 255]
+    return img
+
+
 def remove_form_lines(image: np.ndarray) -> np.ndarray:
     """
     Remove CMS-1500 ruling lines (especially red grid) to improve OCR.
     Approach:
-      1) Mask red pixels in HSV and whiten them.
+      1) Remove all red content (labels + lines).
       2) Extract long horizontal/vertical lines from a binary image and inpaint.
     """
-    img = image.copy()
-    if img.ndim == 2:
-        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+    # Step 1: Remove all red template content
+    img = remove_red_template_text(image)
 
-    # 1) Remove red lines (CMS-1500 grid is commonly red)
-    hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
-    lower1 = np.array([0, 70, 70], dtype=np.uint8)
-    upper1 = np.array([10, 255, 255], dtype=np.uint8)
-    lower2 = np.array([170, 70, 70], dtype=np.uint8)
-    upper2 = np.array([180, 255, 255], dtype=np.uint8)
-    mask1 = cv2.inRange(hsv, lower1, upper1)
-    mask2 = cv2.inRange(hsv, lower2, upper2)
-    red_mask = cv2.bitwise_or(mask1, mask2)
-    if np.count_nonzero(red_mask) > 0:
-        img[red_mask > 0] = (255, 255, 255)
-
-    # 2) Remove long ruling lines (any color) via morphology + inpaint
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    # Invert binarization so lines/text become white on black for morphology ops
+    # Step 2: Remove any remaining long ruling lines via morphology + inpaint
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if img.ndim == 3 else img.copy()
     bw = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                cv2.THRESH_BINARY_INV, 31, 11)
 
@@ -263,7 +296,151 @@ def remove_form_lines(image: np.ndarray) -> np.ndarray:
     # Slight dilation so we inpaint full stroke width
     line_mask = cv2.dilate(line_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
     if np.count_nonzero(line_mask) > 0:
-        # inpaint expects 8-bit 1-channel mask
         img = cv2.inpaint(img, line_mask, 3, cv2.INPAINT_TELEA)
 
     return img
+
+def extract_ink_by_subtraction(
+    image: np.ndarray, 
+    template: np.ndarray, 
+    threshold: int = 25,
+    return_ink_image: bool = False
+) -> np.ndarray:
+    """
+    Extract ink from a filled form by subtracting the blank template.
+    Requires 'image' to be aligned to 'template'.
+    
+    Args:
+        image: Aligned filled form (grayscale or RGB)
+        template: Blank form template (grayscale or RGB)
+        threshold: Difference threshold to consider pixel as ink
+        return_ink_image: If True, return image with non-ink pixels whitened (better for OCR)
+        
+    Returns:
+        If return_ink_image=False: Mask where ink is white (255), background black (0)
+        If return_ink_image=True: RGB image with only ink visible (template text whitened)
+    """
+    # 1. Ensure Grayscale for comparison
+    if len(image.shape) == 3:
+        g_img = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    else:
+        g_img = image
+        
+    if len(template.shape) == 3:
+        g_temp = cv2.cvtColor(template, cv2.COLOR_RGB2GRAY)
+    else:
+        g_temp = template
+        
+    # 2. Resize image to match template if needed (should be aligned already)
+    if g_img.shape != g_temp.shape:
+        g_img = cv2.resize(g_img, (g_temp.shape[1], g_temp.shape[0]))
+        
+    # 3. Compute absolute difference
+    diff = cv2.absdiff(g_img, g_temp)
+    
+    # 4. Multi-level thresholding for better ink detection
+    # Lower threshold for dark ink, higher for faint marks
+    _, mask_strong = cv2.threshold(diff, threshold, 255, cv2.THRESH_BINARY)
+    _, mask_weak = cv2.threshold(diff, max(10, threshold - 10), 255, cv2.THRESH_BINARY)
+    
+    # Combine: strong ink or weak ink that's actually dark in original
+    dark_in_original = g_img < 180  # Handwritten ink is typically dark
+    mask = np.where(dark_in_original, mask_weak, mask_strong).astype(np.uint8)
+    
+    # 5. Morphological cleanup
+    # Small dilation to connect broken strokes
+    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+    mask = cv2.dilate(mask, kernel_dilate, iterations=1)
+    
+    # Remove small noise (dots, specks)
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_open)
+    
+    if not return_ink_image:
+        return mask
+    
+    # Return an OCR-friendly image with template text removed
+    if len(image.shape) == 3:
+        ink_image = image.copy()
+        # Whiten non-ink pixels
+        ink_image[mask == 0] = [255, 255, 255]
+    else:
+        ink_image = g_img.copy()
+        ink_image[mask == 0] = 255
+        ink_image = cv2.cvtColor(ink_image, cv2.COLOR_GRAY2RGB)
+    
+    return ink_image
+
+
+def extract_ink_advanced(
+    aligned_image: np.ndarray,
+    template_image: np.ndarray,
+    enhance_contrast: bool = True
+) -> np.ndarray:
+    """
+    Advanced ink extraction for handwritten forms.
+    Uses multiple techniques to isolate handwritten ink from pre-printed template.
+    
+    Args:
+        aligned_image: Scanned form aligned to template space
+        template_image: Blank template image
+        enhance_contrast: Apply contrast enhancement to improve ink visibility
+        
+    Returns:
+        RGB image with only handwritten ink visible (template whitened)
+    """
+    # Ensure RGB
+    if len(aligned_image.shape) == 2:
+        aligned_rgb = cv2.cvtColor(aligned_image, cv2.COLOR_GRAY2RGB)
+    else:
+        aligned_rgb = aligned_image.copy()
+        
+    if len(template_image.shape) == 2:
+        template_rgb = cv2.cvtColor(template_image, cv2.COLOR_GRAY2RGB)
+    else:
+        template_rgb = template_image.copy()
+    
+    # Resize if needed
+    if aligned_rgb.shape[:2] != template_rgb.shape[:2]:
+        aligned_rgb = cv2.resize(aligned_rgb, (template_rgb.shape[1], template_rgb.shape[0]))
+    
+    # Convert to LAB for better color separation
+    aligned_lab = cv2.cvtColor(aligned_rgb, cv2.COLOR_RGB2LAB)
+    template_lab = cv2.cvtColor(template_rgb, cv2.COLOR_RGB2LAB)
+    
+    # Compute difference in L channel (luminance)
+    l_aligned = aligned_lab[:, :, 0].astype(np.float32)
+    l_template = template_lab[:, :, 0].astype(np.float32)
+    l_diff = np.abs(l_aligned - l_template)
+    
+    # Also check if pixel is darker than template (ink adds darkness)
+    is_darker = l_aligned < (l_template - 5)
+    
+    # Ink mask: significant difference AND darker than template
+    ink_mask = ((l_diff > 15) & is_darker).astype(np.uint8) * 255
+    
+    # Also detect very dark pixels (pen ink is typically very dark)
+    very_dark = (l_aligned < 120).astype(np.uint8) * 255
+    
+    # Combine masks
+    combined_mask = cv2.bitwise_or(ink_mask, very_dark)
+    
+    # Morphological cleanup
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+    combined_mask = cv2.dilate(combined_mask, kernel, iterations=1)
+    combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel)
+    
+    # Create output image
+    output = np.full_like(aligned_rgb, 255)  # White background
+    output[combined_mask > 0] = aligned_rgb[combined_mask > 0]
+    
+    if enhance_contrast:
+        # Enhance contrast of the ink
+        output_gray = cv2.cvtColor(output, cv2.COLOR_RGB2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(output_gray)
+        output = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB)
+        # Restore white background
+        output[combined_mask == 0] = [255, 255, 255]
+    
+    return output

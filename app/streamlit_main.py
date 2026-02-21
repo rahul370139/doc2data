@@ -281,9 +281,15 @@ def get_sample_documents():
         return []
     
     docs = []
-    for ext in ["*.pdf", "*.png", "*.jpg"]:
-        docs.extend([f.name for f in sample_dir.glob(ext)])
-    return sorted(docs)
+    for ext in ["*.pdf", "*.png", "*.jpg", "*.jpeg"]:
+        for f in sample_dir.rglob(ext):
+            if f.is_file():
+                try:
+                    rel = f.relative_to(sample_dir)
+                except ValueError:
+                    rel = f.name
+                docs.append(str(rel))
+    return sorted(set(docs))
 
 
 def draw_bounding_boxes(image, fields, highlight_id=None, ocr_blocks=None, 
@@ -297,8 +303,8 @@ def draw_bounding_boxes(image, fields, highlight_id=None, ocr_blocks=None,
     scale_y = h / source_height if source_height else 1
     
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 0.35
-    font_thickness = 1
+    font_scale = 0.35  # Reduced from 0.5 for thinner labels
+    font_thickness = 1  # Reduced from 2 for lighter weight
     
     for field in fields:
         conf = field.get("confidence", 0)
@@ -343,18 +349,19 @@ def draw_bounding_boxes(image, fields, highlight_id=None, ocr_blocks=None,
         else:
             color = (239, 68, 68)
         
-        thickness = 3 if field.get("id") == highlight_id else 2
+        thickness = 2 if field.get("id") == highlight_id else 1
         cv2.rectangle(img, (x0, y0), (x1, y1), color, thickness)
         
         if show_labels:
             label = field.get("label", field.get("id", ""))
-            if label and len(label) > 20:
-                label = label[:18] + ".."
+            if label and len(label) > 25:
+                label = label[:23] + ".."
             if label:
                 (text_w, text_h), _ = cv2.getTextSize(label, font, font_scale, font_thickness)
-                label_y = y0 - 4 if y0 > text_h + 4 else y0 + text_h + 4
-                cv2.rectangle(img, (x0, label_y - text_h - 2), (x0 + text_w + 4, label_y + 2), color, -1)
-                cv2.putText(img, label, (x0 + 2, label_y - 2), font, font_scale, (255, 255, 255), font_thickness, cv2.LINE_AA)
+                # Smaller padding for compact labels
+                label_y = y0 - 2 if y0 > text_h + 2 else y0 + text_h + 2
+                cv2.rectangle(img, (x0, label_y - text_h - 1), (x0 + text_w + 2, label_y + 1), color, -1)
+                cv2.putText(img, label, (x0 + 1, label_y - 1), font, font_scale, (255, 255, 255), font_thickness, cv2.LINE_AA)
     
     if ocr_blocks:
         for block in ocr_blocks:
@@ -405,9 +412,10 @@ def get_pipeline(pipeline_type: str, config: dict):
                 pass
         
         pconfig = PipelineConfig(
-            enable_trocr=config.get("enable_trocr", True),
-            enable_slm_labeling=config.get("enable_slm", True),
-            enable_vlm_figures=config.get("enable_vlm", True),
+            enable_trocr=config.get("enable_trocr", False),  # Disabled - hallucinates
+            enable_slm_labeling=config.get("enable_slm", False),  # Disabled - hallucinates
+            enable_vlm_figures=config.get("enable_vlm", False),  # Disabled
+            enable_slm_field_cleaning=config.get("enable_slm_field_cleaning", False),  # Optional
             enable_alignment=config.get("enable_alignment", True),
             ocr_confidence_threshold=config.get("confidence_threshold", 0.5),
             handwriting_threshold=config.get("handwriting_threshold", 0.35),
@@ -418,8 +426,8 @@ def get_pipeline(pipeline_type: str, config: dict):
     elif pipeline_type == "cms1500_production":
         from src.pipelines.cms1500_production import CMS1500ProductionPipeline
         return CMS1500ProductionPipeline(
-            use_trocr=config.get("enable_trocr", True),
-            use_llm_qa=config.get("enable_llm_qa", True),
+            use_trocr=config.get("enable_trocr", False),  # Disabled - hallucinates
+            use_llm_qa=config.get("enable_llm_qa", False),  # Disabled
             confidence_threshold=config.get("confidence_threshold", 0.5),
             handwriting_threshold=config.get("handwriting_threshold", 0.35),
         )
@@ -442,8 +450,8 @@ def run_extraction(file_path: str, pipeline_type: str, config: dict) -> dict:
             from src.pipelines.agentic_cms1500 import run_cms1500_agentic
             return run_cms1500_agentic(
                 file_path,
-                use_icr=config.get("enable_trocr", True),
-                use_llm=config.get("enable_vlm", True),
+                use_icr=config.get("enable_trocr", False),  # Disabled - hallucinates
+                use_llm=config.get("enable_vlm", False),  # Disabled
                 align_template=config.get("enable_alignment", True)
             )
         else:
@@ -643,13 +651,16 @@ def main():
         with st.expander("🔧 **Features**", expanded=False):
             col_f1, col_f2 = st.columns(2)
             with col_f1:
-                enable_trocr = st.toggle("TrOCR (Handwriting)", value=True)
+                # TrOCR DISABLED by default - it hallucinates garbage on blank regions
+                enable_trocr = st.toggle("TrOCR (Handwriting)", value=False, help="Disabled by default - causes hallucinations")
                 enable_alignment = st.toggle("Template Alignment", value=True)
                 enable_validators = st.toggle("Field Validators", value=True)
             with col_f2:
-                enable_slm = st.toggle("SLM Labeling", value=True)
-                enable_vlm = st.toggle("VLM for Figures", value=True)
-                enable_llm_qa = st.toggle("LLM QA Check", value=True)
+                # SLM/VLM disabled by default - they cause hallucinations
+                enable_slm = st.toggle("SLM Labeling", value=False, help="Disabled by default - can cause hallucinated text")
+                enable_vlm = st.toggle("VLM for Figures", value=False, help="Disabled by default")
+                enable_llm_qa = st.toggle("LLM QA Check", value=False, help="Disabled by default")
+                # SLM field cleaning removed - red template removal makes it unnecessary
         
         # Threshold Tuning
         with st.expander("📊 **Threshold Tuning**", expanded=False):
@@ -707,6 +718,7 @@ def main():
                     "enable_slm": enable_slm,
                     "enable_vlm": enable_vlm,
                     "enable_llm_qa": enable_llm_qa,
+                    "enable_slm_field_cleaning": False,
                     "confidence_threshold": confidence_threshold,
                     "handwriting_threshold": handwriting_threshold,
                     "ocr_padding": ocr_padding,
@@ -722,6 +734,10 @@ def main():
                     "General Pipeline": "full_page_llm",
                 }
                 pipeline_type = pipeline_map.get(pipeline_mode, "multi_agent")
+                
+                # Auto-detect requires the multi-agent router
+                if form_type_sel == "Auto-detect" and pipeline_type != "multi_agent":
+                    pipeline_type = "multi_agent"
                 
                 # Pass explicit form type if selected
                 if form_type_sel != "Auto-detect":
@@ -763,6 +779,24 @@ def main():
             with col_m4:
                 proc_time = result.get("processing_time", 0)
                 st.metric("Time", f"{proc_time:.1f}s")
+
+            # Alignment diagnostics (useful for CMS handwritten tuning)
+            dbg = result.get("debug", {}) if isinstance(result, dict) else {}
+            if dbg:
+                with st.expander("🧭 Alignment Diagnostics", expanded=False):
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.caption("Method")
+                        st.code(str(dbg.get("alignment_method", "n/a")))
+                    with c2:
+                        st.caption("Quality")
+                        st.code(str(round(float(dbg.get("alignment_quality", 0.0)), 4)))
+                    with c3:
+                        st.caption("Success")
+                        st.code(str(bool(dbg.get("alignment_success", False))))
+                    profile = dbg.get("alignment_profile")
+                    if profile:
+                        st.json(profile)
             
             # Tabs
             tab_table, tab_ocr, tab_business, tab_reducto = st.tabs([
@@ -815,7 +849,9 @@ def main():
                         st.download_button("⬇️ Download CSV", csv, "fields.csv", "text/csv")
             
             with tab_ocr:
-                st.json(result.get("extracted_fields", {}))
+                raw_fields = result.get("extracted_fields", {})
+                display_fields = {k: v for k, v in raw_fields.items() if v and str(v).strip()}
+                st.json(display_fields)
             
             with tab_business:
                 business = result.get("business_fields", {})

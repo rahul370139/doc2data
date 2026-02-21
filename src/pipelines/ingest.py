@@ -47,7 +47,53 @@ def _estimate_orientation_from_masks(horizontal_mask: np.ndarray, vertical_mask:
     return orientation, float(min(max(confidence, 0.0), 1.0))
 
 
-def _generate_analysis_layers(image: np.ndarray) -> Dict[str, Any]:
+def _dropout_red_line_mask(image: np.ndarray) -> Optional[np.ndarray]:
+    """
+    Detect dropout-red gridlines in CMS-1500 style forms.
+    H in [345,15], S > 0.4, V > 0.6 (converted to OpenCV HSV ranges).
+    """
+    try:
+        import cv2
+    except ImportError:
+        return None
+    try:
+        if image is None:
+            return None
+        rgb = image
+        if len(rgb.shape) == 2:
+            rgb = cv2.cvtColor(rgb, cv2.COLOR_GRAY2RGB)
+        hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+        lower1 = np.array([0, int(0.4 * 255), int(0.6 * 255)], dtype=np.uint8)
+        upper1 = np.array([7, 255, 255], dtype=np.uint8)
+        lower2 = np.array([172, int(0.4 * 255), int(0.6 * 255)], dtype=np.uint8)
+        upper2 = np.array([179, 255, 255], dtype=np.uint8)
+        m1 = cv2.inRange(hsv, lower1, upper1)
+        m2 = cv2.inRange(hsv, lower2, upper2)
+        red = cv2.bitwise_or(m1, m2)
+        red = cv2.morphologyEx(red, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
+        red = cv2.dilate(red, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
+        return red
+    except Exception:
+        return None
+
+
+def _sauvola_binary(gray: np.ndarray, window_size: int = 31, k: float = 0.2, R: float = 0.5) -> np.ndarray:
+    """
+    Sauvola-style adaptive binarization (foreground text as white on black).
+    """
+    import cv2
+    if window_size % 2 == 0:
+        window_size += 1
+    f = gray.astype(np.float32) / 255.0
+    mean = cv2.boxFilter(f, ddepth=-1, ksize=(window_size, window_size), borderType=cv2.BORDER_REPLICATE)
+    sqmean = cv2.boxFilter(f * f, ddepth=-1, ksize=(window_size, window_size), borderType=cv2.BORDER_REPLICATE)
+    var = np.maximum(sqmean - mean * mean, 0.0)
+    std = np.sqrt(var)
+    threshold = mean * (1.0 + k * ((std / max(R, 1e-6)) - 1.0))
+    return (f < threshold).astype(np.uint8) * 255
+
+
+def _generate_analysis_layers(image: np.ndarray, doc_type_hint: Optional[str] = None) -> Dict[str, Any]:
     """
     Generate analysis-friendly layers (high-contrast, binary, line masks, box masks).
     """
@@ -73,15 +119,21 @@ def _generate_analysis_layers(image: np.ndarray) -> Dict[str, Any]:
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
         high_contrast = clahe.apply(gray)
     
-    # Adaptive threshold for binary analysis image
-    binary = cv2.adaptiveThreshold(
-        high_contrast,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY_INV,
-        31,
-        8
-    )
+    hint = (doc_type_hint or "").lower().strip()
+    is_cms_like = hint in {"cms1500", "cms-1500", "form", "handwritten", "scan", "scanned"}
+
+    # Text mask (Sauvola) is more stable on faint handwriting than plain adaptive threshold.
+    try:
+        binary = _sauvola_binary(high_contrast, window_size=31, k=0.2, R=0.5)
+    except Exception:
+        binary = cv2.adaptiveThreshold(
+            high_contrast,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV,
+            31,
+            8
+        )
     
     height, width = binary.shape[:2]
     horizontal_kernel = cv2.getStructuringElement(
@@ -104,6 +156,11 @@ def _generate_analysis_layers(image: np.ndarray) -> Dict[str, Any]:
         horizontal_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
         vertical_lines = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
     line_mask = cv2.bitwise_or(horizontal_lines, vertical_lines)
+    if is_cms_like:
+        # Preserve dropout-red rails for geometry alignment when available.
+        red_mask = _dropout_red_line_mask(image)
+        if red_mask is not None:
+            line_mask = cv2.bitwise_or(line_mask, red_mask)
     
     box_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     try:
@@ -369,7 +426,7 @@ def ingest_document(
             doc_type=doc_type_hint
         )
         
-        analysis_layers = _generate_analysis_layers(processed_image)
+        analysis_layers = _generate_analysis_layers(processed_image, doc_type_hint=doc_type_hint)
         orientation = analysis_layers.get("orientation", 0.0)
         orientation_conf = analysis_layers.get("orientation_confidence", 0.0)
         preprocess_meta["analysis_generated"] = bool(analysis_layers)

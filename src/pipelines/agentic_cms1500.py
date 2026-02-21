@@ -97,6 +97,7 @@ from src.processing.registration import (
     transform_normalized_bbox,
     load_and_process_reference,
 )
+from src.pipelines.cms1500_register import get_cms1500_registrar
 from src.ocr.paddle_ocr import PaddleOCRWrapper
 from src.ocr.trocr_wrapper import TrOCRWrapper
 from src.pipelines.business_schema import map_to_business_schema, merge_business_with_ocr
@@ -206,8 +207,18 @@ class RegistrationAgent:
     def __init__(self, template_name: str = "cms-1500"):
         self.template_name = template_name
         self.ref_data = load_and_process_reference(template_name)
+        self._cms_registrar = get_cms1500_registrar() if template_name.lower() in {"cms1500", "cms-1500"} else None
 
     def align(self, page_image: np.ndarray) -> Tuple[Optional[np.ndarray], Tuple[int, int]]:
+        if self._cms_registrar is not None:
+            try:
+                reg = self._cms_registrar.register(page_image)
+                data = self._cms_registrar.get_template_data()
+                t_shape = data.get("shape") or (REF_SIZE[1], REF_SIZE[0])
+                return reg.homography_input_to_template if reg.success else None, (int(t_shape[1]), int(t_shape[0]))
+            except Exception:
+                pass
+
         if self.ref_data is None:
             return None, REF_SIZE[::-1]
         H = compute_alignment_matrix(page_image, self.template_name)
@@ -228,12 +239,18 @@ class ZoneAgent:
 
         page_h, page_w = page.image.shape[:2]
         ref_w, ref_h = ref_size
+        H_ref_to_in = None
+        if H is not None:
+            try:
+                H_ref_to_in = np.linalg.inv(H)
+            except Exception:
+                H_ref_to_in = None
 
         for field in schema.get("fields", []):
             norm = field.get("bbox_norm")
             if not norm or len(norm) != 4:
                 continue
-            bbox = transform_normalized_bbox(norm, H, ref_w, ref_h) if H is not None else (
+            bbox = transform_normalized_bbox(norm, H_ref_to_in, ref_w, ref_h) if H_ref_to_in is not None else (
                 norm[0] * page_w,
                 norm[1] * page_h,
                 norm[2] * page_w,

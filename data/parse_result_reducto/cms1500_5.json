@@ -1,0 +1,2957 @@
+{
+  "success": true,
+  "form_type": "cms-1500",
+  "form_confidence": 0.5333333333333333,
+  "form_version": null,
+  "alignment_quality": 0.6363636363636364,
+  "extracted_fields": {
+    "1a_insured_id": "1 a. INSURED'SI.D.A 2987",
+    "2_patient_name": "nhmoM N 1907) NAN SANNEEE",
+    "3_patient_dob": "5! 02 8 aa HRE",
+    "4_insured_name": "NHoM 12s VWYNNOUNNE",
+    "5_patient_address": "Wayne",
+    "7_insured_address": "7, INSURED'S ADDRESS (No, Steet) 9210 BERWY",
+    "5_patient_city": "after both",
+    "5_patient_state": "m.l",
+    "7_insured_city": "V DA",
+    "7_insured_state": "ATE MA",
+    "5_patient_zip": "offs",
+    "5_patient_phone": "98",
+    "7_insured_zip": "tsa",
+    "7_insured_phone": "S8Z9",
+    "9_other_insured_name": "Selina K",
+    "9a_other_insured_policy": "TERE",
+    "11_insured_policy_group": "0 0000",
+    "11a_insured_dob": "a. INSURED'S DATE OF BIRT 09 is",
+    "11c_insurance_plan_name": "INSURANCE PLAN NAME OR PROGR AM NAME 1.1001n",
+    "12_patient_signature": "Premium menu",
+    "12_signature_date": "ance BEFORE COMPLETNC VATURE Iauthorize the",
+    "13_insured_signature": "to the",
+    "19_additional_claim_info": "37213235 0 SES",
+    "20_charges": "RGES",
+    "21_diagnosis_a": "171",
+    "21_diagnosis_b": "CANCE B",
+    "24_service_lines": "A. DATE(S) OF SERVICE B. C. D. PROCEDURES, SERVICES, OR SUPPLIES E F. G. H. 1. J. From To PLACE OF (Explain Unusual Crcumstances) DIAGNOSIS DAYS EPSDT ID. RENDERING OR Familly M DD YY MM DD YY SERVICE EMG CPT/HCPCS MODIFIER POINTER $ CHARGES UNIT'S Plan QUAL PROVIDER ID.# S\u00d710 MH ME 9000 T2LEFG 9 10 76 C8 11 90 NPI 20 50 12 20/99 6T1BNH VE 5500 MANES NPI NPI NPI",
+    "25_federal_tax_id": "acclocontrarid",
+    "26_patient_account": "increasing it position .",
+    "28_total_charge": "encountment .",
+    "29_amount_paid": "iszl acostauss .",
+    "31_physician_signature": "0 0",
+    "32_service_facility_name": "SIGNATURE OF PHYSICIAN OR SUPPLER INCLUOING DEGREES CA CREDENTIALS",
+    "32_service_facility_address": "ments on the reverse apply fo this bill and are made a part thereof.)",
+    "32a_npi": "Manual available at: www",
+    "33_billing_provider_phone": "HEE N101",
+    "33_billing_provider_name": "3. BILLING PRQVOER INFO & PH",
+    "33_billing_provider_address": "868921.07",
+    "33a_npi": "NPI APPRC"
+  },
+  "field_details": [
+    {
+      "id": "1a_insured_id",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        1530,
+        412,
+        1836,
+        511
+      ],
+      "value": "1 a. INSURED'SI.D.A 2987",
+      "text": "1 a. INSURED'SI.D.A 2987",
+      "confidence": 0.9226758778095245,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "INSURED'S I.D. NUMBER",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "1 a. INSURED'SI.D.A",
+            "bbox": [
+              5.0,
+              2.0,
+              310.0,
+              28.0
+            ],
+            "confidence": 0.8456667065620422
+          },
+          {
+            "text": "2987",
+            "bbox": [
+              92.0,
+              34.0,
+              291.0,
+              109.0
+            ],
+            "confidence": 0.9996850490570068
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "2_patient_name",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        89,
+        511,
+        420,
+        610
+      ],
+      "value": "nhmoM N 1907) NAN SANNEEE",
+      "text": "nhmoM N 1907) NAN SANNEEE",
+      "confidence": 0.5558332403500875,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "PATIENT'S NAME",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "nhmoM",
+            "bbox": [
+              76.0,
+              14.0,
+              290.0,
+              86.0
+            ],
+            "confidence": 0.61261385679245
+          },
+          {
+            "text": "N 1907)",
+            "bbox": [
+              2.0,
+              72.0,
+              99.0,
+              104.0
+            ],
+            "confidence": 0.7106537222862244
+          },
+          {
+            "text": "NAN SANNEEE",
+            "bbox": [
+              85.0,
+              75.0,
+              340.0,
+              109.0
+            ],
+            "confidence": 0.34423214197158813
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "3_patient_dob",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        981,
+        511,
+        1224,
+        610
+      ],
+      "value": "5! 02 8 aa HRE",
+      "text": "5! 02 8 aa HRE",
+      "confidence": 0.6335788011550904,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "PATIENT'S BIRTH DATE",
+        "source": "schema_zones",
+        "field_type": "date",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "5!",
+            "bbox": [
+              0.0,
+              19.0,
+              40.0,
+              72.0
+            ],
+            "confidence": 0.34519025683403015
+          },
+          {
+            "text": "02",
+            "bbox": [
+              74.0,
+              15.0,
+              149.0,
+              68.0
+            ],
+            "confidence": 0.6828683018684387
+          },
+          {
+            "text": "8",
+            "bbox": [
+              198.0,
+              14.0,
+              231.0,
+              62.0
+            ],
+            "confidence": 0.9988239407539368
+          },
+          {
+            "text": "aa",
+            "bbox": [
+              100.0,
+              59.0,
+              146.0,
+              84.0
+            ],
+            "confidence": 0.7213453054428101
+          },
+          {
+            "text": "HRE",
+            "bbox": [
+              21.0,
+              77.0,
+              252.0,
+              108.0
+            ],
+            "confidence": 0.41966620087623596
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "3_patient_sex",
+      "label": "CHECKBOX",
+      "type": "checkbox",
+      "bbox": [
+        752,
+        511,
+        816,
+        610
+      ],
+      "value": "",
+      "text": "",
+      "confidence": 1.0,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "CHECKBOX",
+        "field_name": "SEX",
+        "source": "schema_zones",
+        "field_type": "checkbox",
+        "class_name": "checkbox",
+        "ocr_engine": "checkbox_detector"
+      }
+    },
+    {
+      "id": "4_insured_name",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        1530,
+        511,
+        1887,
+        610
+      ],
+      "value": "NHoM 12s VWYNNOUNNE",
+      "text": "NHoM 12s VWYNNOUNNE",
+      "confidence": 0.4635625183582306,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "INSURED'S NAME",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "NHoM",
+            "bbox": [
+              0.0,
+              10.0,
+              227.0,
+              82.0
+            ],
+            "confidence": 0.6627495288848877
+          },
+          {
+            "text": "12s",
+            "bbox": [
+              2.0,
+              77.0,
+              81.0,
+              102.0
+            ],
+            "confidence": 0.44797882437705994
+          },
+          {
+            "text": "VWYNNOUNNE",
+            "bbox": [
+              80.0,
+              78.0,
+              363.0,
+              104.0
+            ],
+            "confidence": 0.27995920181274414
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "5_patient_address",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        89,
+        610,
+        561,
+        709
+      ],
+      "value": "Wayne",
+      "text": "Wayne",
+      "confidence": 0.8843392133712769,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "PATIENT'S ADDRESS",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "Wayne",
+            "bbox": [
+              28.0,
+              30.0,
+              282.0,
+              101.0
+            ],
+            "confidence": 0.8843392133712769
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "7_insured_address",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        1530,
+        610,
+        2040,
+        709
+      ],
+      "value": "7, INSURED'S ADDRESS (No, Steet) 9210 BERWY",
+      "text": "7, INSURED'S ADDRESS (No, Steet) 9210 BERWY",
+      "confidence": 0.91944287220637,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "INSURED'S ADDRESS",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "7, INSURED'S ADDRESS (No, Steet)",
+            "bbox": [
+              6.0,
+              0.0,
+              505.0,
+              30.0
+            ],
+            "confidence": 0.9399843215942383
+          },
+          {
+            "text": "9210",
+            "bbox": [
+              56.0,
+              22.0,
+              230.0,
+              108.0
+            ],
+            "confidence": 0.8192819356918335
+          },
+          {
+            "text": "BERWY",
+            "bbox": [
+              258.0,
+              28.0,
+              519.0,
+              104.0
+            ],
+            "confidence": 0.9990623593330383
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "5_patient_city",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        89,
+        709,
+        369,
+        808
+      ],
+      "value": "after both",
+      "text": "after both",
+      "confidence": 0.85,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "CITY",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [],
+        "ocr_engine": "trocr"
+      }
+    },
+    {
+      "id": "5_patient_state",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        408,
+        709,
+        510,
+        808
+      ],
+      "value": "m.l",
+      "text": "m.l",
+      "confidence": 0.85,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "STATE",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [],
+        "ocr_engine": "trocr"
+      }
+    },
+    {
+      "id": "7_insured_city",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        1530,
+        709,
+        1734,
+        808
+      ],
+      "value": "V DA",
+      "text": "V DA",
+      "confidence": 0.6303165853023529,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "CITY",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "V",
+            "bbox": [
+              5.0,
+              14.0,
+              71.0,
+              95.0
+            ],
+            "confidence": 0.8684697151184082
+          },
+          {
+            "text": "DA",
+            "bbox": [
+              130.0,
+              76.0,
+              202.0,
+              108.0
+            ],
+            "confidence": 0.3921634554862976
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "7_insured_state",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        2295,
+        709,
+        2448,
+        808
+      ],
+      "value": "ATE MA",
+      "text": "ATE MA",
+      "confidence": 0.9976839423179626,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "STATE",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "ATE",
+            "bbox": [
+              0.0,
+              1.0,
+              58.0,
+              34.0
+            ],
+            "confidence": 0.9996345043182373
+          },
+          {
+            "text": "MA",
+            "bbox": [
+              32.0,
+              12.0,
+              145.0,
+              98.0
+            ],
+            "confidence": 0.995733380317688
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "5_patient_zip",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        89,
+        818,
+        242,
+        917
+      ],
+      "value": "offs",
+      "text": "offs",
+      "confidence": 0.85,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "ZIP CODE",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [],
+        "ocr_engine": "trocr"
+      }
+    },
+    {
+      "id": "5_patient_phone",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        612,
+        818,
+        816,
+        917
+      ],
+      "value": "98",
+      "text": "98",
+      "confidence": 0.8869045972824097,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "TELEPHONE",
+        "source": "schema_zones",
+        "field_type": "phone",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "98",
+            "bbox": [
+              24.0,
+              26.0,
+              128.0,
+              92.0
+            ],
+            "confidence": 0.8869045972824097
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "7_insured_zip",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        1530,
+        818,
+        1683,
+        917
+      ],
+      "value": "tsa",
+      "text": "tsa",
+      "confidence": 0.85,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "ZIP CODE",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [],
+        "ocr_engine": "trocr"
+      }
+    },
+    {
+      "id": "7_insured_phone",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        2091,
+        818,
+        2320,
+        917
+      ],
+      "value": "S8Z9",
+      "text": "S8Z9",
+      "confidence": 0.7867924571037292,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "TELEPHONE",
+        "source": "schema_zones",
+        "field_type": "phone",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "S8Z9",
+            "bbox": [
+              0.0,
+              23.0,
+              194.0,
+              96.0
+            ],
+            "confidence": 0.7867924571037292
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "9_other_insured_name",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        89,
+        924,
+        561,
+        1023
+      ],
+      "value": "Selina K",
+      "text": "Selina K",
+      "confidence": 0.9659823179244995,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "OTHER INSURED'S NAME",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "Selina K",
+            "bbox": [
+              190.0,
+              6.0,
+              480.0,
+              85.0
+            ],
+            "confidence": 0.9659823179244995
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "9a_other_insured_policy",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        89,
+        1006,
+        561,
+        1105
+      ],
+      "value": "TERE",
+      "text": "TERE",
+      "confidence": 0.29628613591194153,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "OTHER INSURED'S POLICY NUMBER",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "TERE",
+            "bbox": [
+              32.0,
+              79.0,
+              480.0,
+              108.0
+            ],
+            "confidence": 0.29628613591194153
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "11_insured_policy_group",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        1530,
+        924,
+        2091,
+        1023
+      ],
+      "value": "0 0000",
+      "text": "0 0000",
+      "confidence": 0.85,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "INSURED'S POLICY GROUP OR FECA NUMBER",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [],
+        "ocr_engine": "trocr"
+      }
+    },
+    {
+      "id": "11a_insured_dob",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        1530,
+        1006,
+        1912,
+        1105
+      ],
+      "value": "a. INSURED'S DATE OF BIRT 09 is",
+      "text": "a. INSURED'S DATE OF BIRT 09 is",
+      "confidence": 0.7743982275327047,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "INSURED'S DATE OF BIRTH",
+        "source": "schema_zones",
+        "field_type": "date",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "a. INSURED'S DATE OF BIRT",
+            "bbox": [
+              2.0,
+              0.0,
+              391.0,
+              30.0
+            ],
+            "confidence": 0.9313843250274658
+          },
+          {
+            "text": "09",
+            "bbox": [
+              80.0,
+              44.0,
+              160.0,
+              102.0
+            ],
+            "confidence": 0.6818908452987671
+          },
+          {
+            "text": "is",
+            "bbox": [
+              217.0,
+              52.0,
+              288.0,
+              95.0
+            ],
+            "confidence": 0.7099195122718811
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "11a_insured_sex",
+      "label": "CHECKBOX",
+      "type": "checkbox",
+      "bbox": [
+        1912,
+        1006,
+        1989,
+        1105
+      ],
+      "value": "",
+      "text": "",
+      "confidence": 0.7685085591760694,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "CHECKBOX",
+        "field_name": "SEX",
+        "source": "schema_zones",
+        "field_type": "checkbox",
+        "class_name": "checkbox",
+        "ocr_engine": "checkbox_detector"
+      }
+    },
+    {
+      "id": "11c_insurance_plan_name",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        1530,
+        1171,
+        2295,
+        1270
+      ],
+      "value": "INSURANCE PLAN NAME OR PROGR AM NAME 1.1001n",
+      "text": "INSURANCE PLAN NAME OR PROGR AM NAME 1.1001n",
+      "confidence": 0.8759738802909851,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "INSURANCE PLAN NAME",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "INSURANCE PLAN NAME OR PROGR AM NAME",
+            "bbox": [
+              0.0,
+              39.0,
+              660.0,
+              73.0
+            ],
+            "confidence": 0.9942212700843811
+          },
+          {
+            "text": "1.1001n",
+            "bbox": [
+              185.0,
+              75.0,
+              426.0,
+              109.0
+            ],
+            "confidence": 0.7577264904975891
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "12_patient_signature",
+      "label": "SIGNATURE",
+      "type": "signature",
+      "bbox": [
+        89,
+        1336,
+        637,
+        1468
+      ],
+      "value": "Premium menu",
+      "text": "Premium menu",
+      "confidence": 0.85,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "SIGNATURE",
+        "field_name": "PATIENT SIGNATURE",
+        "source": "schema_zones",
+        "field_type": "signature",
+        "class_name": "signature",
+        "ocr_engine": "trocr"
+      }
+    },
+    {
+      "id": "12_signature_date",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        663,
+        1336,
+        943,
+        1468
+      ],
+      "value": "ance BEFORE COMPLETNC VATURE Iauthorize the",
+      "text": "ance BEFORE COMPLETNC VATURE Iauthorize the",
+      "confidence": 0.9414005875587463,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "DATE",
+        "source": "schema_zones",
+        "field_type": "date",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "ance",
+            "bbox": [
+              0.0,
+              0.0,
+              178.0,
+              75.0
+            ],
+            "confidence": 0.9525625705718994
+          },
+          {
+            "text": "BEFORE COMPLETNC",
+            "bbox": [
+              0.0,
+              78.0,
+              290.0,
+              111.0
+            ],
+            "confidence": 0.9587004780769348
+          },
+          {
+            "text": "VATURE Iauthorize the",
+            "bbox": [
+              0.0,
+              106.0,
+              290.0,
+              141.0
+            ],
+            "confidence": 0.9129387140274048
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "13_insured_signature",
+      "label": "SIGNATURE",
+      "type": "signature",
+      "bbox": [
+        1530,
+        1336,
+        2295,
+        1468
+      ],
+      "value": "to the",
+      "text": "to the",
+      "confidence": 0.85,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "SIGNATURE",
+        "field_name": "INSURED'S SIGNATURE",
+        "source": "schema_zones",
+        "field_type": "signature",
+        "class_name": "signature",
+        "ocr_engine": "trocr"
+      }
+    },
+    {
+      "id": "19_additional_claim_info",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        89,
+        1815,
+        2167,
+        1897
+      ],
+      "value": "37213235 0 SES",
+      "text": "37213235 0 SES",
+      "confidence": 0.5090753336747488,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "ADDITIONAL CLAIM INFORMATION",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "37213235",
+            "bbox": [
+              1500.0,
+              0.0,
+              1905.0,
+              92.0
+            ],
+            "confidence": 0.5987108945846558
+          },
+          {
+            "text": "0",
+            "bbox": [
+              129.0,
+              6.0,
+              332.0,
+              72.0
+            ],
+            "confidence": 0.3573853075504303
+          },
+          {
+            "text": "SES",
+            "bbox": [
+              390.0,
+              16.0,
+              462.0,
+              52.0
+            ],
+            "confidence": 0.5711297988891602
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "20_outside_lab",
+      "label": "CHECKBOX",
+      "type": "checkbox",
+      "bbox": [
+        2167,
+        1798,
+        2295,
+        1897
+      ],
+      "value": "",
+      "text": "",
+      "confidence": 1.0,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "CHECKBOX",
+        "field_name": "OUTSIDE LAB",
+        "source": "schema_zones",
+        "field_type": "checkbox",
+        "class_name": "checkbox",
+        "ocr_engine": "checkbox_detector"
+      }
+    },
+    {
+      "id": "20_charges",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        2091,
+        1798,
+        2244,
+        1897
+      ],
+      "value": "RGES",
+      "text": "RGES",
+      "confidence": 0.9970630407333374,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "$ CHARGES",
+        "source": "schema_zones",
+        "field_type": "money",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "RGES",
+            "bbox": [
+              0.0,
+              3.0,
+              95.0,
+              32.0
+            ],
+            "confidence": 0.9970630407333374
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "21_diagnosis_a",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        89,
+        1920,
+        433,
+        2013
+      ],
+      "value": "171",
+      "text": "171",
+      "confidence": 0.9334642291069031,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "DIAGNOSIS A",
+        "source": "schema_zones",
+        "field_type": "icd10",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "171",
+            "bbox": [
+              99.0,
+              21.0,
+              256.0,
+              101.0
+            ],
+            "confidence": 0.9334642291069031
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "21_diagnosis_b",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        433,
+        1920,
+        765,
+        2013
+      ],
+      "value": "CANCE B",
+      "text": "CANCE B",
+      "confidence": 0.9948701858520508,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "DIAGNOSIS B",
+        "source": "schema_zones",
+        "field_type": "icd10",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "CANCE",
+            "bbox": [
+              120.0,
+              12.0,
+              342.0,
+              90.0
+            ],
+            "confidence": 0.999711811542511
+          },
+          {
+            "text": "B",
+            "bbox": [
+              31.0,
+              49.0,
+              114.0,
+              92.0
+            ],
+            "confidence": 0.9900285601615906
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "24_service_lines",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        89,
+        2062,
+        2473,
+        2673
+      ],
+      "value": "A. DATE(S) OF SERVICE B. C. D. PROCEDURES, SERVICES, OR SUPPLIES E F. G. H. 1. J. From To PLACE OF (Explain Unusual Crcumstances) DIAGNOSIS DAYS EPSDT ID. RENDERING OR Familly M DD YY MM DD YY SERVICE EMG CPT/HCPCS MODIFIER POINTER $ CHARGES UNIT'S Plan QUAL PROVIDER ID.# S\u00d710 MH ME 9000 T2LEFG 9 10 76 C8 11 90 NPI 20 50 12 20/99 6T1BNH VE 5500 MANES NPI NPI NPI",
+      "text": "A. DATE(S) OF SERVICE B. C. D. PROCEDURES, SERVICES, OR SUPPLIES E F. G. H. 1. J. From To PLACE OF (Explain Unusual Crcumstances) DIAGNOSIS DAYS EPSDT ID. RENDERING OR Familly M DD YY MM DD YY SERVICE EMG CPT/HCPCS MODIFIER POINTER $ CHARGES UNIT'S Plan QUAL PROVIDER ID.# S\u00d710 MH ME 9000 T2LEFG 9 10 76 C8 11 90 NPI 20 50 12 20/99 6T1BNH VE 5500 MANES NPI NPI NPI",
+      "confidence": 0.95318082150291,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "SERVICE LINES TABLE",
+        "source": "schema_zones",
+        "field_type": "table",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "A.",
+            "bbox": [
+              0.0,
+              8.0,
+              61.0,
+              44.0
+            ],
+            "confidence": 0.8860143423080444
+          },
+          {
+            "text": "DATE(S) OF SERVICE",
+            "bbox": [
+              110.0,
+              9.0,
+              392.0,
+              50.0
+            ],
+            "confidence": 0.9772605895996094
+          },
+          {
+            "text": "B.",
+            "bbox": [
+              549.0,
+              10.0,
+              581.0,
+              45.0
+            ],
+            "confidence": 0.9696531295776367
+          },
+          {
+            "text": "C.",
+            "bbox": [
+              643.0,
+              13.0,
+              675.0,
+              48.0
+            ],
+            "confidence": 0.9812302589416504
+          },
+          {
+            "text": "D. PROCEDURES, SERVICES, OR SUPPLIES",
+            "bbox": [
+              716.0,
+              12.0,
+              1276.0,
+              47.0
+            ],
+            "confidence": 0.9680706858634949
+          },
+          {
+            "text": "E",
+            "bbox": [
+              1384.0,
+              11.0,
+              1419.0,
+              50.0
+            ],
+            "confidence": 0.9997208714485168
+          },
+          {
+            "text": "F.",
+            "bbox": [
+              1605.0,
+              15.0,
+              1638.0,
+              50.0
+            ],
+            "confidence": 0.9959961175918579
+          },
+          {
+            "text": "G.",
+            "bbox": [
+              1800.0,
+              16.0,
+              1832.0,
+              48.0
+            ],
+            "confidence": 0.9510794878005981
+          },
+          {
+            "text": "H.",
+            "bbox": [
+              1891.0,
+              16.0,
+              1924.0,
+              49.0
+            ],
+            "confidence": 0.9321264624595642
+          },
+          {
+            "text": "1.",
+            "bbox": [
+              1970.0,
+              17.0,
+              1994.0,
+              49.0
+            ],
+            "confidence": 0.7379917502403259
+          },
+          {
+            "text": "J.",
+            "bbox": [
+              2207.0,
+              19.0,
+              2233.0,
+              49.0
+            ],
+            "confidence": 0.990095853805542
+          },
+          {
+            "text": "From",
+            "bbox": [
+              75.0,
+              39.0,
+              146.0,
+              79.0
+            ],
+            "confidence": 0.9995328187942505
+          },
+          {
+            "text": "To",
+            "bbox": [
+              356.0,
+              43.0,
+              399.0,
+              82.0
+            ],
+            "confidence": 0.9919818043708801
+          },
+          {
+            "text": "PLACE OF",
+            "bbox": [
+              513.0,
+              41.0,
+              615.0,
+              81.0
+            ],
+            "confidence": 0.9552429914474487
+          },
+          {
+            "text": "(Explain Unusual Crcumstances)",
+            "bbox": [
+              775.0,
+              45.0,
+              1159.0,
+              83.0
+            ],
+            "confidence": 0.9626285433769226
+          },
+          {
+            "text": "DIAGNOSIS",
+            "bbox": [
+              1319.0,
+              44.0,
+              1477.0,
+              82.0
+            ],
+            "confidence": 0.958434522151947
+          },
+          {
+            "text": "DAYS",
+            "bbox": [
+              1781.0,
+              42.0,
+              1847.0,
+              71.0
+            ],
+            "confidence": 0.9973042011260986
+          },
+          {
+            "text": "EPSDT",
+            "bbox": [
+              1871.0,
+              44.0,
+              1937.0,
+              70.0
+            ],
+            "confidence": 0.9783698916435242
+          },
+          {
+            "text": "ID.",
+            "bbox": [
+              1962.0,
+              53.0,
+              1996.0,
+              84.0
+            ],
+            "confidence": 0.9804079532623291
+          },
+          {
+            "text": "RENDERING",
+            "bbox": [
+              2139.0,
+              47.0,
+              2301.0,
+              82.0
+            ],
+            "confidence": 0.9988238215446472
+          },
+          {
+            "text": "OR",
+            "bbox": [
+              1790.0,
+              64.0,
+              1829.0,
+              93.0
+            ],
+            "confidence": 0.9253944754600525
+          },
+          {
+            "text": "Familly",
+            "bbox": [
+              1869.0,
+              61.0,
+              1932.0,
+              96.0
+            ],
+            "confidence": 0.833513081073761
+          },
+          {
+            "text": "M",
+            "bbox": [
+              0.0,
+              75.0,
+              30.0,
+              109.0
+            ],
+            "confidence": 0.998403012752533
+          },
+          {
+            "text": "DD",
+            "bbox": [
+              74.0,
+              72.0,
+              126.0,
+              112.0
+            ],
+            "confidence": 0.9984419941902161
+          },
+          {
+            "text": "YY",
+            "bbox": [
+              173.0,
+              75.0,
+              216.0,
+              109.0
+            ],
+            "confidence": 0.9995137453079224
+          },
+          {
+            "text": "MM",
+            "bbox": [
+              260.0,
+              75.0,
+              318.0,
+              114.0
+            ],
+            "confidence": 0.9997361302375793
+          },
+          {
+            "text": "DD",
+            "bbox": [
+              351.0,
+              79.0,
+              396.0,
+              113.0
+            ],
+            "confidence": 0.9989747405052185
+          },
+          {
+            "text": "YY",
+            "bbox": [
+              447.0,
+              78.0,
+              491.0,
+              113.0
+            ],
+            "confidence": 0.9996209144592285
+          },
+          {
+            "text": "SERVICE",
+            "bbox": [
+              512.0,
+              78.0,
+              606.0,
+              115.0
+            ],
+            "confidence": 0.9934178590774536
+          },
+          {
+            "text": "EMG",
+            "bbox": [
+              621.0,
+              78.0,
+              691.0,
+              112.0
+            ],
+            "confidence": 0.9993974566459656
+          },
+          {
+            "text": "CPT/HCPCS",
+            "bbox": [
+              733.0,
+              79.0,
+              883.0,
+              110.0
+            ],
+            "confidence": 0.9921810626983643
+          },
+          {
+            "text": "MODIFIER",
+            "bbox": [
+              1045.0,
+              76.0,
+              1186.0,
+              115.0
+            ],
+            "confidence": 0.9548744559288025
+          },
+          {
+            "text": "POINTER",
+            "bbox": [
+              1327.0,
+              76.0,
+              1457.0,
+              116.0
+            ],
+            "confidence": 0.9476949572563171
+          },
+          {
+            "text": "$ CHARGES",
+            "bbox": [
+              1527.0,
+              78.0,
+              1687.0,
+              116.0
+            ],
+            "confidence": 0.9933185577392578
+          },
+          {
+            "text": "UNIT'S",
+            "bbox": [
+              1768.0,
+              83.0,
+              1839.0,
+              120.0
+            ],
+            "confidence": 0.8921276926994324
+          },
+          {
+            "text": "Plan",
+            "bbox": [
+              1873.0,
+              85.0,
+              1920.0,
+              116.0
+            ],
+            "confidence": 0.9471163153648376
+          },
+          {
+            "text": "QUAL",
+            "bbox": [
+              1942.0,
+              84.0,
+              2012.0,
+              114.0
+            ],
+            "confidence": 0.99769127368927
+          },
+          {
+            "text": "PROVIDER ID.#",
+            "bbox": [
+              2116.0,
+              81.0,
+              2320.0,
+              116.0
+            ],
+            "confidence": 0.9504013657569885
+          },
+          {
+            "text": "S\u00d710 MH",
+            "bbox": [
+              701.0,
+              130.0,
+              1041.0,
+              242.0
+            ],
+            "confidence": 0.7423585653305054
+          },
+          {
+            "text": "ME 9000",
+            "bbox": [
+              1342.0,
+              140.0,
+              1641.0,
+              238.0
+            ],
+            "confidence": 0.9909764528274536
+          },
+          {
+            "text": "T2LEFG",
+            "bbox": [
+              2064.0,
+              137.0,
+              2384.0,
+              236.0
+            ],
+            "confidence": 0.9500555992126465
+          },
+          {
+            "text": "9 10 76 C8 11 90",
+            "bbox": [
+              0.0,
+              157.0,
+              524.0,
+              233.0
+            ],
+            "confidence": 0.8539927005767822
+          },
+          {
+            "text": "NPI",
+            "bbox": [
+              1936.0,
+              184.0,
+              1995.0,
+              224.0
+            ],
+            "confidence": 0.9985122680664062
+          },
+          {
+            "text": "20 50 12 20/99",
+            "bbox": [
+              45.0,
+              258.0,
+              520.0,
+              342.0
+            ],
+            "confidence": 0.8232963681221008
+          },
+          {
+            "text": "6T1BNH",
+            "bbox": [
+              719.0,
+              253.0,
+              1035.0,
+              346.0
+            ],
+            "confidence": 0.8305800557136536
+          },
+          {
+            "text": "VE",
+            "bbox": [
+              1326.0,
+              260.0,
+              1462.0,
+              340.0
+            ],
+            "confidence": 0.9993453025817871
+          },
+          {
+            "text": "5500",
+            "bbox": [
+              1461.0,
+              257.0,
+              1643.0,
+              342.0
+            ],
+            "confidence": 0.799429714679718
+          },
+          {
+            "text": "MANES",
+            "bbox": [
+              2055.0,
+              256.0,
+              2381.0,
+              341.0
+            ],
+            "confidence": 0.9950931668281555
+          },
+          {
+            "text": "NPI",
+            "bbox": [
+              1934.0,
+              288.0,
+              1993.0,
+              330.0
+            ],
+            "confidence": 0.9971193671226501
+          },
+          {
+            "text": "NPI",
+            "bbox": [
+              1933.0,
+              405.0,
+              1992.0,
+              442.0
+            ],
+            "confidence": 0.9987028241157532
+          },
+          {
+            "text": "NPI",
+            "bbox": [
+              1937.0,
+              518.0,
+              1998.0,
+              560.0
+            ],
+            "confidence": 0.9989743232727051
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "25_federal_tax_id",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        89,
+        2706,
+        357,
+        2805
+      ],
+      "value": "acclocontrarid",
+      "text": "acclocontrarid",
+      "confidence": 0.85,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "FEDERAL TAX I.D. NUMBER",
+        "source": "schema_zones",
+        "field_type": "tax_id",
+        "class_name": "form_field",
+        "ocr_boxes": [],
+        "ocr_engine": "trocr"
+      }
+    },
+    {
+      "id": "26_patient_account",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        382,
+        2706,
+        663,
+        2805
+      ],
+      "value": "increasing it position .",
+      "text": "increasing it position .",
+      "confidence": 0.85,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "PATIENT'S ACCOUNT NO.",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [],
+        "ocr_engine": "trocr"
+      }
+    },
+    {
+      "id": "27_accept_assignment",
+      "label": "CHECKBOX",
+      "type": "checkbox",
+      "bbox": [
+        688,
+        2706,
+        892,
+        2805
+      ],
+      "value": "",
+      "text": "",
+      "confidence": 1.0,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "CHECKBOX",
+        "field_name": "ACCEPT ASSIGNMENT",
+        "source": "schema_zones",
+        "field_type": "checkbox",
+        "class_name": "checkbox",
+        "ocr_engine": "checkbox_detector"
+      }
+    },
+    {
+      "id": "28_total_charge",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        918,
+        2706,
+        1147,
+        2805
+      ],
+      "value": "encountment .",
+      "text": "encountment .",
+      "confidence": 0.85,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "TOTAL CHARGE",
+        "source": "schema_zones",
+        "field_type": "money",
+        "class_name": "form_field",
+        "ocr_boxes": [],
+        "ocr_engine": "trocr"
+      }
+    },
+    {
+      "id": "29_amount_paid",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        1173,
+        2706,
+        1377,
+        2805
+      ],
+      "value": "iszl acostauss .",
+      "text": "iszl acostauss .",
+      "confidence": 0.85,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "AMOUNT PAID",
+        "source": "schema_zones",
+        "field_type": "money",
+        "class_name": "form_field",
+        "ocr_boxes": [],
+        "ocr_engine": "trocr"
+      }
+    },
+    {
+      "id": "31_physician_signature",
+      "label": "SIGNATURE",
+      "type": "signature",
+      "bbox": [
+        89,
+        2838,
+        637,
+        3036
+      ],
+      "value": "0 0",
+      "text": "0 0",
+      "confidence": 0.85,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "SIGNATURE",
+        "field_name": "SIGNATURE OF PHYSICIAN",
+        "source": "schema_zones",
+        "field_type": "signature",
+        "class_name": "signature",
+        "ocr_engine": "trocr"
+      }
+    },
+    {
+      "id": "32_service_facility_name",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        89,
+        2871,
+        765,
+        2953
+      ],
+      "value": "SIGNATURE OF PHYSICIAN OR SUPPLER INCLUOING DEGREES CA CREDENTIALS",
+      "text": "SIGNATURE OF PHYSICIAN OR SUPPLER INCLUOING DEGREES CA CREDENTIALS",
+      "confidence": 0.967840850353241,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "SERVICE FACILITY NAME",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "SIGNATURE OF PHYSICIAN OR SUPPLER",
+            "bbox": [
+              0.0,
+              14.0,
+              596.0,
+              56.0
+            ],
+            "confidence": 0.9932339787483215
+          },
+          {
+            "text": "INCLUOING DEGREES CA CREDENTIALS",
+            "bbox": [
+              9.0,
+              55.0,
+              576.0,
+              92.0
+            ],
+            "confidence": 0.9424477219581604
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "32_service_facility_address",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        89,
+        2953,
+        765,
+        3118
+      ],
+      "value": "ments on the reverse apply fo this bill and are made a part thereof.)",
+      "text": "ments on the reverse apply fo this bill and are made a part thereof.)",
+      "confidence": 0.9810802042484283,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "SERVICE FACILITY ADDRESS",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "ments on the reverse",
+            "bbox": [
+              294.0,
+              0.0,
+              559.0,
+              25.0
+            ],
+            "confidence": 0.9980288743972778
+          },
+          {
+            "text": "apply fo this bill and are made a part thereof.)",
+            "bbox": [
+              1.0,
+              21.0,
+              592.0,
+              59.0
+            ],
+            "confidence": 0.9641315340995789
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "32a_npi",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        306,
+        3118,
+        765,
+        3201
+      ],
+      "value": "Manual available at: www",
+      "text": "Manual available at: www",
+      "confidence": 0.9955154359340668,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "NPI (Box 32a)",
+        "source": "schema_zones",
+        "field_type": "npi",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "Manual",
+            "bbox": [
+              13.0,
+              33.0,
+              152.0,
+              64.0
+            ],
+            "confidence": 0.9994962215423584
+          },
+          {
+            "text": "available at: www",
+            "bbox": [
+              154.0,
+              30.0,
+              465.0,
+              66.0
+            ],
+            "confidence": 0.9915346503257751
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "33_billing_provider_phone",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        1530,
+        2706,
+        1887,
+        2805
+      ],
+      "value": "HEE N101",
+      "text": "HEE N101",
+      "confidence": 0.5699582546949387,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "BILLING PROVIDER PHONE",
+        "source": "schema_zones",
+        "field_type": "phone",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "HEE",
+            "bbox": [
+              100.0,
+              1.0,
+              211.0,
+              20.0
+            ],
+            "confidence": 0.40953031182289124
+          },
+          {
+            "text": "N101",
+            "bbox": [
+              233.0,
+              2.0,
+              313.0,
+              18.0
+            ],
+            "confidence": 0.7303861975669861
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "33_billing_provider_name",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        1530,
+        2838,
+        2295,
+        2920
+      ],
+      "value": "3. BILLING PRQVOER INFO & PH",
+      "text": "3. BILLING PRQVOER INFO & PH",
+      "confidence": 0.8843787908554077,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "BILLING PROVIDER NAME",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "3. BILLING PRQVOER INFO & PH",
+            "bbox": [
+              0.0,
+              56.0,
+              534.0,
+              89.0
+            ],
+            "confidence": 0.8843787908554077
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "33_billing_provider_address",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        1530,
+        2920,
+        2295,
+        3118
+      ],
+      "value": "868921.07",
+      "text": "868921.07",
+      "confidence": 0.9237784147262573,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "BILLING PROVIDER ADDRESS",
+        "source": "schema_zones",
+        "field_type": "text",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "868921.07",
+            "bbox": [
+              137.0,
+              5.0,
+              583.0,
+              159.0
+            ],
+            "confidence": 0.9237784147262573
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    },
+    {
+      "id": "33a_npi",
+      "label": "FORM_FIELD",
+      "type": "form_field",
+      "bbox": [
+        1555,
+        3085,
+        1836,
+        3168
+      ],
+      "value": "NPI APPRC",
+      "text": "NPI APPRC",
+      "confidence": 0.9543969333171844,
+      "detected_by": "schema_zones",
+      "metadata": {
+        "label": "FORM_FIELD",
+        "field_name": "NPI (Box 33a)",
+        "source": "schema_zones",
+        "field_type": "npi",
+        "class_name": "form_field",
+        "ocr_boxes": [
+          {
+            "text": "NPI",
+            "bbox": [
+              134.0,
+              0.0,
+              248.0,
+              43.0
+            ],
+            "confidence": 0.9226692318916321
+          },
+          {
+            "text": "APPRC",
+            "bbox": [
+              162.0,
+              57.0,
+              291.0,
+              91.0
+            ],
+            "confidence": 0.9861246347427368
+          }
+        ],
+        "ocr_engine": "paddleocr"
+      }
+    }
+  ],
+  "page_width": 2550,
+  "page_height": 3300,
+  "processing_time": 304.56563210487366,
+  "validation": {
+    "errors": [
+      {
+        "field_id": "3_patient_dob",
+        "message": "Invalid date format"
+      },
+      {
+        "field_id": "5_patient_phone",
+        "message": "Invalid phone format"
+      },
+      {
+        "field_id": "7_insured_phone",
+        "message": "Invalid phone format"
+      },
+      {
+        "field_id": "11a_insured_dob",
+        "message": "Invalid date format"
+      },
+      {
+        "field_id": "12_signature_date",
+        "message": "Invalid date format"
+      },
+      {
+        "field_id": "21_diagnosis_a",
+        "message": "Invalid icd10 format"
+      },
+      {
+        "field_id": "21_diagnosis_b",
+        "message": "Invalid icd10 format"
+      },
+      {
+        "field_id": "32a_npi",
+        "message": "Invalid npi format"
+      },
+      {
+        "field_id": "33_billing_provider_phone",
+        "message": "Invalid phone format"
+      },
+      {
+        "field_id": "33a_npi",
+        "message": "Invalid npi format"
+      }
+    ],
+    "warnings": [],
+    "qa_notes": [
+      "Here are the obvious errors I found:\n\n1. **Invalid date format**: In field 11c_insurance_plan_name, the date format is not consistent with other fields that have a specific format for dates (e.g., MM/DD/YY or YYYY-MM-DD). The format used here seems to be a mix of letters and numbers.\n2. **Missing or incorrect zip code**: In field 5_patient_zip, it says \"offs\", which doesn't appear to be a valid zip code. Similarly, in field 7_insured_zip, it says \"tsa\", which is not a standard zip code format either.\n3. **Invalid phone number**: In field 5_patient_phone, the phone number starts with \"98\" followed by another digit (\"8\"), which doesn't appear to be a valid phone number format.\n\nThese errors seem to be the most obvious ones. If you'd like me to review the rest of the form for any other potential issues, feel free to ask!"
+    ]
+  },
+  "ocr_blocks": [
+    {
+      "text": "1 a. INSURED'SI.D.A 2987",
+      "bbox": [
+        1530,
+        412,
+        1836,
+        511
+      ],
+      "confidence": 0.9226758778095245
+    },
+    {
+      "text": "nhmoM N 1907) NAN SANNEEE",
+      "bbox": [
+        89,
+        511,
+        420,
+        610
+      ],
+      "confidence": 0.5558332403500875
+    },
+    {
+      "text": "5! 02 8 aa HRE",
+      "bbox": [
+        981,
+        511,
+        1224,
+        610
+      ],
+      "confidence": 0.6335788011550904
+    },
+    {
+      "text": "NHoM 12s VWYNNOUNNE",
+      "bbox": [
+        1530,
+        511,
+        1887,
+        610
+      ],
+      "confidence": 0.4635625183582306
+    },
+    {
+      "text": "Wayne",
+      "bbox": [
+        89,
+        610,
+        561,
+        709
+      ],
+      "confidence": 0.8843392133712769
+    },
+    {
+      "text": "7, INSURED'S ADDRESS (No, Steet) 9210 BERWY",
+      "bbox": [
+        1530,
+        610,
+        2040,
+        709
+      ],
+      "confidence": 0.91944287220637
+    },
+    {
+      "text": "after both",
+      "bbox": [
+        89,
+        709,
+        369,
+        808
+      ],
+      "confidence": 0.85
+    },
+    {
+      "text": "m.l",
+      "bbox": [
+        408,
+        709,
+        510,
+        808
+      ],
+      "confidence": 0.85
+    },
+    {
+      "text": "V DA",
+      "bbox": [
+        1530,
+        709,
+        1734,
+        808
+      ],
+      "confidence": 0.6303165853023529
+    },
+    {
+      "text": "ATE MA",
+      "bbox": [
+        2295,
+        709,
+        2448,
+        808
+      ],
+      "confidence": 0.9976839423179626
+    },
+    {
+      "text": "offs",
+      "bbox": [
+        89,
+        818,
+        242,
+        917
+      ],
+      "confidence": 0.85
+    },
+    {
+      "text": "98",
+      "bbox": [
+        612,
+        818,
+        816,
+        917
+      ],
+      "confidence": 0.8869045972824097
+    },
+    {
+      "text": "tsa",
+      "bbox": [
+        1530,
+        818,
+        1683,
+        917
+      ],
+      "confidence": 0.85
+    },
+    {
+      "text": "S8Z9",
+      "bbox": [
+        2091,
+        818,
+        2320,
+        917
+      ],
+      "confidence": 0.7867924571037292
+    },
+    {
+      "text": "Selina K",
+      "bbox": [
+        89,
+        924,
+        561,
+        1023
+      ],
+      "confidence": 0.9659823179244995
+    },
+    {
+      "text": "TERE",
+      "bbox": [
+        89,
+        1006,
+        561,
+        1105
+      ],
+      "confidence": 0.29628613591194153
+    },
+    {
+      "text": "0 0000",
+      "bbox": [
+        1530,
+        924,
+        2091,
+        1023
+      ],
+      "confidence": 0.85
+    },
+    {
+      "text": "a. INSURED'S DATE OF BIRT 09 is",
+      "bbox": [
+        1530,
+        1006,
+        1912,
+        1105
+      ],
+      "confidence": 0.7743982275327047
+    },
+    {
+      "text": "INSURANCE PLAN NAME OR PROGR AM NAME 1.1001n",
+      "bbox": [
+        1530,
+        1171,
+        2295,
+        1270
+      ],
+      "confidence": 0.8759738802909851
+    },
+    {
+      "text": "Premium menu",
+      "bbox": [
+        89,
+        1336,
+        637,
+        1468
+      ],
+      "confidence": 0.85
+    },
+    {
+      "text": "ance BEFORE COMPLETNC VATURE Iauthorize the",
+      "bbox": [
+        663,
+        1336,
+        943,
+        1468
+      ],
+      "confidence": 0.9414005875587463
+    },
+    {
+      "text": "to the",
+      "bbox": [
+        1530,
+        1336,
+        2295,
+        1468
+      ],
+      "confidence": 0.85
+    },
+    {
+      "text": "37213235 0 SES",
+      "bbox": [
+        89,
+        1815,
+        2167,
+        1897
+      ],
+      "confidence": 0.5090753336747488
+    },
+    {
+      "text": "RGES",
+      "bbox": [
+        2091,
+        1798,
+        2244,
+        1897
+      ],
+      "confidence": 0.9970630407333374
+    },
+    {
+      "text": "171",
+      "bbox": [
+        89,
+        1920,
+        433,
+        2013
+      ],
+      "confidence": 0.9334642291069031
+    },
+    {
+      "text": "CANCE B",
+      "bbox": [
+        433,
+        1920,
+        765,
+        2013
+      ],
+      "confidence": 0.9948701858520508
+    },
+    {
+      "text": "A. DATE(S) OF SERVICE B. C. D. PROCEDURES, SERVICES, OR SUPPLIES E F. G. H. 1. J. From To PLACE OF (Explain Unusual Crcumstances) DIAGNOSIS DAYS EPSDT ID. RENDERING OR Familly M DD YY MM DD YY SERVICE EMG CPT/HCPCS MODIFIER POINTER $ CHARGES UNIT'S Plan QUAL PROVIDER ID.# S\u00d710 MH ME 9000 T2LEFG 9 10 76 C8 11 90 NPI 20 50 12 20/99 6T1BNH VE 5500 MANES NPI NPI NPI",
+      "bbox": [
+        89,
+        2062,
+        2473,
+        2673
+      ],
+      "confidence": 0.95318082150291
+    },
+    {
+      "text": "acclocontrarid",
+      "bbox": [
+        89,
+        2706,
+        357,
+        2805
+      ],
+      "confidence": 0.85
+    },
+    {
+      "text": "increasing it position .",
+      "bbox": [
+        382,
+        2706,
+        663,
+        2805
+      ],
+      "confidence": 0.85
+    },
+    {
+      "text": "encountment .",
+      "bbox": [
+        918,
+        2706,
+        1147,
+        2805
+      ],
+      "confidence": 0.85
+    },
+    {
+      "text": "iszl acostauss .",
+      "bbox": [
+        1173,
+        2706,
+        1377,
+        2805
+      ],
+      "confidence": 0.85
+    },
+    {
+      "text": "0 0",
+      "bbox": [
+        89,
+        2838,
+        637,
+        3036
+      ],
+      "confidence": 0.85
+    },
+    {
+      "text": "SIGNATURE OF PHYSICIAN OR SUPPLER INCLUOING DEGREES CA CREDENTIALS",
+      "bbox": [
+        89,
+        2871,
+        765,
+        2953
+      ],
+      "confidence": 0.967840850353241
+    },
+    {
+      "text": "ments on the reverse apply fo this bill and are made a part thereof.)",
+      "bbox": [
+        89,
+        2953,
+        765,
+        3118
+      ],
+      "confidence": 0.9810802042484283
+    },
+    {
+      "text": "Manual available at: www",
+      "bbox": [
+        306,
+        3118,
+        765,
+        3201
+      ],
+      "confidence": 0.9955154359340668
+    },
+    {
+      "text": "HEE N101",
+      "bbox": [
+        1530,
+        2706,
+        1887,
+        2805
+      ],
+      "confidence": 0.5699582546949387
+    },
+    {
+      "text": "3. BILLING PRQVOER INFO & PH",
+      "bbox": [
+        1530,
+        2838,
+        2295,
+        2920
+      ],
+      "confidence": 0.8843787908554077
+    },
+    {
+      "text": "868921.07",
+      "bbox": [
+        1530,
+        2920,
+        2295,
+        3118
+      ],
+      "confidence": 0.9237784147262573
+    },
+    {
+      "text": "NPI APPRC",
+      "bbox": [
+        1555,
+        3085,
+        1836,
+        3168
+      ],
+      "confidence": 0.9543969333171844
+    }
+  ],
+  "extraction_method": "multi_agent",
+  "config": {
+    "layout_model": "yolo",
+    "enable_trocr": true,
+    "enable_slm": true,
+    "enable_vlm": true
+  },
+  "business_fields": {
+    "patient_name": "nhmoM N 1907) NAN SANNEEE",
+    "patient_dob": "5! 02 8 aa HRE",
+    "patient_sex": null,
+    "patient_address": "Wayne, after both m.l offs",
+    "patient_phone": "98",
+    "insured_name": "NHoM 12s VWYNNOUNNE",
+    "insured_id": "1 a. INSURED'SI.D.A 2987",
+    "insured_dob": "a. INSURED'S DATE OF BIRT 09 is",
+    "insured_sex": null,
+    "insured_address": "7, INSURED'S ADDRESS (No, Steet) 9210 BERWY, V DA ATE MA tsa",
+    "insured_phone": "S8Z9",
+    "insurance_plan_name": "INSURANCE PLAN NAME OR PROGR AM NAME 1.1001n",
+    "claim_number": "increasing it position .",
+    "service_facility_name": "SIGNATURE OF PHYSICIAN OR SUPPLER INCLUOING DEGREES CA CREDENTIALS",
+    "service_facility_address": "ments on the reverse apply fo this bill and are made a part thereof.)",
+    "billing_provider_name": "3. BILLING PRQVOER INFO & PH",
+    "billing_provider_address": "868921.07",
+    "billing_provider_phone": "HEE N101",
+    "billing_npi": "Manual available at: www",
+    "total_charge": "encountment .",
+    "amount_paid": "iszl acostauss .",
+    "diagnosis_codes": [
+      "171",
+      "CANCE B"
+    ]
+  },
+  "business_field_details": [
+    {
+      "business_id": "patient_name",
+      "value": "nhmoM N 1907) NAN SANNEEE",
+      "source_field_id": "2_patient_name",
+      "confidence": 0.5558332403500875,
+      "bbox": [
+        89,
+        511,
+        420,
+        610
+      ],
+      "validator": null,
+      "validator_passed": null,
+      "normalized_value": null,
+      "notes": null
+    },
+    {
+      "business_id": "patient_dob",
+      "value": "5! 02 8 aa HRE",
+      "source_field_id": "3_patient_dob",
+      "confidence": 0.55,
+      "bbox": [
+        981,
+        511,
+        1224,
+        610
+      ],
+      "validator": "date",
+      "validator_passed": false,
+      "normalized_value": null,
+      "notes": "failed_date"
+    },
+    {
+      "business_id": "patient_sex",
+      "value": null,
+      "source_field_id": null,
+      "confidence": 0.0,
+      "bbox": null,
+      "validator": null,
+      "validator_passed": null,
+      "normalized_value": null,
+      "notes": null
+    },
+    {
+      "business_id": "patient_address",
+      "value": "Wayne, after both m.l offs",
+      "source_field_id": "5_patient_address",
+      "confidence": 0.65,
+      "bbox": [
+        89,
+        610,
+        561,
+        709
+      ],
+      "validator": null,
+      "validator_passed": null,
+      "normalized_value": null,
+      "notes": null
+    },
+    {
+      "business_id": "patient_phone",
+      "value": "98",
+      "source_field_id": "5_patient_phone",
+      "confidence": 0.55,
+      "bbox": [
+        612,
+        818,
+        816,
+        917
+      ],
+      "validator": "phone",
+      "validator_passed": false,
+      "normalized_value": null,
+      "notes": "failed_phone"
+    },
+    {
+      "business_id": "insured_name",
+      "value": "NHoM 12s VWYNNOUNNE",
+      "source_field_id": "4_insured_name",
+      "confidence": 0.4635625183582306,
+      "bbox": [
+        1530,
+        511,
+        1887,
+        610
+      ],
+      "validator": null,
+      "validator_passed": null,
+      "normalized_value": null,
+      "notes": null
+    },
+    {
+      "business_id": "insured_id",
+      "value": "1 a. INSURED'SI.D.A 2987",
+      "source_field_id": "1a_insured_id",
+      "confidence": 0.55,
+      "bbox": [
+        1530,
+        412,
+        1836,
+        511
+      ],
+      "validator": "member_id",
+      "validator_passed": false,
+      "normalized_value": null,
+      "notes": "failed_member_id"
+    },
+    {
+      "business_id": "insured_dob",
+      "value": "a. INSURED'S DATE OF BIRT 09 is",
+      "source_field_id": "11a_insured_dob",
+      "confidence": 0.55,
+      "bbox": [
+        1530,
+        1006,
+        1912,
+        1105
+      ],
+      "validator": "date",
+      "validator_passed": false,
+      "normalized_value": null,
+      "notes": "failed_date"
+    },
+    {
+      "business_id": "insured_sex",
+      "value": null,
+      "source_field_id": null,
+      "confidence": 0.0,
+      "bbox": null,
+      "validator": null,
+      "validator_passed": null,
+      "normalized_value": null,
+      "notes": null
+    },
+    {
+      "business_id": "insured_address",
+      "value": "7, INSURED'S ADDRESS (No, Steet) 9210 BERWY, V DA ATE MA tsa",
+      "source_field_id": "7_insured_address",
+      "confidence": 0.65,
+      "bbox": [
+        1530,
+        610,
+        2040,
+        709
+      ],
+      "validator": null,
+      "validator_passed": null,
+      "normalized_value": null,
+      "notes": null
+    },
+    {
+      "business_id": "insured_phone",
+      "value": "S8Z9",
+      "source_field_id": "7_insured_phone",
+      "confidence": 0.55,
+      "bbox": [
+        2091,
+        818,
+        2320,
+        917
+      ],
+      "validator": "phone",
+      "validator_passed": false,
+      "normalized_value": null,
+      "notes": "failed_phone"
+    },
+    {
+      "business_id": "insurance_plan_name",
+      "value": "INSURANCE PLAN NAME OR PROGR AM NAME 1.1001n",
+      "source_field_id": "11c_insurance_plan_name",
+      "confidence": 0.8759738802909851,
+      "bbox": [
+        1530,
+        1171,
+        2295,
+        1270
+      ],
+      "validator": null,
+      "validator_passed": null,
+      "normalized_value": null,
+      "notes": null
+    },
+    {
+      "business_id": "claim_number",
+      "value": "increasing it position .",
+      "source_field_id": "26_patient_account",
+      "confidence": 0.85,
+      "bbox": [
+        382,
+        2706,
+        663,
+        2805
+      ],
+      "validator": null,
+      "validator_passed": null,
+      "normalized_value": null,
+      "notes": null
+    },
+    {
+      "business_id": "service_facility_name",
+      "value": "SIGNATURE OF PHYSICIAN OR SUPPLER INCLUOING DEGREES CA CREDENTIALS",
+      "source_field_id": "32_service_facility_name",
+      "confidence": 0.967840850353241,
+      "bbox": [
+        89,
+        2871,
+        765,
+        2953
+      ],
+      "validator": null,
+      "validator_passed": null,
+      "normalized_value": null,
+      "notes": null
+    },
+    {
+      "business_id": "service_facility_address",
+      "value": "ments on the reverse apply fo this bill and are made a part thereof.)",
+      "source_field_id": "32_service_facility_address",
+      "confidence": 0.65,
+      "bbox": [
+        89,
+        2953,
+        765,
+        3118
+      ],
+      "validator": null,
+      "validator_passed": null,
+      "normalized_value": null,
+      "notes": null
+    },
+    {
+      "business_id": "billing_provider_name",
+      "value": "3. BILLING PRQVOER INFO & PH",
+      "source_field_id": "33_billing_provider_name",
+      "confidence": 0.55,
+      "bbox": [
+        1530,
+        2838,
+        2295,
+        2920
+      ],
+      "validator": "member_id",
+      "validator_passed": false,
+      "normalized_value": null,
+      "notes": "failed_member_id"
+    },
+    {
+      "business_id": "billing_provider_address",
+      "value": "868921.07",
+      "source_field_id": "33_billing_provider_address",
+      "confidence": 0.55,
+      "bbox": [
+        1530,
+        2920,
+        2295,
+        3118
+      ],
+      "validator": "member_id",
+      "validator_passed": false,
+      "normalized_value": null,
+      "notes": "failed_member_id"
+    },
+    {
+      "business_id": "billing_provider_phone",
+      "value": "HEE N101",
+      "source_field_id": "33_billing_provider_phone",
+      "confidence": 0.55,
+      "bbox": [
+        1530,
+        2706,
+        1887,
+        2805
+      ],
+      "validator": "phone",
+      "validator_passed": false,
+      "normalized_value": null,
+      "notes": "failed_phone"
+    },
+    {
+      "business_id": "billing_npi",
+      "value": "Manual available at: www",
+      "source_field_id": "32a_npi",
+      "confidence": 0.55,
+      "bbox": [
+        306,
+        3118,
+        765,
+        3201
+      ],
+      "validator": "npi",
+      "validator_passed": false,
+      "normalized_value": null,
+      "notes": "failed_npi"
+    },
+    {
+      "business_id": "total_charge",
+      "value": "encountment .",
+      "source_field_id": "28_total_charge",
+      "confidence": 0.55,
+      "bbox": [
+        918,
+        2706,
+        1147,
+        2805
+      ],
+      "validator": "money",
+      "validator_passed": false,
+      "normalized_value": null,
+      "notes": "failed_money"
+    },
+    {
+      "business_id": "amount_paid",
+      "value": "iszl acostauss .",
+      "source_field_id": "29_amount_paid",
+      "confidence": 0.55,
+      "bbox": [
+        1173,
+        2706,
+        1377,
+        2805
+      ],
+      "validator": "money",
+      "validator_passed": false,
+      "normalized_value": null,
+      "notes": "failed_money"
+    },
+    {
+      "business_id": "diagnosis_codes",
+      "value": [
+        "171",
+        "CANCE B"
+      ],
+      "source_field_id": "21_diagnosis_a",
+      "confidence": 0.55,
+      "bbox": [
+        89,
+        1920,
+        433,
+        2013
+      ],
+      "validator": "icd",
+      "validator_passed": false,
+      "normalized_value": null,
+      "notes": "failed_icd"
+    }
+  ],
+  "business_coverage": 0.9090909090909091
+}

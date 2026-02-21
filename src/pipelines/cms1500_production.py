@@ -36,6 +36,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from utils.config import Config
 from utils.corrections import log_correction, auto_tune_thresholds, load_threshold_overrides
+from src.processing.preprocessing import extract_ink_by_subtraction
+from src.processing.registration import load_and_process_reference
 
 
 # ============================================================================
@@ -358,10 +360,17 @@ class OCREngines:
         """Get PaddleOCR instance (lazy loaded)."""
         if cls._paddle_ocr is None:
             try:
-                from paddleocr import PaddleOCR
-                cls._paddle_ocr = PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
+                # Try to use our PaddleOCRWrapper which handles PaddleX API
+                from src.ocr.paddle_ocr import PaddleOCRWrapper
+                cls._paddle_ocr = PaddleOCRWrapper()
             except Exception as e:
                 print(f"PaddleOCR init failed: {e}")
+                # Fallback to direct PaddleOCR
+                try:
+                    from paddleocr import PaddleOCR
+                    cls._paddle_ocr = PaddleOCR(use_angle_cls=True, lang='en')
+                except Exception as e2:
+                    print(f"Fallback PaddleOCR init also failed: {e2}")
         return cls._paddle_ocr
     
     @classmethod
@@ -384,15 +393,24 @@ class OCREngines:
             return "", 0.0
         
         try:
-            result = ocr.ocr(image, cls=True)
-            if result and result[0]:
-                texts = []
-                confs = []
-                for line in result[0]:
-                    if line and len(line) >= 2:
-                        texts.append(line[1][0])
-                        confs.append(line[1][1])
-                return " ".join(texts), sum(confs) / len(confs) if confs else 0.0
+            # Check if it's our PaddleOCRWrapper
+            if hasattr(ocr, 'extract_text'):
+                word_boxes = ocr.extract_text(image)
+                if word_boxes:
+                    texts = [wb.text for wb in word_boxes if wb.text]
+                    confs = [wb.confidence for wb in word_boxes]
+                    return " ".join(texts), sum(confs) / len(confs) if confs else 0.0
+            else:
+                # Direct PaddleOCR API
+                result = ocr.ocr(image, cls=True)
+                if result and result[0]:
+                    texts = []
+                    confs = []
+                    for line in result[0]:
+                        if line and len(line) >= 2:
+                            texts.append(line[1][0])
+                            confs.append(line[1][1])
+                    return " ".join(texts), sum(confs) / len(confs) if confs else 0.0
         except Exception as e:
             print(f"PaddleOCR error: {e}")
         
@@ -541,10 +559,18 @@ class CMS1500ProductionPipeline:
         return score > 0.3, score
     
     def _align_to_template(self, image: np.ndarray) -> Tuple[np.ndarray, float]:
-        """Align scanned image to CMS-1500 template using ORB features."""
-        # For now, return as-is with perfect alignment score
-        # In production, would implement homography alignment
-        return image, 1.0
+        """Align scanned image to CMS-1500 template."""
+        try:
+            from src.pipelines.cms1500_register import get_cms1500_registrar
+
+            registrar = get_cms1500_registrar()
+            reg = registrar.register(image)
+            if reg.success and reg.aligned_image is not None:
+                return reg.aligned_image, float(reg.quality)
+        except Exception as e:
+            print(f"Alignment failed: {e}")
+            
+        return image, 0.0
     
     def _crop_field(self, image: np.ndarray, bbox_norm: Tuple[float, float, float, float], 
                     padding: int = 5) -> np.ndarray:
@@ -693,6 +719,18 @@ class CMS1500ProductionPipeline:
         if patient_dob and patient_dob.value and service_date and service_date.value:
             # Could add date comparison logic here
             pass
+            
+        # Check: Patient Name should equal Insured Name if Relationship is Self
+        # Note: Requires '6_patient_relationship' to specifically indicate 'Self'
+        rel = results.get("6_patient_relationship")
+        pat_name = results.get("2_patient_name")
+        ins_name = results.get("4_insured_name")
+        
+        if rel and rel.value and pat_name and pat_name.value and ins_name and ins_name.value:
+            # Heuristic: if relationship field is checked ("X") and names differ significantly
+            # This assumes the box corresponds to "Self" or we can distinguish. 
+            # Since current schema has one box for all, we skip if we can't be sure.
+            pass
         
         return errors
     
@@ -764,7 +802,14 @@ List any obvious errors or missing required fields (be brief, max 3 issues):"""
         
         return business
     
-    def extract(self, path: str) -> Dict[str, Any]:
+    def extract(
+        self,
+        path: Optional[str] = None,
+        image_override: Optional[np.ndarray] = None,
+        already_aligned: bool = False,
+        alignment_quality_override: Optional[float] = None,
+        source_shape: Optional[Tuple[int, int]] = None,
+    ) -> Dict[str, Any]:
         """
         Run the complete CMS-1500 extraction pipeline.
         
@@ -774,7 +819,18 @@ List any obvious errors or missing required fields (be brief, max 3 issues):"""
         start_time = time.time()
         
         # Step 1: Load image
-        image, width, height = self._load_image(path)
+        if image_override is not None:
+            image = image_override
+            height, width = image.shape[:2]
+            if source_shape and len(source_shape) == 2:
+                source_height, source_width = int(source_shape[0]), int(source_shape[1])
+            else:
+                source_width, source_height = int(width), int(height)
+        else:
+            if not path:
+                raise ValueError("path is required when image_override is not provided")
+            image, width, height = self._load_image(path)
+            source_width, source_height = int(width), int(height)
         
         # Step 2: Identify form (optional verification)
         is_cms1500, form_score = self._identify_form(image)
@@ -782,7 +838,51 @@ List any obvious errors or missing required fields (be brief, max 3 issues):"""
             print(f"Warning: Document may not be CMS-1500 (score: {form_score:.2f})")
         
         # Step 3: Align to template
-        aligned_image, alignment_quality = self._align_to_template(image)
+        if already_aligned:
+            aligned_image = image
+            alignment_quality = float(alignment_quality_override) if alignment_quality_override is not None else 0.90
+        else:
+            aligned_image, alignment_quality = self._align_to_template(image)
+        aligned_height, aligned_width = aligned_image.shape[:2]
+
+        # Save aligned preview for UI overlays
+        aligned_preview_path = None
+        try:
+            import uuid
+            cache_dir = Config.PROJECT_ROOT / "cache" / "previews"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            aligned_preview_path = cache_dir / f"aligned_prod_{uuid.uuid4().hex}.png"
+            if aligned_image.ndim == 3 and aligned_image.shape[2] == 3:
+                bgr = cv2.cvtColor(aligned_image, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(str(aligned_preview_path), bgr)
+            else:
+                cv2.imwrite(str(aligned_preview_path), aligned_image)
+        except Exception:
+            aligned_preview_path = None
+        
+        # Step 3.5: Ink Extraction (Track 2C)
+        # Remove printed template text/lines by subtracting the reference template
+        processed_image = aligned_image
+        try:
+            ref_data = load_and_process_reference("cms-1500")
+            if ref_data and "image" in ref_data:
+                template_img = ref_data["image"]
+                # Get ink mask (255 = ink/diff, 0 = matching background)
+                ink_mask = extract_ink_by_subtraction(aligned_image, template_img)
+                
+                # Create clean image: keep original pixels where ink is detected, white elsewhere
+                processed_image = aligned_image.copy()
+                
+                # Expand mask to 3 channels if needed
+                if len(processed_image.shape) == 3 and len(ink_mask.shape) == 2:
+                     # Where mask is 0 (background), set to 255 (white)
+                     processed_image[ink_mask == 0] = [255, 255, 255]
+                else:
+                     processed_image[ink_mask == 0] = 255
+                     
+                print("Applied ink extraction mask (Track 2C)")
+        except Exception as e:
+            print(f"Ink extraction skipped: {e}")
         
         # Step 4: Extract all fields
         results: Dict[str, ExtractionResult] = {}
@@ -790,7 +890,8 @@ List any obvious errors or missing required fields (be brief, max 3 issues):"""
         ocr_blocks: List[Dict[str, Any]] = []
         
         for field_def in CMS1500_FIELDS:
-            result = self._extract_field(aligned_image, field_def)
+            # Use processed_image (cleaned) for extraction
+            result = self._extract_field(processed_image, field_def)
             results[field_def.id] = result
             
             field_details.append({
@@ -809,10 +910,10 @@ List any obvious errors or missing required fields (be brief, max 3 issues):"""
                 ocr_blocks.append({
                     "text": result.value,
                     "bbox": [
-                        field_def.bbox_norm[0] * width,
-                        field_def.bbox_norm[1] * height,
-                        field_def.bbox_norm[2] * width,
-                        field_def.bbox_norm[3] * height,
+                        field_def.bbox_norm[0] * aligned_width,
+                        field_def.bbox_norm[1] * aligned_height,
+                        field_def.bbox_norm[2] * aligned_width,
+                        field_def.bbox_norm[3] * aligned_height,
                     ],
                     "confidence": result.confidence,
                 })
@@ -847,10 +948,14 @@ List any obvious errors or missing required fields (be brief, max 3 issues):"""
             "extracted_fields": extracted_fields,
             "business_fields": business_fields,
             "field_details": field_details,
-            "page_width": width,
-            "page_height": height,
+            "page_width": aligned_width,
+            "page_height": aligned_height,
+            "source_width": source_width,
+            "source_height": source_height,
             "processing_time": processing_time,
             "alignment_quality": alignment_quality,
+            "aligned_preview_path": str(aligned_preview_path) if aligned_preview_path else None,
+            "aligned_image_shape": [int(aligned_height), int(aligned_width)],
             "ocr_blocks": ocr_blocks,
             "validation_errors": validation_errors,
             "llm_qa_notes": llm_qa_notes,

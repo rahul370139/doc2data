@@ -12,6 +12,8 @@ from typing import Tuple, Optional, List, Dict, Any
 from pathlib import Path
 import os
 
+from src.pipelines.cms1500_register import get_cms1500_registrar
+
 # Cache for template features to avoid re-computing
 _TEMPLATE_CACHE: Dict[str, Dict[str, Any]] = {}
 
@@ -117,23 +119,76 @@ def _validate_homography_ref_to_input(H: np.ndarray, ref_shape: Tuple[int, int],
     except Exception:
         return False
 
+
+def _validate_homography_input_to_ref(H: np.ndarray, input_shape: Tuple[int, int], ref_shape: Tuple[int, int]) -> bool:
+    """
+    Validate a homography that maps INPUT -> REFERENCE.
+    Reject wild warps but allow mild perspective (scans).
+    """
+    if H is None:
+        return False
+    try:
+        in_h, in_w = input_shape[:2]
+        ref_h, ref_w = ref_shape[:2]
+
+        in_corners = np.float32([[0, 0], [in_w, 0], [in_w, in_h], [0, in_h]]).reshape(-1, 1, 2)
+        warped = cv2.perspectiveTransform(in_corners, H).reshape(-1, 2)
+        if not np.isfinite(warped).all():
+            return False
+
+        # Area sanity (in reference space)
+        area = float(cv2.contourArea(warped.astype(np.float32)))
+        ref_area = float(ref_w * ref_h)
+        if area < ref_area * 0.15 or area > ref_area * 1.10:
+            return False
+
+        # Keep corners within a reasonable padded boundary of reference
+        pad_x = ref_w * 0.15
+        pad_y = ref_h * 0.15
+        if (warped[:, 0].min() < -pad_x or warped[:, 0].max() > ref_w + pad_x or
+            warped[:, 1].min() < -pad_y or warped[:, 1].max() > ref_h + pad_y):
+            return False
+
+        if not cv2.isContourConvex(warped.astype(np.float32)):
+            return False
+        return True
+    except Exception:
+        return False
+
 def get_reference_image_path(template_name: str) -> Optional[str]:
     """Resolve path to reference image for a template."""
-    # Assuming standard location in data/sample_docs
-    # Adjust this path relative to the project root
-    base_dir = Path(__file__).parent.parent.parent / "data" / "sample_docs"
-    
+    name = (template_name or "").lower().strip()
+    project_root = Path(__file__).parent.parent.parent
+
+    if name in {"cms-1500", "cms1500"}:
+        # Prefer user-provided canonical template in data/raw.
+        candidates = [
+            project_root / "data" / "raw" / "cms1500_template.pdf",
+            project_root / "data" / "raw" / "cms1500_template.png",
+            project_root / "data" / "raw" / "cms1500_template.jpg",
+            project_root / "data" / "sample_docs" / "cms1500_blank.pdf",
+            project_root / "data" / "sample_docs" / "cms1500_blank.png",
+        ]
+        env_path = os.getenv("CMS1500_TEMPLATE_PATH")
+        if env_path:
+            candidates.insert(0, Path(env_path))
+        for p in candidates:
+            try:
+                if p.exists():
+                    return str(p)
+            except Exception:
+                continue
+        return None
+
+    # Generic template resolution fallback.
+    base_dir = project_root / "data" / "sample_docs"
     mapping = {
-        "cms-1500": "cms1500_blank.pdf",
-        "cms1500": "cms1500_blank.pdf",
-        "ub-04": "ub04_clean.pdf", 
-        "ub04": "ub04_clean.pdf"
+        "ub-04": "ub04_clean.pdf",
+        "ub04": "ub04_clean.pdf",
     }
-    
-    filename = mapping.get(template_name.lower())
+    filename = mapping.get(name)
     if not filename:
         return None
-        
     path = base_dir / filename
     return str(path) if path.exists() else None
 
@@ -146,6 +201,25 @@ def load_and_process_reference(template_name: str) -> Optional[Dict[str, Any]]:
     
     if template_name in _TEMPLATE_CACHE:
         return _TEMPLATE_CACHE[template_name]
+
+    # CMS-1500 uses the deterministic registrar template loader.
+    if (template_name or "").lower().strip() in {"cms-1500", "cms1500"}:
+        try:
+            registrar = get_cms1500_registrar()
+            data = registrar.get_template_data()
+            out = {
+                "keypoints": data.get("keypoints"),
+                "descriptors": data.get("descriptors"),
+                "shape": data.get("shape"),
+                "image": data.get("image"),
+                "image_rgb": data.get("image_rgb"),
+                "line_mask": data.get("line_mask"),
+            }
+            _TEMPLATE_CACHE[template_name] = out
+            return out
+        except Exception as e:
+            print(f"Error loading CMS-1500 reference template: {e}")
+            return None
     
     path = get_reference_image_path(template_name)
     if not path:
@@ -193,6 +267,45 @@ def load_and_process_reference(template_name: str) -> Optional[Dict[str, Any]]:
         print(f"Error loading reference template {template_name}: {e}")
         return None
 
+def _detect_corners_yolo(image: np.ndarray, model_path: str) -> Optional[np.ndarray]:
+    """
+    Detect document corners using YOLO model.
+    Expects model to return 4 classes: top_left, top_right, bottom_right, bottom_left
+    OR 'corner' class which we spatially sort.
+    """
+    try:
+        from ultralytics import YOLO
+        model = YOLO(model_path)
+        results = model.predict(image, verbose=False, conf=0.25)
+        
+        if not results:
+            return None
+            
+        # Collect all 'corner' detections
+        points = []
+        for r in results:
+            boxes = r.boxes
+            for box in boxes:
+                # Use center of box as point
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+                points.append([cx, cy])
+                
+        if len(points) != 4:
+            # Maybe fallback to top 4 highest confidence if > 4?
+            if len(points) > 4:
+                # TODO: intelligent filtering
+                pass 
+            else:
+                return None
+                
+        pts = np.array(points)
+        return _order_quad_points(pts)
+        
+    except Exception as e:
+        print(f"YOLO detection error: {e}")
+        return None
+
 def compute_alignment_matrix(
     input_image: np.ndarray, 
     template_name: str
@@ -201,73 +314,73 @@ def compute_alignment_matrix(
     Compute homography matrix to align input_image to template.
     
     Returns 3x3 matrix H such that:
-    Template_Point = H * Input_Point
-    
-    Note: To map Schema (Template) coordinates TO Input Image,
-    we typically need the inverse (Input = H_inv * Template).
+    Template_Point = H * Input_Point  (INPUT -> REFERENCE).
     """
+    name = (template_name or "").lower().strip()
+
+    # Canonical CMS-1500 path: use deterministic registrar.
+    if name in {"cms-1500", "cms1500"}:
+        try:
+            registrar = get_cms1500_registrar()
+            result = registrar.register(input_image)
+            if result.success and result.homography_input_to_template is not None:
+                return result.homography_input_to_template
+            return None
+        except Exception as e:
+            print(f"CMS-1500 registration failed: {e}")
+            return None
+
+    # Generic fallback for other templates.
     ref_data = load_and_process_reference(template_name)
     if not ref_data:
         return None
-        
-    # Convert input to grayscale if needed
+
     if len(input_image.shape) == 3:
         gray = cv2.cvtColor(input_image, cv2.COLOR_RGB2GRAY)
     else:
         gray = input_image
 
-    # 0) Stable primary: outer quad -> compute input->ref then invert to ref->input
+    # Contour-based quad first.
     try:
         quad, q_score = _detect_form_quad(gray)
         ref_h, ref_w = ref_data["shape"][:2]
         if quad is not None and q_score >= 0.55:
             dst = np.array([[0, 0], [ref_w - 1, 0], [ref_w - 1, ref_h - 1], [0, ref_h - 1]], dtype=np.float32)
             H_in_to_ref = cv2.getPerspectiveTransform(quad.astype(np.float32), dst)
-            if H_in_to_ref is not None:
-                H_ref_to_in = np.linalg.inv(H_in_to_ref)
-                if _validate_homography_ref_to_input(H_ref_to_in, (ref_h, ref_w), gray.shape):
-                    return H_ref_to_in
+            if H_in_to_ref is not None and _validate_homography_input_to_ref(H_in_to_ref, gray.shape, (ref_h, ref_w)):
+                return H_in_to_ref
     except Exception:
         pass
-        
-    # Detect features in input image
+
+    # ORB feature fallback.
     orb = cv2.ORB_create(nfeatures=5000)
     kp_img, des_img = orb.detectAndCompute(gray, None)
-    
-    if des_img is None or len(kp_img) < 10:
+    ref_des = ref_data.get("descriptors")
+    ref_kp = ref_data.get("keypoints")
+    if des_img is None or ref_des is None or ref_kp is None or len(kp_img) < 10:
         return None
-        
-    # Match features using BFMatcher
-    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-    matches = bf.match(ref_data["descriptors"], des_img)
-    
-    # Sort by distance
-    matches = sorted(matches, key=lambda x: x.distance)
-    
-    # Keep top % matches
-    keep_percent = 0.2
-    num_keep = int(len(matches) * keep_percent)
-    good_matches = matches[:num_keep]
-    
-    if len(good_matches) < 10:
-        print(f"Not enough matches for alignment: {len(good_matches)}")
+
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+    matches = bf.knnMatch(des_img, ref_des, k=2)
+    good: List[cv2.DMatch] = []
+    for pair in matches:
+        if len(pair) < 2:
+            continue
+        m, n = pair
+        if m.distance < 0.78 * n.distance:
+            good.append(m)
+    if len(good) < 12:
         return None
-        
-    # Extract point coordinates
-    src_pts = np.float32([ref_data["keypoints"][m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-    dst_pts = np.float32([kp_img[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-    
-    # Find Homography (feature fallback)
-    # H maps Reference(src) -> Input(dst)
-    # This means: Input_Coord = H * Reference_Coord
-    # This is exactly what we need to transform Schema BBoxes (Reference) to Input Image
-    H_ref_to_in, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-    if H_ref_to_in is None:
+
+    src_pts = np.float32([kp_img[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+    dst_pts = np.float32([ref_kp[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+    H_in_to_ref, _ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+    if H_in_to_ref is None:
         return None
     ref_h, ref_w = ref_data["shape"][:2]
-    if not _validate_homography_ref_to_input(H_ref_to_in, (ref_h, ref_w), gray.shape):
+    if not _validate_homography_input_to_ref(H_in_to_ref, gray.shape, (ref_h, ref_w)):
         return None
-    return H_ref_to_in
+    return H_in_to_ref
 
 def transform_bbox(bbox: Tuple[float, float, float, float], H: np.ndarray) -> Tuple[float, float, float, float]:
     """
@@ -311,4 +424,3 @@ def transform_normalized_bbox(
     
     # 2. Transform using H
     return transform_bbox((x0, y0, x1, y1), H)
-

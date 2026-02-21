@@ -1,10 +1,129 @@
 {
+  "form_type": "ub-04",
+  "form_name": "UB-04 Uniform Bill",
+  "description": "CMS-1450 / UB-04 Institutional Claim Form",
   "fields": [
-    {"id": "patient_name", "label": "PATIENT NAME", "field_type": "generic", "bbox_norm": [0.05, 0.07, 0.55, 0.10]},
-    {"id": "patient_addr", "label": "PATIENT ADDRESS", "field_type": "generic", "bbox_norm": [0.05, 0.11, 0.55, 0.15]},
-    {"id": "patient_dob", "label": "DATE OF BIRTH", "field_type": "date", "bbox_norm": [0.58, 0.07, 0.70, 0.10]},
-    {"id": "patient_sex", "label": "SEX", "field_type": "generic", "bbox_norm": [0.71, 0.07, 0.78, 0.10]},
-    {"id": "provider_name", "label": "PROVIDER NAME", "field_type": "generic", "bbox_norm": [0.05, 0.18, 0.55, 0.22]},
-    {"id": "claim_amount", "label": "TOTAL CHARGES", "field_type": "money", "bbox_norm": [0.65, 0.80, 0.90, 0.83]}
+    {"id": "fl1_provider_name", "label": "1. Provider Name", "field_type": "text", "block_type": "header", "bbox_norm": [0.02, 0.00, 0.30, 0.02], "business_key": "provider_name"},
+    {"id": "fl1_provider_address1", "label": "1. Provider Address", "field_type": "text", "block_type": "header", "bbox_norm": [0.02, 0.02, 0.30, 0.04]},
+    {"id": "fl1_provider_city_state_zip", "label": "1. Provider City/ST/ZIP", "field_type": "text", "block_type": "header", "bbox_norm": [0.02, 0.04, 0.30, 0.06]},
+    
+    {"id": "fl3a_patient_control", "label": "3a. Patient Control No", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.65, 0.00, 0.91, 0.02], "required": true, "business_key": "patient_control_number"},
+    {"id": "fl4_type_of_bill", "label": "4. Type of Bill", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.93, 0.01, 0.99, 0.04], "required": true, "business_key": "type_of_bill"},
+    
+    {"id": "fl5_federal_tax_id", "label": "5. Fed Tax ID", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.61, 0.05, 0.72, 0.07], "business_key": "federal_tax_id"},
+    {"id": "fl6_from_date", "label": "6. From Date", "field_type": "date", "block_type": "form_field", "bbox_norm": [0.72, 0.05, 0.81, 0.07], "required": true, "business_key": "statement_from_date"},
+    {"id": "fl6_thru_date", "label": "6. Thru Date", "field_type": "date", "block_type": "form_field", "bbox_norm": [0.81, 0.05, 0.90, 0.07], "required": true, "business_key": "statement_thru_date"},
+    
+    {"id": "fl8a_patient_id", "label": "8a. Patient Name", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.14, 0.06, 0.37, 0.08], "required": true, "business_key": "patient_name"},
+    {"id": "fl9_patient_address", "label": "9. Patient Address", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.50, 0.06, 0.99, 0.08], "business_key": "patient_address"},
+    {"id": "fl9_patient_city", "label": "9. Patient City", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.38, 0.08, 0.76, 0.10]},
+    {"id": "fl9_patient_state", "label": "9. Patient State", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.77, 0.08, 0.82, 0.10]},
+    {"id": "fl9_patient_zip", "label": "9. Patient ZIP", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.82, 0.08, 0.94, 0.10], "business_key": "patient_zip"},
+    
+    {"id": "fl10_patient_dob", "label": "10. Patient DOB", "field_type": "date", "block_type": "form_field", "bbox_norm": [0.01, 0.11, 0.12, 0.13], "required": true, "business_key": "patient_dob"},
+    {"id": "fl11_patient_sex", "label": "11. Patient Sex", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.12, 0.11, 0.15, 0.13], "business_key": "patient_sex"},
+    
+    {"id": "fl12_admission_date", "label": "12. Admission Date", "field_type": "date", "block_type": "form_field", "bbox_norm": [0.15, 0.11, 0.22, 0.13], "business_key": "admission_date"},
+    {"id": "fl13_admission_hour", "label": "13. Admission Hour", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.23, 0.11, 0.26, 0.13]},
+    {"id": "fl14_admission_type", "label": "14. Type", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.26, 0.11, 0.29, 0.13]},
+    {"id": "fl15_admission_source", "label": "15. Source", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.30, 0.11, 0.33, 0.13]},
+    {"id": "fl16_discharge_hour", "label": "16. DHR", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.33, 0.11, 0.36, 0.13]},
+    {"id": "fl17_patient_status", "label": "17. STAT", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.37, 0.11, 0.40, 0.13], "business_key": "discharge_status"},
+    
+    {"id": "fl31_occurrence_code_1", "label": "31. Occ Code a", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.01, 0.14, 0.04, 0.16]},
+    {"id": "fl31_occurrence_date_1", "label": "31. Occ Date a", "field_type": "date", "block_type": "table_cell", "bbox_norm": [0.04, 0.14, 0.13, 0.16]},
+    {"id": "fl32_occurrence_code_2", "label": "32. Occ Code b", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.13, 0.14, 0.16, 0.16]},
+    {"id": "fl32_occurrence_date_2", "label": "32. Occ Date b", "field_type": "date", "block_type": "table_cell", "bbox_norm": [0.16, 0.14, 0.25, 0.16]},
+    {"id": "fl33_occurrence_code_3", "label": "33. Occ Code c", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.25, 0.14, 0.28, 0.16]},
+    {"id": "fl33_occurrence_date_3", "label": "33. Occ Date c", "field_type": "date", "block_type": "table_cell", "bbox_norm": [0.28, 0.14, 0.37, 0.16]},
+    {"id": "fl34_occurrence_code_4", "label": "34. Occ Code d", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.37, 0.14, 0.40, 0.16]},
+    {"id": "fl34_occurrence_date_4", "label": "34. Occ Date d", "field_type": "date", "block_type": "table_cell", "bbox_norm": [0.40, 0.14, 0.49, 0.16]},
+    
+    {"id": "fl35_occurrence_span_code_1", "label": "35. Span Code a", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.52, 0.14, 0.56, 0.16]},
+    {"id": "fl35_occurrence_span_from_1", "label": "35. Span From a", "field_type": "date", "block_type": "table_cell", "bbox_norm": [0.56, 0.14, 0.61, 0.16]},
+    {"id": "fl35_occurrence_span_thru_1", "label": "35. Span Thru a", "field_type": "date", "block_type": "table_cell", "bbox_norm": [0.61, 0.14, 0.69, 0.16]},
+    {"id": "fl36_occurrence_span_code_2", "label": "36. Span Code b", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.69, 0.14, 0.73, 0.16]},
+    {"id": "fl36_occurrence_span_from_2", "label": "36. Span From b", "field_type": "date", "block_type": "table_cell", "bbox_norm": [0.73, 0.14, 0.81, 0.16]},
+    {"id": "fl36_occurrence_span_thru_2", "label": "36. Span Thru b", "field_type": "date", "block_type": "table_cell", "bbox_norm": [0.81, 0.14, 0.89, 0.16]},
+    
+    {"id": "fl38_responsible_party", "label": "38. Responsible Party", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.02, 0.17, 0.50, 0.25], "business_key": "responsible_party"},
+    
+    {"id": "fl39a_value_code_1", "label": "39. Value Code a", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.52, 0.19, 0.56, 0.21]},
+    {"id": "fl39a_value_amount_1", "label": "39. Value Amt a", "field_type": "money", "block_type": "table_cell", "bbox_norm": [0.56, 0.19, 0.66, 0.21]},
+    {"id": "fl39b_value_code_2", "label": "40. Value Code b", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.52, 0.20, 0.56, 0.22]},
+    {"id": "fl39b_value_amount_2", "label": "40. Value Amt b", "field_type": "money", "block_type": "table_cell", "bbox_norm": [0.56, 0.20, 0.66, 0.22]},
+    {"id": "fl39c_value_code_3", "label": "41. Value Code c", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.52, 0.22, 0.56, 0.24]},
+    {"id": "fl39c_value_amount_3", "label": "41. Value Amt c", "field_type": "money", "block_type": "table_cell", "bbox_norm": [0.56, 0.22, 0.66, 0.24]},
+    {"id": "fl39d_value_code_4", "label": "41. Value Code d", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.52, 0.24, 0.56, 0.26]},
+    {"id": "fl39d_value_amount_4", "label": "41. Value Amt d", "field_type": "money", "block_type": "table_cell", "bbox_norm": [0.56, 0.24, 0.66, 0.26]},
+    
+    {"id": "fl42_revenue_code_1", "label": "42. Rev Code 1", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.01, 0.27, 0.07, 0.29], "business_key": "revenue_code_1"},
+    {"id": "fl43_description_1", "label": "43. Description 1", "field_type": "text", "block_type": "table_cell", "bbox_norm": [0.07, 0.27, 0.36, 0.29], "business_key": "service_description_1"},
+    {"id": "fl44_hcpcs_1", "label": "44. HCPCS 1", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.36, 0.27, 0.54, 0.29], "business_key": "hcpcs_code_1"},
+    {"id": "fl45_service_date_1", "label": "45. Svc Date 1", "field_type": "date", "block_type": "table_cell", "bbox_norm": [0.54, 0.27, 0.63, 0.29], "business_key": "service_date_1"},
+    {"id": "fl46_units_1", "label": "46. Units 1", "field_type": "text", "block_type": "table_cell", "bbox_norm": [0.63, 0.27, 0.72, 0.29]},
+    {"id": "fl47_charges_1", "label": "47. Charges 1", "field_type": "money", "block_type": "table_cell", "bbox_norm": [0.72, 0.27, 0.84, 0.29], "business_key": "charges_1"},
+    
+    {"id": "fl42_revenue_code_2", "label": "42. Rev Code 2", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.01, 0.28, 0.07, 0.30]},
+    {"id": "fl43_description_2", "label": "43. Description 2", "field_type": "text", "block_type": "table_cell", "bbox_norm": [0.07, 0.28, 0.36, 0.30]},
+    {"id": "fl44_hcpcs_2", "label": "44. HCPCS 2", "field_type": "code", "block_type": "table_cell", "bbox_norm": [0.36, 0.28, 0.54, 0.30]},
+    {"id": "fl45_service_date_2", "label": "45. Svc Date 2", "field_type": "date", "block_type": "table_cell", "bbox_norm": [0.54, 0.28, 0.63, 0.30]},
+    {"id": "fl46_units_2", "label": "46. Units 2", "field_type": "text", "block_type": "table_cell", "bbox_norm": [0.63, 0.28, 0.72, 0.30]},
+    {"id": "fl47_charges_2", "label": "47. Charges 2", "field_type": "money", "block_type": "table_cell", "bbox_norm": [0.72, 0.28, 0.84, 0.30]},
+    
+    {"id": "fl47_total_charges", "label": "47. Total Charges", "field_type": "money", "block_type": "form_field", "bbox_norm": [0.72, 0.61, 0.84, 0.63], "required": true, "business_key": "total_charges"},
+    
+    {"id": "fl50_payer_name_a", "label": "50. Payer Name A", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.01, 0.64, 0.28, 0.66], "required": true, "business_key": "payer_name"},
+    {"id": "fl51_health_plan_id_a", "label": "51. Health Plan ID A", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.29, 0.64, 0.46, 0.66], "business_key": "health_plan_id"},
+    {"id": "fl52_release_info_a", "label": "52. Rel Info A", "field_type": "checkbox", "block_type": "checkbox", "bbox_norm": [0.46, 0.64, 0.49, 0.66]},
+    {"id": "fl53_assignment_a", "label": "53. Asgn Ben A", "field_type": "checkbox", "block_type": "checkbox", "bbox_norm": [0.50, 0.64, 0.53, 0.66]},
+    {"id": "fl54_prior_payments_a", "label": "54. Prior Payments A", "field_type": "money", "block_type": "form_field", "bbox_norm": [0.52, 0.64, 0.64, 0.66], "business_key": "prior_payments"},
+    {"id": "fl55_estimated_due_a", "label": "55. Est Amt Due A", "field_type": "money", "block_type": "form_field", "bbox_norm": [0.65, 0.64, 0.77, 0.66], "business_key": "estimated_amount_due"},
+    {"id": "fl56_npi_a", "label": "56. NPI", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.81, 0.63, 0.99, 0.65], "business_key": "billing_npi"},
+    
+    {"id": "fl58_insured_name_a", "label": "58. Insured Name A", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.01, 0.70, 0.32, 0.72], "required": true, "business_key": "insured_name"},
+    {"id": "fl59_patient_rel_a", "label": "59. P.Rel A", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.32, 0.70, 0.36, 0.72]},
+    {"id": "fl60_insured_id_a", "label": "60. Insured ID A", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.36, 0.70, 0.59, 0.72], "required": true, "business_key": "insured_id"},
+    {"id": "fl61_group_name_a", "label": "61. Group Name A", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.60, 0.70, 0.77, 0.72], "business_key": "group_name"},
+    {"id": "fl62_group_number_a", "label": "62. Ins Group No A", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.78, 0.70, 0.99, 0.72], "business_key": "group_number"},
+    
+    {"id": "fl63_treatment_auth_a", "label": "63. Treatment Auth", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.01, 0.77, 0.37, 0.79], "business_key": "treatment_auth_code"},
+    {"id": "fl65_employer_name_a", "label": "65. Employer Name", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.38, 0.77, 0.67, 0.79], "business_key": "employer_name"},
+    {"id": "fl66_employer_loc_a", "label": "66. Employer Loc", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.69, 0.77, 0.99, 0.79]},
+    
+    {"id": "fl67_principal_diagnosis", "label": "67. Principal Dx", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.02, 0.81, 0.11, 0.83], "required": true, "business_key": "principal_diagnosis"},
+    {"id": "fl67a_diagnosis_a", "label": "67A. Dx A", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.12, 0.81, 0.20, 0.83], "business_key": "diagnosis_code_2"},
+    {"id": "fl67b_diagnosis_b", "label": "67B. Dx B", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.21, 0.81, 0.30, 0.83], "business_key": "diagnosis_code_3"},
+    {"id": "fl67c_diagnosis_c", "label": "67C. Dx C", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.31, 0.81, 0.39, 0.83], "business_key": "diagnosis_code_4"},
+    {"id": "fl67d_diagnosis_d", "label": "67D. Dx D", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.40, 0.81, 0.49, 0.83]},
+    
+    {"id": "fl69_admitting_diagnosis", "label": "69. Admitting Dx", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.21, 0.815, 0.30, 0.83], "business_key": "admitting_diagnosis"},
+    {"id": "fl70_patient_reason", "label": "70. Patient Reason", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.31, 0.815, 0.39, 0.83]},
+    {"id": "fl71_pps_code", "label": "71. PPS Code", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.31, 0.81, 0.39, 0.83], "business_key": "pps_code"},
+    {"id": "fl72_eci_code", "label": "72. ECI", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.40, 0.81, 0.49, 0.83], "business_key": "eci_code"},
+    
+    {"id": "fl74_principal_procedure", "label": "74. Principal Proc", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.06, 0.84, 0.14, 0.86], "business_key": "principal_procedure"},
+    {"id": "fl74_principal_proc_date", "label": "74. Proc Date", "field_type": "date", "block_type": "form_field", "bbox_norm": [0.20, 0.84, 0.28, 0.86]},
+    {"id": "fl74a_other_procedure_1", "label": "74a. Other Proc 1", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.29, 0.84, 0.36, 0.86]},
+    {"id": "fl74a_other_proc_date_1", "label": "74a. Proc Date 1", "field_type": "date", "block_type": "form_field", "bbox_norm": [0.37, 0.84, 0.46, 0.86]},
+    
+    {"id": "fl76_attending_npi", "label": "76. Attending NPI", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.71, 0.86, 0.83, 0.88], "required": true, "business_key": "attending_npi"},
+    {"id": "fl76_attending_qual", "label": "76. Qual", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.85, 0.86, 0.89, 0.88]},
+    {"id": "fl76_attending_last", "label": "76. Attending Last", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.64, 0.88, 0.82, 0.90], "business_key": "attending_physician_last"},
+    {"id": "fl76_attending_first", "label": "76. Attending First", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.85, 0.88, 0.99, 0.90], "business_key": "attending_physician_first"},
+    
+    {"id": "fl77_operating_npi", "label": "77. Operating NPI", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.71, 0.89, 0.83, 0.91]},
+    {"id": "fl77_operating_last", "label": "77. Operating Last", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.64, 0.91, 0.82, 0.93]},
+    {"id": "fl77_operating_first", "label": "77. Operating First", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.85, 0.91, 0.99, 0.93]},
+    
+    {"id": "fl78_other_npi_1", "label": "78. Other NPI", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.71, 0.92, 0.83, 0.94]},
+    {"id": "fl78_other_last_1", "label": "78. Other Last", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.64, 0.94, 0.82, 0.96]},
+    {"id": "fl78_other_first_1", "label": "78. Other First", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.85, 0.94, 0.99, 0.96]},
+    
+    {"id": "fl79_admitting_dx_code", "label": "79. Admit Dx", "field_type": "code", "block_type": "form_field", "bbox_norm": [0.01, 0.83, 0.03, 0.85], "business_key": "admitting_dx_code"},
+    
+    {"id": "fl80_remarks", "label": "80. Remarks", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.01, 0.94, 0.30, 0.98], "business_key": "remarks"},
+    
+    {"id": "fl81_code_code", "label": "81. CC", "field_type": "text", "block_type": "form_field", "bbox_norm": [0.32, 0.92, 0.46, 0.94]}
   ]
 }

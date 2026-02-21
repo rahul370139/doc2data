@@ -45,6 +45,7 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
+import cv2
 
 # Import existing agents
 from src.pipelines.agentic_cms1500 import (
@@ -187,10 +188,11 @@ class TemplateAlignNode(GraphNode):
 
         H, shape = self.agent.align(state.images[0])
         if H is not None:
-            h, w = state.images[0].shape[:2]
-            state.aligned_image = cv2.warpPerspective(state.images[0], H, (w, h))
+            ref_w, ref_h = int(shape[0]), int(shape[1])
+            state.aligned_image = cv2.warpPerspective(state.images[0], H, (ref_w, ref_h))
             state.alignment_matrix = H
             state.metadata["alignment_success"] = True
+            state.metadata["alignment_size"] = [ref_w, ref_h]
         else:
             state.log("Alignment failed, using original")
             state.aligned_image = state.images[0]

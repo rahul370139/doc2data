@@ -34,12 +34,38 @@ class QwenVLProcessor:
             try:
                 from src.vlm.ollama_client import get_ollama_client
                 self.client = get_ollama_client()
-                self.model = Config.OLLAMA_MODEL_VLM
-                print("✓ VLM processing enabled (Ollama required)")
+                self.model = self._resolve_vlm_model()
+                print(f"✓ VLM processing enabled (model={self.model})")
             except Exception as e:
                 print(f"⚠ VLM enabled but Ollama unavailable: {e}")
                 print("  Continuing with stub (no VLM processing)")
                 self.enabled = False
+
+    def _resolve_vlm_model(self) -> Optional[str]:
+        """
+        Pick a vision-capable model from Ollama if available.
+        Avoid using the same SLM model for VLM tasks.
+        """
+        model = Config.OLLAMA_MODEL_VLM or None
+        if model and model != Config.OLLAMA_MODEL_SLM:
+            return model
+
+        # Fallback: discover a vision model from Ollama tags (no downloads)
+        try:
+            resp = self.client.session.get(f"{Config.get_ollama_url()}/api/tags", timeout=10)
+            if resp.ok:
+                models = resp.json().get("models", [])
+                names = [m.get("name", "") for m in models]
+                vision_hints = ("vl", "vision", "llava", "minicpm", "qwen-vl")
+                for name in names:
+                    lname = name.lower()
+                    if any(h in lname for h in vision_hints) and name != Config.OLLAMA_MODEL_SLM:
+                        return name
+        except Exception:
+            pass
+
+        # If no VLM model is found, keep the configured one (even if same)
+        return Config.OLLAMA_MODEL_VLM
     
     def image_to_base64(self, image: np.ndarray) -> str:
         """

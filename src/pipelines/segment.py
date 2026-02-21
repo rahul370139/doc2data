@@ -95,14 +95,61 @@ def _load_template_schema(template_hint: Optional[str]) -> Optional[Dict[str, An
         return None
     import json
     slug = template_hint.lower()
+    template_candidates = [
+        Config.PROJECT_ROOT / "data" / "templates" / f"{slug}_boxes.json",
+        Config.PROJECT_ROOT / "data" / "templates" / f"{slug.replace('-', '')}_boxes.json",
+    ]
     schema_path = Config.PROJECT_ROOT / "data" / "schemas" / f"{slug}.json"
-    if not schema_path.exists():
-        return None
-    try:
-        with open(schema_path, "r") as f:
-            return json.load(f)
-    except Exception:
-        return None
+
+    payload: Optional[Dict[str, Any]] = None
+    for tp in template_candidates:
+        if not tp.exists():
+            continue
+        try:
+            with open(tp, "r") as f:
+                payload = json.load(f)
+            break
+        except Exception:
+            payload = None
+
+    # Fallback to schema directly.
+    if payload is None:
+        if not schema_path.exists():
+            return None
+        try:
+            with open(schema_path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    # Allow template file to delegate field definitions to source_schema.
+    fields = payload.get("fields", [])
+    if fields:
+        return payload
+
+    source_schema = payload.get("source_schema")
+    if source_schema:
+        source_path = Path(source_schema)
+        if not source_path.is_absolute():
+            source_path = Config.PROJECT_ROOT / source_path
+        if source_path.exists():
+            try:
+                with open(source_path, "r") as f:
+                    source = json.load(f)
+                payload["fields"] = source.get("fields", [])
+                return payload
+            except Exception:
+                pass
+
+    if schema_path.exists():
+        try:
+            with open(schema_path, "r") as f:
+                source = json.load(f)
+            payload["fields"] = source.get("fields", [])
+            return payload
+        except Exception:
+            return payload
+    return payload
 
 
 def _compute_field_score(block: Block) -> float:
@@ -177,8 +224,8 @@ class LayoutSegmenter:
         # Geometry controls
         self.enable_form_geometry: bool = True
         self.geometry_strictness: float = 0.7  # 0..1, higher = stricter
-        # Template alignment controls (disabled by default)
-        self.enable_template_alignment: bool = False
+        # Template alignment controls
+        self.enable_template_alignment: bool = True
         self.template_layouts: Dict[str, Dict[str, Any]] = dict(DEFAULT_TEMPLATE_LAYOUTS)
         self.yolo_detector: Optional[YOLOLayoutDetector] = None
         self._initialize()
@@ -1690,6 +1737,52 @@ class LayoutSegmenter:
                 new_block.metadata["field_score"] = _compute_field_score(new_block)
                 updated.append(new_block)
         return updated
+
+    def _build_template_field_blocks(
+        self,
+        image_shape: Tuple[int, int],
+        page_id: int,
+        template_hint: str,
+    ) -> List[Block]:
+        """
+        Deterministic CMS template path: build field blocks directly from template schema.
+        """
+        schema = _load_template_schema(template_hint)
+        if not schema:
+            return []
+        fields = schema.get("fields", [])
+        if not fields:
+            return []
+
+        width = image_shape[1] if len(image_shape) >= 2 else 1
+        height = image_shape[0] if len(image_shape) >= 2 else 1
+        out: List[Block] = []
+        for idx, field in enumerate(fields):
+            norm_bbox = field.get("bbox") or field.get("bbox_norm")
+            if not norm_bbox or len(norm_bbox) < 4:
+                continue
+            abs_bbox = _norm_to_abs_bbox(norm_bbox, width, height)
+            field_type = str(field.get("field_type", "text")).lower()
+            block_type = BlockType.CHECKBOX if "checkbox" in field_type else BlockType.FORM
+            block = Block(
+                id=f"template_{page_id}_{idx}",
+                type=block_type,
+                bbox=abs_bbox,
+                page_id=page_id,
+                confidence=0.98,
+                metadata={
+                    "detected_by": "template_registration",
+                    "template_hint": template_hint,
+                    "form_field": {
+                        "field_type": field.get("field_type"),
+                        "label_text": field.get("label"),
+                        "schema_id": field.get("id"),
+                    },
+                    "field_score": 1.0,
+                },
+            )
+            out.append(block)
+        return out
     
     def _augment_text_with_heuristic(
         self,
@@ -3684,6 +3777,44 @@ class LayoutSegmenter:
         Returns:
             List of blocks
         """
+        normalized_template_hint = template_hint.lower() if template_hint else None
+
+        # Deterministic template short-circuit for CMS-1500:
+        # when template alignment is enabled, skip ML layout and use canonical field boxes.
+        if (
+            normalized_template_hint in {"cms-1500", "cms1500"}
+            and getattr(self, "enable_template_alignment", False)
+        ):
+            template_blocks = self._build_template_field_blocks(image.shape, page_id, normalized_template_hint)
+            if template_blocks:
+                column_hint = normalized_template_hint
+                if column_hint == "cms1500":
+                    column_hint = "cms-1500"
+                template_columns = compute_template_column_centers(
+                    self.template_layouts,
+                    column_hint,
+                    image.shape[1] if len(image.shape) >= 2 else 0,
+                )
+                assign_columns_to_blocks(
+                    template_blocks,
+                    page_width=image.shape[1] if len(image.shape) >= 2 else 0,
+                    tolerance=0.05,
+                    template_centers=template_columns,
+                )
+                if resolve_order:
+                    template_blocks = self.resolve_reading_order(template_blocks)
+                for i, block in enumerate(template_blocks):
+                    block.id = f"{page_id}-{i}"
+                    block.page_id = page_id
+                    if not block.citations:
+                        block.add_citation(page_id, block.bbox)
+                    block.metadata = block.metadata or {}
+                    block.metadata["overlay_color"] = (
+                        (180, 90, 255) if block.type == BlockType.FORM else (230, 140, 40)
+                    )
+                print(f"  ✅ Template short-circuit: {len(template_blocks)} CMS-1500 field blocks")
+                return template_blocks
+
         # Detect layout with proper threshold (0.3) for quality detection using PubLayNet
         # Ensemble: if GPU and detectron2+paddle available, aggregate both; else single model
         if Config.USE_GPU and not self.use_heuristic and self.table_model:
@@ -3838,7 +3969,6 @@ class LayoutSegmenter:
             block.bbox = tight_bbox
 
         template_columns = None
-        normalized_template_hint = template_hint.lower() if template_hint else None
         if getattr(self, "enable_template_alignment", False) and normalized_template_hint:
             template_columns = self._apply_template_alignment(blocks, image.shape, normalized_template_hint)
 

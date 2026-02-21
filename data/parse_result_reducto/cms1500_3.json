@@ -1,0 +1,305 @@
+{
+  "job_id": "170cda4d-2e72-4590-8291-fbb768ba0ece",
+  "duration": 18.870497941970825,
+  "pdf_url": null,
+  "studio_link": "https://studio.reducto.ai/job/170cda4d-2e72-4590-8291-fbb768ba0ece",
+  "usage": {
+    "num_pages": 1,
+    "credits": 4
+  },
+  "result": {
+    "type": "full",
+    "chunks": [
+      {
+        "content": "Medical Care\nSystem $\\rightarrow$ Doc to Data\nPipeline Agentic\nEnd to End\n\n# HEALTH INSURANCE CLAIM FORM\n\nAPPROVED BY NATIONAL UNIFORM CLAIM COMMITTEE (NUCC) 02/2\n\n☐ PICA\n\n1. MEDICARE\n[ ] (Medicare#)\nMEDICAID\n[x] (Medicaid#)\nTRICARE\n[ ] (ID#/DoD#)\nCHAMPVA\n[ ] (Member ID#)\nGROUP HEALTH PLAN\n[ ] (ID#)\nFECA BLK LUNG\n[ ] (ID#)\nOTHER\n[ ] (ID#)\n\n1a. INSURED'S I.D. NUMBER: ID141-12345\n(For Program in Item 1)\n\n2. PATIENT'S NAME (Last Name, First Name, Middle Initial)\nRonald, Mcdonald\n\n3. PATIENT'S BIRTH DATE\nMM: 05\nDD: 19\nYY: 1945\nSEX\n[x] M\n[ ] F\n\n4. INSURED'S NAME (Last Name, First Name, Middle Initial)\nJackman, Hugh\n\n5. PATIENT'S ADDRESS (No., Street)\n825 Lynn Ogden Lane\nCITY: Beaumont\nSTATE: Tx\nZIP CODE: 77701\nTELEPHONE (Include Area Code): (409-853-3240)\n\n6. PATIENT RELATIONSHIP TO INSURED\n[ ] Self\n[ ] Spouse\n[ ] Child\n[ ] Other\n\n7. INSURED'S ADDRESS (No., Street)\n4740 Hartwick Road\nCITY: College Park\nSTATE: MD\nZIP CODE: 20743\nTELEPHONE (Include Area Code): (240)-667-7223\n\n8. RESERVED FOR NUCC USE: <empty>\n\n9. OTHER INSURED'S NAME (Last Name, First Name, Middle Initial)\nCare Care International\n\n10. IS PATIENT'S CONDITION RELATED TO:\na. EMPLOYMENT? (Current or Previous)\n[x] YES\n[ ] NO\nb. AUTO ACCIDENT?\n[ ] YES\n[x] NO\nPLACE (State): <empty>\nc. OTHER ACCIDENT?\n[ ] YES\n[x] NO\n\n11. INSURED'S POLICY GROUP OR FECA NUMBER: <empty>\n\na. OTHER INSURED'S POLICY OR GROUP NUMBER\n1 OME - 4Q355\na. INSURED'S DATE OF BIRTH\nMM: 01\nDD: 01\nYY: 90\nSEX\n[x] M\n[ ] F\n\nb. RESERVED FOR NUCC USE: <empty>\n\nb. OTHER CLAIM ID (Designated by NUCC)\nIDC3 - 14370\n\nc. RESERVED FOR NUCC USE\nClaim 24x7 Support\n\nc. INSURANCE PLAN NAME OR PROGRAM NAME\nHope you get well soon\n\nd. INSURANCE PLAN NAME OR PROGRAM NAME: <empty>\n\n10d. CLAIM CODES (Designated by NUCC)\nFree 20\n\nd. IS THERE ANOTHER HEALTH BENEFIT PLAN?\n[ ] YES\n[ ] NO\nIf yes, complete items 9, 9a, and 9d.\n\nREAD BACK OF FORM BEFORE COMPLETING & SIGNING THIS FORM.\n12. PATIENT'S OR AUTHORIZED PERSON'S SIGNATURE I authorize the release of any medical or other information necessary to process this claim. I also request payment of government benefits either to myself or to the party who accepts assignment below.\nSIGNED: <signature>\nDATE: 12-10-2025\n\n13. INSURED'S OR AUTHORIZED PERSON'S SIGNATURE I authorize payment of medical benefits to the undersigned physician or supplier for services described below.\nSIGNED: <signature>\n\n14. DATE OF CURRENT ILLNESS, INJURY, or PREGNANCY (LMP):\nMM: 05\nDD: 15\nYY: 1990\nQUAL.: <empty>\n\n15. OTHER DATE:\nQUAL.: <empty>\nMM: <empty>\nDD: <empty>\nYY: <empty>\n\n16. DATES PATIENT UNABLE TO WORK IN CURRENT OCCUPATION:\nFROM MM: 10\nFROM DD: 10\nFROM YY: 2025\nTO MM: 11\nTO DD: 21\nTO YY: 2025\n\n17. NAME OF REFERRING PROVIDER OR OTHER SOURCE: <empty>\n17a. <empty>\n17b. NPI: <empty>\n\n18. HOSPITALIZATION DATES RELATED TO CURRENT SERVICES:\nFROM MM: 11\nFROM DD: 10\nFROM YY: 2025\nTO MM: 11\nTO DD: 18\nTO YY: 2025\n\n19. ADDITIONAL CLAIM INFORMATION (Designated by NUCC): Medical Radiology Imaging 7300 Road\n\n20. OUTSIDE LAB?:\n[x] YES\n[ ] NO\n$ CHARGES: <empty>\n\n21. DIAGNOSIS OR NATURE OF ILLNESS OR INJURY Relate A-L to service line below (24E):\nICD Ind.: <empty>\nA. Serious\nB. Fatigue\nC. Headache\nD. <empty>\nE. <empty>\nF. <empty>\nG. <empty>\nH. <empty>\nI. <empty>\nJ. <empty>\nK. <empty>\nL. <empty>\n\n22. RESUBMISSION CODE: <empty>\nORIGINAL REF. NO.: <empty>\n\n23. PRIOR AUTHORIZATION NUMBER: <empty>\n\n24. A. DATE(S) OF SERVICE\nFrom:\nMM: 08\nDD: 02\nYY: 04\nTo:\nMM: 01\nDD: 01\nYY: 01\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: Bx 890\nMODIFIER: NH\nE. DIAGNOSIS POINTER: A2\nF. $ CHARGES: 2000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99342x47\n\n2\nFrom:\nMM: 09\nDD: 03\nYY: 06\nTo:\nMM: 02\nDD: 10\nYY: 99\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: CY842\nMODIFIER: RR\nE. DIAGNOSIS POINTER: A4\nF. $ CHARGES: 3000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99341x66\n\n3\nFrom:\nMM: 06\nDD: 10\nYY: 02\nTo:\nMM: 03\nDD: 09\nYY: 04\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: KG565\nMODIFIER: MD\nE. DIAGNOSIS POINTER: A6\nF. $ CHARGES: 5000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99341x47\n\n4\nFrom:\nMM: 08\nDD: 10\nYY: 99\nTo:\nMM: 11\nDD: 09\nYY: 20\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: 562233\nMODIFIER: GW\nE. DIAGNOSIS POINTER: B2\nF. $ CHARGES: 6000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99341x48\n\n5\nFrom:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nTo:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: <empty>\nMODIFIER: <empty>\nE. DIAGNOSIS POINTER: <empty>\nF. $ CHARGES: <empty>\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: <empty>\n\n6\nFrom:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nTo:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: <empty>\nMODIFIER: <empty>\nE. DIAGNOSIS POINTER: <empty>\nF. $ CHARGES: <empty>\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: <empty>\n\n25. FEDERAL TAX I.D. NUMBER: 87450678\n[ ] SSN\n[x] EIN\n\n26. PATIENT'S ACCOUNT NO.: 2567136420\n\n27. ACCEPT ASSIGNMENT?\n(For govt. claims, see back)\n[x] YES\n[ ] NO\n\n28. TOTAL CHARGE: $ 16,000 00\n\n29. AMOUNT PAID: $ <empty>\n\n30. Rsvd for NUCC Use: <empty>\n\n31. SIGNATURE OF PHYSICIAN OR SUPPLIER INCLUDING DEGREES OR CREDENTIALS (I certify that the statements on the reverse apply to this bill and are made a part thereof.): <signature>\nSIGNED: <empty>\nDATE: <empty>\n\n32. SERVICE FACILITY LOCATION INFORMATION: <empty>\na. NPI: <empty>\nb. <empty>\n\n33. BILLING PROVIDER INFO & PH #: (417) 222-3344\na. NPI: <empty>\nb. <empty>\n\nPHYSICIAN OR SUPPLIER INFORMATION\n\nPLEASE PRINT OR TYPE\n\nNUCC Instruction Manual available at: www.nucc.org\n\nAPPROVED OMB-0938-1197 FORM 1500 (02-12)\n\nPATIENT AND INSURED INFORMATION",
+        "embed": "Medical Care\nSystem $\\rightarrow$ Doc to Data\nPipeline Agentic\nEnd to End\n\n# HEALTH INSURANCE CLAIM FORM\n\nAPPROVED BY NATIONAL UNIFORM CLAIM COMMITTEE (NUCC) 02/2\n\n☐ PICA\n\n1. MEDICARE\n[ ] (Medicare#)\nMEDICAID\n[x] (Medicaid#)\nTRICARE\n[ ] (ID#/DoD#)\nCHAMPVA\n[ ] (Member ID#)\nGROUP HEALTH PLAN\n[ ] (ID#)\nFECA BLK LUNG\n[ ] (ID#)\nOTHER\n[ ] (ID#)\n\n1a. INSURED'S I.D. NUMBER: ID141-12345\n(For Program in Item 1)\n\n2. PATIENT'S NAME (Last Name, First Name, Middle Initial)\nRonald, Mcdonald\n\n3. PATIENT'S BIRTH DATE\nMM: 05\nDD: 19\nYY: 1945\nSEX\n[x] M\n[ ] F\n\n4. INSURED'S NAME (Last Name, First Name, Middle Initial)\nJackman, Hugh\n\n5. PATIENT'S ADDRESS (No., Street)\n825 Lynn Ogden Lane\nCITY: Beaumont\nSTATE: Tx\nZIP CODE: 77701\nTELEPHONE (Include Area Code): (409-853-3240)\n\n6. PATIENT RELATIONSHIP TO INSURED\n[ ] Self\n[ ] Spouse\n[ ] Child\n[ ] Other\n\n7. INSURED'S ADDRESS (No., Street)\n4740 Hartwick Road\nCITY: College Park\nSTATE: MD\nZIP CODE: 20743\nTELEPHONE (Include Area Code): (240)-667-7223\n\n8. RESERVED FOR NUCC USE: <empty>\n\n9. OTHER INSURED'S NAME (Last Name, First Name, Middle Initial)\nCare Care International\n\n10. IS PATIENT'S CONDITION RELATED TO:\na. EMPLOYMENT? (Current or Previous)\n[x] YES\n[ ] NO\nb. AUTO ACCIDENT?\n[ ] YES\n[x] NO\nPLACE (State): <empty>\nc. OTHER ACCIDENT?\n[ ] YES\n[x] NO\n\n11. INSURED'S POLICY GROUP OR FECA NUMBER: <empty>\n\na. OTHER INSURED'S POLICY OR GROUP NUMBER\n1 OME - 4Q355\na. INSURED'S DATE OF BIRTH\nMM: 01\nDD: 01\nYY: 90\nSEX\n[x] M\n[ ] F\n\nb. RESERVED FOR NUCC USE: <empty>\n\nb. OTHER CLAIM ID (Designated by NUCC)\nIDC3 - 14370\n\nc. RESERVED FOR NUCC USE\nClaim 24x7 Support\n\nc. INSURANCE PLAN NAME OR PROGRAM NAME\nHope you get well soon\n\nd. INSURANCE PLAN NAME OR PROGRAM NAME: <empty>\n\n10d. CLAIM CODES (Designated by NUCC)\nFree 20\n\nd. IS THERE ANOTHER HEALTH BENEFIT PLAN?\n[ ] YES\n[ ] NO\nIf yes, complete items 9, 9a, and 9d.\n\nREAD BACK OF FORM BEFORE COMPLETING & SIGNING THIS FORM.\n12. PATIENT'S OR AUTHORIZED PERSON'S SIGNATURE I authorize the release of any medical or other information necessary to process this claim. I also request payment of government benefits either to myself or to the party who accepts assignment below.\nSIGNED: <signature>\nDATE: 12-10-2025\n\n13. INSURED'S OR AUTHORIZED PERSON'S SIGNATURE I authorize payment of medical benefits to the undersigned physician or supplier for services described below.\nSIGNED: <signature>\n\n14. DATE OF CURRENT ILLNESS, INJURY, or PREGNANCY (LMP):\nMM: 05\nDD: 15\nYY: 1990\nQUAL.: <empty>\n\n15. OTHER DATE:\nQUAL.: <empty>\nMM: <empty>\nDD: <empty>\nYY: <empty>\n\n16. DATES PATIENT UNABLE TO WORK IN CURRENT OCCUPATION:\nFROM MM: 10\nFROM DD: 10\nFROM YY: 2025\nTO MM: 11\nTO DD: 21\nTO YY: 2025\n\n17. NAME OF REFERRING PROVIDER OR OTHER SOURCE: <empty>\n17a. <empty>\n17b. NPI: <empty>\n\n18. HOSPITALIZATION DATES RELATED TO CURRENT SERVICES:\nFROM MM: 11\nFROM DD: 10\nFROM YY: 2025\nTO MM: 11\nTO DD: 18\nTO YY: 2025\n\n19. ADDITIONAL CLAIM INFORMATION (Designated by NUCC): Medical Radiology Imaging 7300 Road\n\n20. OUTSIDE LAB?:\n[x] YES\n[ ] NO\n$ CHARGES: <empty>\n\n21. DIAGNOSIS OR NATURE OF ILLNESS OR INJURY Relate A-L to service line below (24E):\nICD Ind.: <empty>\nA. Serious\nB. Fatigue\nC. Headache\nD. <empty>\nE. <empty>\nF. <empty>\nG. <empty>\nH. <empty>\nI. <empty>\nJ. <empty>\nK. <empty>\nL. <empty>\n\n22. RESUBMISSION CODE: <empty>\nORIGINAL REF. NO.: <empty>\n\n23. PRIOR AUTHORIZATION NUMBER: <empty>\n\n24. A. DATE(S) OF SERVICE\nFrom:\nMM: 08\nDD: 02\nYY: 04\nTo:\nMM: 01\nDD: 01\nYY: 01\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: Bx 890\nMODIFIER: NH\nE. DIAGNOSIS POINTER: A2\nF. $ CHARGES: 2000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99342x47\n\n2\nFrom:\nMM: 09\nDD: 03\nYY: 06\nTo:\nMM: 02\nDD: 10\nYY: 99\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: CY842\nMODIFIER: RR\nE. DIAGNOSIS POINTER: A4\nF. $ CHARGES: 3000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99341x66\n\n3\nFrom:\nMM: 06\nDD: 10\nYY: 02\nTo:\nMM: 03\nDD: 09\nYY: 04\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: KG565\nMODIFIER: MD\nE. DIAGNOSIS POINTER: A6\nF. $ CHARGES: 5000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99341x47\n\n4\nFrom:\nMM: 08\nDD: 10\nYY: 99\nTo:\nMM: 11\nDD: 09\nYY: 20\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: 562233\nMODIFIER: GW\nE. DIAGNOSIS POINTER: B2\nF. $ CHARGES: 6000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99341x48\n\n5\nFrom:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nTo:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: <empty>\nMODIFIER: <empty>\nE. DIAGNOSIS POINTER: <empty>\nF. $ CHARGES: <empty>\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: <empty>\n\n6\nFrom:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nTo:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: <empty>\nMODIFIER: <empty>\nE. DIAGNOSIS POINTER: <empty>\nF. $ CHARGES: <empty>\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: <empty>\n\n25. FEDERAL TAX I.D. NUMBER: 87450678\n[ ] SSN\n[x] EIN\n\n26. PATIENT'S ACCOUNT NO.: 2567136420\n\n27. ACCEPT ASSIGNMENT?\n(For govt. claims, see back)\n[x] YES\n[ ] NO\n\n28. TOTAL CHARGE: $ 16,000 00\n\n29. AMOUNT PAID: $ <empty>\n\n30. Rsvd for NUCC Use: <empty>\n\n31. SIGNATURE OF PHYSICIAN OR SUPPLIER INCLUDING DEGREES OR CREDENTIALS (I certify that the statements on the reverse apply to this bill and are made a part thereof.): <signature>\nSIGNED: <empty>\nDATE: <empty>\n\n32. SERVICE FACILITY LOCATION INFORMATION: <empty>\na. NPI: <empty>\nb. <empty>\n\n33. BILLING PROVIDER INFO & PH #: (417) 222-3344\na. NPI: <empty>\nb. <empty>\n\nPHYSICIAN OR SUPPLIER INFORMATION\n\nPLEASE PRINT OR TYPE\n\nNUCC Instruction Manual available at: www.nucc.org\n\nAPPROVED OMB-0938-1197 FORM 1500 (02-12)\n\nPATIENT AND INSURED INFORMATION",
+        "enriched": "Medical Care\nSystem $\\rightarrow$ Doc to Data\nPipeline Agentic\nEnd to End\n\n# HEALTH INSURANCE CLAIM FORM\n\nAPPROVED BY NATIONAL UNIFORM CLAIM COMMITTEE (NUCC) 02/2\n\n☐ PICA\n\n1. MEDICARE\n[ ] (Medicare#)\nMEDICAID\n[x] (Medicaid#)\nTRICARE\n[ ] (ID#/DoD#)\nCHAMPVA\n[ ] (Member ID#)\nGROUP HEALTH PLAN\n[ ] (ID#)\nFECA BLK LUNG\n[ ] (ID#)\nOTHER\n[ ] (ID#)\n\n1a. INSURED'S I.D. NUMBER: ID141-12345\n(For Program in Item 1)\n\n2. PATIENT'S NAME (Last Name, First Name, Middle Initial)\nRonald, Mcdonald\n\n3. PATIENT'S BIRTH DATE\nMM: 05\nDD: 19\nYY: 1945\nSEX\n[x] M\n[ ] F\n\n4. INSURED'S NAME (Last Name, First Name, Middle Initial)\nJackman, Hugh\n\n5. PATIENT'S ADDRESS (No., Street)\n825 Lynn Ogden Lane\nCITY: Beaumont\nSTATE: Tx\nZIP CODE: 77701\nTELEPHONE (Include Area Code): (409-853-3240)\n\n6. PATIENT RELATIONSHIP TO INSURED\n[ ] Self\n[ ] Spouse\n[ ] Child\n[ ] Other\n\n7. INSURED'S ADDRESS (No., Street)\n4740 Hartwick Road\nCITY: College Park\nSTATE: MD\nZIP CODE: 20743\nTELEPHONE (Include Area Code): (240)-667-7223\n\n8. RESERVED FOR NUCC USE: <empty>\n\n9. OTHER INSURED'S NAME (Last Name, First Name, Middle Initial)\nCare Care International\n\n10. IS PATIENT'S CONDITION RELATED TO:\na. EMPLOYMENT? (Current or Previous)\n[x] YES\n[ ] NO\nb. AUTO ACCIDENT?\n[ ] YES\n[x] NO\nPLACE (State): <empty>\nc. OTHER ACCIDENT?\n[ ] YES\n[x] NO\n\n11. INSURED'S POLICY GROUP OR FECA NUMBER: <empty>\n\na. OTHER INSURED'S POLICY OR GROUP NUMBER\n1 OME - 4Q355\na. INSURED'S DATE OF BIRTH\nMM: 01\nDD: 01\nYY: 90\nSEX\n[x] M\n[ ] F\n\nb. RESERVED FOR NUCC USE: <empty>\n\nb. OTHER CLAIM ID (Designated by NUCC)\nIDC3 - 14370\n\nc. RESERVED FOR NUCC USE\nClaim 24x7 Support\n\nc. INSURANCE PLAN NAME OR PROGRAM NAME\nHope you get well soon\n\nd. INSURANCE PLAN NAME OR PROGRAM NAME: <empty>\n\n10d. CLAIM CODES (Designated by NUCC)\nFree 20\n\nd. IS THERE ANOTHER HEALTH BENEFIT PLAN?\n[ ] YES\n[ ] NO\nIf yes, complete items 9, 9a, and 9d.\n\nREAD BACK OF FORM BEFORE COMPLETING & SIGNING THIS FORM.\n12. PATIENT'S OR AUTHORIZED PERSON'S SIGNATURE I authorize the release of any medical or other information necessary to process this claim. I also request payment of government benefits either to myself or to the party who accepts assignment below.\nSIGNED: <signature>\nDATE: 12-10-2025\n\n13. INSURED'S OR AUTHORIZED PERSON'S SIGNATURE I authorize payment of medical benefits to the undersigned physician or supplier for services described below.\nSIGNED: <signature>\n\n14. DATE OF CURRENT ILLNESS, INJURY, or PREGNANCY (LMP):\nMM: 05\nDD: 15\nYY: 1990\nQUAL.: <empty>\n\n15. OTHER DATE:\nQUAL.: <empty>\nMM: <empty>\nDD: <empty>\nYY: <empty>\n\n16. DATES PATIENT UNABLE TO WORK IN CURRENT OCCUPATION:\nFROM MM: 10\nFROM DD: 10\nFROM YY: 2025\nTO MM: 11\nTO DD: 21\nTO YY: 2025\n\n17. NAME OF REFERRING PROVIDER OR OTHER SOURCE: <empty>\n17a. <empty>\n17b. NPI: <empty>\n\n18. HOSPITALIZATION DATES RELATED TO CURRENT SERVICES:\nFROM MM: 11\nFROM DD: 10\nFROM YY: 2025\nTO MM: 11\nTO DD: 18\nTO YY: 2025\n\n19. ADDITIONAL CLAIM INFORMATION (Designated by NUCC): Medical Radiology Imaging 7300 Road\n\n20. OUTSIDE LAB?:\n[x] YES\n[ ] NO\n$ CHARGES: <empty>\n\n21. DIAGNOSIS OR NATURE OF ILLNESS OR INJURY Relate A-L to service line below (24E):\nICD Ind.: <empty>\nA. Serious\nB. Fatigue\nC. Headache\nD. <empty>\nE. <empty>\nF. <empty>\nG. <empty>\nH. <empty>\nI. <empty>\nJ. <empty>\nK. <empty>\nL. <empty>\n\n22. RESUBMISSION CODE: <empty>\nORIGINAL REF. NO.: <empty>\n\n23. PRIOR AUTHORIZATION NUMBER: <empty>\n\n24. A. DATE(S) OF SERVICE\nFrom:\nMM: 08\nDD: 02\nYY: 04\nTo:\nMM: 01\nDD: 01\nYY: 01\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: Bx 890\nMODIFIER: NH\nE. DIAGNOSIS POINTER: A2\nF. $ CHARGES: 2000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99342x47\n\n2\nFrom:\nMM: 09\nDD: 03\nYY: 06\nTo:\nMM: 02\nDD: 10\nYY: 99\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: CY842\nMODIFIER: RR\nE. DIAGNOSIS POINTER: A4\nF. $ CHARGES: 3000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99341x66\n\n3\nFrom:\nMM: 06\nDD: 10\nYY: 02\nTo:\nMM: 03\nDD: 09\nYY: 04\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: KG565\nMODIFIER: MD\nE. DIAGNOSIS POINTER: A6\nF. $ CHARGES: 5000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99341x47\n\n4\nFrom:\nMM: 08\nDD: 10\nYY: 99\nTo:\nMM: 11\nDD: 09\nYY: 20\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: 562233\nMODIFIER: GW\nE. DIAGNOSIS POINTER: B2\nF. $ CHARGES: 6000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99341x48\n\n5\nFrom:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nTo:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: <empty>\nMODIFIER: <empty>\nE. DIAGNOSIS POINTER: <empty>\nF. $ CHARGES: <empty>\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: <empty>\n\n6\nFrom:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nTo:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: <empty>\nMODIFIER: <empty>\nE. DIAGNOSIS POINTER: <empty>\nF. $ CHARGES: <empty>\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: <empty>\n\n25. FEDERAL TAX I.D. NUMBER: 87450678\n[ ] SSN\n[x] EIN\n\n26. PATIENT'S ACCOUNT NO.: 2567136420\n\n27. ACCEPT ASSIGNMENT?\n(For govt. claims, see back)\n[x] YES\n[ ] NO\n\n28. TOTAL CHARGE: $ 16,000 00\n\n29. AMOUNT PAID: $ <empty>\n\n30. Rsvd for NUCC Use: <empty>\n\n31. SIGNATURE OF PHYSICIAN OR SUPPLIER INCLUDING DEGREES OR CREDENTIALS (I certify that the statements on the reverse apply to this bill and are made a part thereof.): <signature>\nSIGNED: <empty>\nDATE: <empty>\n\n32. SERVICE FACILITY LOCATION INFORMATION: <empty>\na. NPI: <empty>\nb. <empty>\n\n33. BILLING PROVIDER INFO & PH #: (417) 222-3344\na. NPI: <empty>\nb. <empty>\n\nPHYSICIAN OR SUPPLIER INFORMATION\n\nPLEASE PRINT OR TYPE\n\nNUCC Instruction Manual available at: www.nucc.org\n\nAPPROVED OMB-0938-1197 FORM 1500 (02-12)\n\nPATIENT AND INSURED INFORMATION",
+        "enrichment_success": true,
+        "blocks": [
+          {
+            "type": "Figure",
+            "bbox": {
+              "left": 0.041673990307223824,
+              "top": 0.03243087631366984,
+              "width": 0.06139528549266759,
+              "height": 0.04706198183345269,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "",
+            "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/948d4516-c289-4831-9a0f-d75c4567577f.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251218%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251218T073238Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=c023724f1a973f8a23b8094411eb9efd7598f91c3b167297e08d88de3dbe7156",
+            "chart_data": null,
+            "confidence": "high",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.5984455168247224
+            },
+            "extra": null
+          },
+          {
+            "type": "Key Value",
+            "bbox": {
+              "left": 0.5484042420050698,
+              "top": 0,
+              "width": 0.4251580882192519,
+              "height": 0.12433628963228154,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "Medical Care\nSystem $\\rightarrow$ Doc to Data\nPipeline Agentic\nEnd to End",
+            "image_url": null,
+            "chart_data": null,
+            "confidence": "high",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.7905549049377442
+            },
+            "extra": null
+          },
+          {
+            "type": "Title",
+            "bbox": {
+              "left": 0.0414039333649564,
+              "top": 0.08245097426314334,
+              "width": 0.29837694895373085,
+              "height": 0.011934016532017663,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "HEALTH INSURANCE CLAIM FORM",
+            "image_url": null,
+            "chart_data": null,
+            "confidence": "high",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.8629753321409226
+            },
+            "extra": null
+          },
+          {
+            "type": "Text",
+            "bbox": {
+              "left": 0.04151030407994964,
+              "top": 0.10171580889954517,
+              "width": 0.3260865203969371,
+              "height": 0.008152915032312061,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "APPROVED BY NATIONAL UNIFORM CLAIM COMMITTEE (NUCC) 02/2",
+            "image_url": null,
+            "chart_data": null,
+            "confidence": "high",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.7614910274744033
+            },
+            "extra": null
+          },
+          {
+            "type": "Text",
+            "bbox": {
+              "left": 0.04242509223457229,
+              "top": 0.11613517148596987,
+              "width": 0.056365842255533184,
+              "height": 0.011795185596746001,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "☐ PICA",
+            "image_url": null,
+            "chart_data": null,
+            "confidence": "low",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.653816069662571
+            },
+            "extra": null
+          },
+          {
+            "type": "Key Value",
+            "bbox": {
+              "left": 0.04100530973095825,
+              "top": 0.12766703254060774,
+              "width": 0.92529714495745,
+              "height": 0.35926625130936873,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "1. MEDICARE\n[ ] (Medicare#)\nMEDICAID\n[x] (Medicaid#)\nTRICARE\n[ ] (ID#/DoD#)\nCHAMPVA\n[ ] (Member ID#)\nGROUP HEALTH PLAN\n[ ] (ID#)\nFECA BLK LUNG\n[ ] (ID#)\nOTHER\n[ ] (ID#)\n\n1a. INSURED'S I.D. NUMBER: ID141-12345\n(For Program in Item 1)\n\n2. PATIENT'S NAME (Last Name, First Name, Middle Initial)\nRonald, Mcdonald\n\n3. PATIENT'S BIRTH DATE\nMM: 05\nDD: 19\nYY: 1945\nSEX\n[x] M\n[ ] F\n\n4. INSURED'S NAME (Last Name, First Name, Middle Initial)\nJackman, Hugh\n\n5. PATIENT'S ADDRESS (No., Street)\n825 Lynn Ogden Lane\nCITY: Beaumont\nSTATE: Tx\nZIP CODE: 77701\nTELEPHONE (Include Area Code): (409-853-3240)\n\n6. PATIENT RELATIONSHIP TO INSURED\n[ ] Self\n[ ] Spouse\n[ ] Child\n[ ] Other\n\n7. INSURED'S ADDRESS (No., Street)\n4740 Hartwick Road\nCITY: College Park\nSTATE: MD\nZIP CODE: 20743\nTELEPHONE (Include Area Code): (240)-667-7223\n\n8. RESERVED FOR NUCC USE: <empty>\n\n9. OTHER INSURED'S NAME (Last Name, First Name, Middle Initial)\nCare Care International\n\n10. IS PATIENT'S CONDITION RELATED TO:\na. EMPLOYMENT? (Current or Previous)\n[x] YES\n[ ] NO\nb. AUTO ACCIDENT?\n[ ] YES\n[x] NO\nPLACE (State): <empty>\nc. OTHER ACCIDENT?\n[ ] YES\n[x] NO\n\n11. INSURED'S POLICY GROUP OR FECA NUMBER: <empty>\n\na. OTHER INSURED'S POLICY OR GROUP NUMBER\n1 OME - 4Q355\na. INSURED'S DATE OF BIRTH\nMM: 01\nDD: 01\nYY: 90\nSEX\n[x] M\n[ ] F\n\nb. RESERVED FOR NUCC USE: <empty>\n\nb. OTHER CLAIM ID (Designated by NUCC)\nIDC3 - 14370\n\nc. RESERVED FOR NUCC USE\nClaim 24x7 Support\n\nc. INSURANCE PLAN NAME OR PROGRAM NAME\nHope you get well soon\n\nd. INSURANCE PLAN NAME OR PROGRAM NAME: <empty>\n\n10d. CLAIM CODES (Designated by NUCC)\nFree 20\n\nd. IS THERE ANOTHER HEALTH BENEFIT PLAN?\n[ ] YES\n[ ] NO\nIf yes, complete items 9, 9a, and 9d.\n\nREAD BACK OF FORM BEFORE COMPLETING & SIGNING THIS FORM.\n12. PATIENT'S OR AUTHORIZED PERSON'S SIGNATURE I authorize the release of any medical or other information necessary to process this claim. I also request payment of government benefits either to myself or to the party who accepts assignment below.\nSIGNED: <signature>\nDATE: 12-10-2025\n\n13. INSURED'S OR AUTHORIZED PERSON'S SIGNATURE I authorize payment of medical benefits to the undersigned physician or supplier for services described below.\nSIGNED: <signature>",
+            "image_url": null,
+            "chart_data": null,
+            "confidence": "high",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.989650297164917
+            },
+            "extra": null
+          },
+          {
+            "type": "Key Value",
+            "bbox": {
+              "left": 0.04346947981176257,
+              "top": 0.4858574268537743,
+              "width": 0.9215482524275034,
+              "height": 0.15199386941607,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "14. DATE OF CURRENT ILLNESS, INJURY, or PREGNANCY (LMP):\nMM: 05\nDD: 15\nYY: 1990\nQUAL.: <empty>\n\n15. OTHER DATE:\nQUAL.: <empty>\nMM: <empty>\nDD: <empty>\nYY: <empty>\n\n16. DATES PATIENT UNABLE TO WORK IN CURRENT OCCUPATION:\nFROM MM: 10\nFROM DD: 10\nFROM YY: 2025\nTO MM: 11\nTO DD: 21\nTO YY: 2025\n\n17. NAME OF REFERRING PROVIDER OR OTHER SOURCE: <empty>\n17a. <empty>\n17b. NPI: <empty>\n\n18. HOSPITALIZATION DATES RELATED TO CURRENT SERVICES:\nFROM MM: 11\nFROM DD: 10\nFROM YY: 2025\nTO MM: 11\nTO DD: 18\nTO YY: 2025\n\n19. ADDITIONAL CLAIM INFORMATION (Designated by NUCC): Medical Radiology Imaging 7300 Road\n\n20. OUTSIDE LAB?:\n[x] YES\n[ ] NO\n$ CHARGES: <empty>\n\n21. DIAGNOSIS OR NATURE OF ILLNESS OR INJURY Relate A-L to service line below (24E):\nICD Ind.: <empty>\nA. Serious\nB. Fatigue\nC. Headache\nD. <empty>\nE. <empty>\nF. <empty>\nG. <empty>\nH. <empty>\nI. <empty>\nJ. <empty>\nK. <empty>\nL. <empty>\n\n22. RESUBMISSION CODE: <empty>\nORIGINAL REF. NO.: <empty>\n\n23. PRIOR AUTHORIZATION NUMBER: <empty>",
+            "image_url": null,
+            "chart_data": null,
+            "confidence": "high",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.9948011636734009
+            },
+            "extra": null
+          },
+          {
+            "type": "Key Value",
+            "bbox": {
+              "left": 0.03100442303822367,
+              "top": 0.6346206153063932,
+              "width": 0.9361484673701793,
+              "height": 0.20942118566072843,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "24. A. DATE(S) OF SERVICE\nFrom:\nMM: 08\nDD: 02\nYY: 04\nTo:\nMM: 01\nDD: 01\nYY: 01\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: Bx 890\nMODIFIER: NH\nE. DIAGNOSIS POINTER: A2\nF. $ CHARGES: 2000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99342x47\n\n2\nFrom:\nMM: 09\nDD: 03\nYY: 06\nTo:\nMM: 02\nDD: 10\nYY: 99\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: CY842\nMODIFIER: RR\nE. DIAGNOSIS POINTER: A4\nF. $ CHARGES: 3000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99341x66\n\n3\nFrom:\nMM: 06\nDD: 10\nYY: 02\nTo:\nMM: 03\nDD: 09\nYY: 04\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: KG565\nMODIFIER: MD\nE. DIAGNOSIS POINTER: A6\nF. $ CHARGES: 5000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99341x47\n\n4\nFrom:\nMM: 08\nDD: 10\nYY: 99\nTo:\nMM: 11\nDD: 09\nYY: 20\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: 562233\nMODIFIER: GW\nE. DIAGNOSIS POINTER: B2\nF. $ CHARGES: 6000\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: 99341x48\n\n5\nFrom:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nTo:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: <empty>\nMODIFIER: <empty>\nE. DIAGNOSIS POINTER: <empty>\nF. $ CHARGES: <empty>\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: <empty>\n\n6\nFrom:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nTo:\nMM: <empty>\nDD: <empty>\nYY: <empty>\nB. PLACE OF SERVICE: <empty>\nC. EMG: <empty>\nD. PROCEDURES, SERVICES, OR SUPPLIES (Explain Unusual Circumstances)\nCPT/HCPCS: <empty>\nMODIFIER: <empty>\nE. DIAGNOSIS POINTER: <empty>\nF. $ CHARGES: <empty>\nG. DAYS OR UNITS: <empty>\nH. EPSDT Family Plan: <empty>\nI. ID. QUAL.: NPI\nJ. RENDERING PROVIDER ID. #: <empty>",
+            "image_url": null,
+            "chart_data": null,
+            "confidence": "high",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.877388334274292
+            },
+            "extra": null
+          },
+          {
+            "type": "Key Value",
+            "bbox": {
+              "left": 0.04673832466627441,
+              "top": 0.8410664357982697,
+              "width": 0.9222245537529833,
+              "height": 0.11013462146780145,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "25. FEDERAL TAX I.D. NUMBER: 87450678\n[ ] SSN\n[x] EIN\n\n26. PATIENT'S ACCOUNT NO.: 2567136420\n\n27. ACCEPT ASSIGNMENT?\n(For govt. claims, see back)\n[x] YES\n[ ] NO\n\n28. TOTAL CHARGE: $ 16,000 00\n\n29. AMOUNT PAID: $ <empty>\n\n30. Rsvd for NUCC Use: <empty>\n\n31. SIGNATURE OF PHYSICIAN OR SUPPLIER INCLUDING DEGREES OR CREDENTIALS (I certify that the statements on the reverse apply to this bill and are made a part thereof.): <signature>\nSIGNED: <empty>\nDATE: <empty>\n\n32. SERVICE FACILITY LOCATION INFORMATION: <empty>\na. NPI: <empty>\nb. <empty>\n\n33. BILLING PROVIDER INFO & PH #: (417) 222-3344\na. NPI: <empty>\nb. <empty>",
+            "image_url": null,
+            "chart_data": null,
+            "confidence": "high",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.947870421409607
+            },
+            "extra": null
+          },
+          {
+            "type": "Text",
+            "bbox": {
+              "left": 0.9654676148804153,
+              "top": 0.6378101248425806,
+              "width": 0.012846036760215191,
+              "height": 0.1968105523995316,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "PHYSICIAN OR SUPPLIER INFORMATION",
+            "image_url": null,
+            "chart_data": null,
+            "confidence": "high",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.9082832515239716
+            },
+            "extra": null
+          },
+          {
+            "type": "Footer",
+            "bbox": {
+              "left": 0.41845975500859905,
+              "top": 0.9533156870716256,
+              "width": 0.15466302064544293,
+              "height": 0.00824274682114206,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "PLEASE PRINT OR TYPE",
+            "image_url": null,
+            "chart_data": null,
+            "confidence": "high",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.8882527053356171
+            },
+            "extra": null
+          },
+          {
+            "type": "Footer",
+            "bbox": {
+              "left": 0.04787127284790641,
+              "top": 0.9533891858000111,
+              "width": 0.3034082838069961,
+              "height": 0.010014882941652046,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "NUCC Instruction Manual available at: www.nucc.org",
+            "image_url": null,
+            "chart_data": null,
+            "confidence": "high",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.8877222776412963
+            },
+            "extra": null
+          },
+          {
+            "type": "Footer",
+            "bbox": {
+              "left": 0.6772667977178458,
+              "top": 0.949458364672609,
+              "width": 0.2899630253409573,
+              "height": 0.009971328137061421,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "APPROVED OMB-0938-1197 FORM 1500 (02-12)",
+            "image_url": null,
+            "chart_data": null,
+            "confidence": "high",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.8708291918039321
+            },
+            "extra": null
+          },
+          {
+            "type": "Text",
+            "bbox": {
+              "left": 0.9606490214741794,
+              "top": 0.21974388580120838,
+              "width": 0.01699094898285579,
+              "height": 0.18650167451816865,
+              "page": 1,
+              "original_page": 1
+            },
+            "content": "PATIENT AND INSURED INFORMATION",
+            "image_url": null,
+            "chart_data": null,
+            "confidence": "high",
+            "granular_confidence": {
+              "extract_confidence": null,
+              "parse_confidence": 0.8960856348276138
+            },
+            "extra": null
+          }
+        ]
+      }
+    ],
+    "ocr": null,
+    "custom": null
+  }
+}

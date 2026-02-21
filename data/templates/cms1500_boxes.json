@@ -1,0 +1,8 @@
+{
+  "form_type": "cms-1500",
+  "version": "02/12",
+  "description": "Canonical CMS-1500 field boxes in template space.",
+  "source_schema": "data/schemas/cms-1500.json",
+  "notes": "If fields are not embedded here, loader should resolve from source_schema.",
+  "fields": []
+}

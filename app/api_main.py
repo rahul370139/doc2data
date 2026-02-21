@@ -233,6 +233,99 @@ async def extract_cms1500(
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
 
 
+@app.post("/extract/ub04")
+async def extract_ub04(
+    file: UploadFile = File(...),
+    dpi: int = Form(default=300)
+):
+    """
+    Extract data from a UB-04 (CMS-1450) institutional claim form.
+    Uses the Multi-Agent Pipeline with UB-04 specific mapping.
+    
+    Returns:
+        - form_type: "ub-04"
+        - extracted_fields: All UB-04 fields detected
+        - business_fields: Mapped to standard business schema
+        - field_details: Per-field metadata and confidence
+    """
+    try:
+        # Save uploaded file temporarily
+        suffix = Path(file.filename).suffix
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+            
+        # Initialize pipeline
+        global pipeline
+        if pipeline is None:
+            config = PipelineConfig(
+                enable_form_detection=True,
+                enable_alignment=True,
+                enable_trocr=True,
+                enable_slm_labeling=Config.ENABLE_SLM
+            )
+            pipeline = MultiAgentPipeline(config)
+            
+        # Process
+        result = await pipeline.process(tmp_path)
+        
+        # Cleanup
+        Path(tmp_path).unlink(missing_ok=True)
+        
+        # Build response
+        stats = {
+            "total_fields": len(result.get("field_details", [])),
+            "extracted_fields": len(result.get("extracted_fields", {})),
+            "high_confidence_fields": sum(1 for f in result.get("field_details", []) if f.get("confidence", 0) > 0.8),
+            "coverage_percent": result.get("business_coverage", 0.0) * 100
+        }
+        
+        return {
+            "form_type": result.get("form_type", "ub-04"),
+            "extraction_method": result.get("extraction_method", "multi_agent_v2"),
+            "statistics": stats,
+            "extracted_fields": result.get("extracted_fields", {}),
+            "business_fields": result.get("business_fields", {}),
+            "field_details": result.get("field_details", [])
+        }
+    
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"UB-04 extraction failed: {str(e)}")
+
+
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint for load balancers and monitoring.
+    """
+    return {
+        "status": "healthy",
+        "service": "doc2data-api",
+        "version": "2.0.0",
+        "supported_forms": ["cms-1500", "ub-04", "generic"]
+    }
+
+
+@app.get("/schemas")
+async def list_schemas():
+    """
+    List available form schemas.
+    """
+    schemas_dir = Path(__file__).parent.parent / "data" / "schemas"
+    schemas = []
+    if schemas_dir.exists():
+        for f in schemas_dir.glob("*.json"):
+            schemas.append({
+                "id": f.stem,
+                "name": f.stem.upper().replace("-", " "),
+                "file": f.name
+            })
+    return {"schemas": schemas}
+
+
 @app.post("/extract/generic")
 async def extract_generic(
     file: UploadFile = File(...),

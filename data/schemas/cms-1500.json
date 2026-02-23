@@ -2,48 +2,48 @@
   "form_type": "CMS-1500",
   "description": "Health Insurance Claim Form - All 33 boxes with sub-fields",
   "version": "02/12",
-  "notes": "Complete coverage of CMS-1500 form boxes 1-33. Coordinates target data-entry areas only (not red labels). Composite address fields (scan_only) replace individual sub-fields for Lane C scanned forms. No two active fields overlap at runtime.",
+  "notes": "Complete coverage of CMS-1500 form boxes 1-33. Coordinates target data-entry areas only (not red labels). Composite address fields (scan_only) replace individual sub-fields for Lane C scanned forms. No two active fields overlap at runtime. Diagnosis uses combined scan field for robust capture.",
   "fields": [
     {
       "id": "header_top_right_notes",
       "label": "TOP RIGHT NOTES",
       "field_type": "text",
-      "bbox_norm": [0.55, 0.02, 0.96, 0.125],
-      "description": "Top-right header notes (insurance company name/address)"
+      "bbox_norm": [0.54, 0.015, 0.97, 0.150],
+      "description": "Top-right header notes (insurance company name/address) — covers all handwritten lines including bottom"
     },
     {
       "id": "1_insurance_type",
       "label": "INSURANCE TYPE",
       "field_type": "checkbox",
-      "bbox_norm": [0.08, 0.133, 0.60, 0.168],
+      "bbox_norm": [0.07, 0.138, 0.57, 0.166],
       "description": "Box 1: Insurance type checkboxes (Medicare/Medicaid/Tricare/Champva/Group/FECA/Other)"
     },
     {
       "id": "1a_insured_id",
       "label": "INSURED'S I.D. NUMBER",
       "field_type": "text",
-      "bbox_norm": [0.62, 0.170, 0.96, 0.186],
+      "bbox_norm": [0.62, 0.170, 0.96, 0.188],
       "description": "Box 1a: Insured's ID number"
     },
     {
       "id": "2_patient_name",
       "label": "PATIENT'S NAME",
       "field_type": "text",
-      "bbox_norm": [0.08, 0.196, 0.39, 0.213],
+      "bbox_norm": [0.08, 0.196, 0.39, 0.215],
       "description": "Box 2: Patient name (Last, First)"
     },
     {
       "id": "3_patient_dob",
       "label": "PATIENT'S BIRTH DATE",
       "field_type": "date",
-      "bbox_norm": [0.40, 0.198, 0.525, 0.214],
-      "description": "Box 3: Patient DOB (MM DD YY)"
+      "bbox_norm": [0.40, 0.200, 0.52, 0.216],
+      "description": "Box 3: Patient DOB data cells only (avoids sex checkboxes to the right)"
     },
     {
       "id": "3_patient_sex_m",
       "label": "SEX_M",
       "field_type": "checkbox",
-      "bbox_norm": [0.530, 0.199, 0.555, 0.213],
+      "bbox_norm": [0.535, 0.199, 0.560, 0.213],
       "description": "Box 3: Patient sex checkbox (Male)"
     },
     {
@@ -57,7 +57,7 @@
       "id": "4_insured_name",
       "label": "INSURED'S NAME",
       "field_type": "text",
-      "bbox_norm": [0.62, 0.196, 0.96, 0.213],
+      "bbox_norm": [0.62, 0.196, 0.96, 0.215],
       "description": "Box 4: Insured's name (Last, First)"
     },
     {
@@ -65,7 +65,7 @@
       "label": "PATIENT'S ADDRESS",
       "field_type": "text",
       "mode": "digital",
-      "bbox_norm": [0.08, 0.222, 0.39, 0.238],
+      "bbox_norm": [0.08, 0.222, 0.39, 0.240],
       "description": "Box 5: Patient street address"
     },
     {
@@ -73,7 +73,7 @@
       "label": "CITY",
       "field_type": "text",
       "mode": "digital",
-      "bbox_norm": [0.08, 0.250, 0.345, 0.266],
+      "bbox_norm": [0.08, 0.250, 0.300, 0.268],
       "description": "Box 5: Patient city"
     },
     {
@@ -81,7 +81,7 @@
       "label": "STATE",
       "field_type": "text",
       "mode": "digital",
-      "bbox_norm": [0.350, 0.250, 0.39, 0.266],
+      "bbox_norm": [0.350, 0.250, 0.39, 0.268],
       "description": "Box 5: Patient state"
     },
     {
@@ -89,7 +89,7 @@
       "label": "ZIP CODE",
       "field_type": "text",
       "mode": "digital",
-      "bbox_norm": [0.08, 0.280, 0.22, 0.296],
+      "bbox_norm": [0.08, 0.278, 0.20, 0.296],
       "description": "Box 5: Patient ZIP code"
     },
     {
@@ -97,7 +97,7 @@
       "label": "TELEPHONE",
       "field_type": "phone",
       "mode": "digital",
-      "bbox_norm": [0.225, 0.280, 0.39, 0.296],
+      "bbox_norm": [0.22, 0.278, 0.39, 0.296],
       "description": "Box 5: Patient phone number (area + number)"
     },
     {
@@ -112,7 +112,7 @@
       "id": "6_patient_relationship",
       "label": "PATIENT RELATIONSHIP TO INSURED",
       "field_type": "checkbox",
-      "bbox_norm": [0.40, 0.222, 0.615, 0.238],
+      "bbox_norm": [0.40, 0.222, 0.615, 0.240],
       "description": "Box 6: Patient relationship to insured (Self/Spouse/Child/Other)"
     },
     {
@@ -120,7 +120,7 @@
       "label": "INSURED'S ADDRESS",
       "field_type": "text",
       "mode": "digital",
-      "bbox_norm": [0.62, 0.222, 0.96, 0.238],
+      "bbox_norm": [0.62, 0.222, 0.96, 0.240],
       "description": "Box 7: Insured street address"
     },
     {
@@ -128,7 +128,7 @@
       "label": "CITY",
       "field_type": "text",
       "mode": "digital",
-      "bbox_norm": [0.62, 0.250, 0.88, 0.266],
+      "bbox_norm": [0.62, 0.250, 0.84, 0.268],
       "description": "Box 7: Insured city"
     },
     {
@@ -136,7 +136,7 @@
       "label": "STATE",
       "field_type": "text",
       "mode": "digital",
-      "bbox_norm": [0.885, 0.250, 0.96, 0.266],
+      "bbox_norm": [0.885, 0.250, 0.96, 0.268],
       "description": "Box 7: Insured state"
     },
     {
@@ -144,7 +144,7 @@
       "label": "ZIP CODE",
       "field_type": "text",
       "mode": "digital",
-      "bbox_norm": [0.62, 0.280, 0.76, 0.296],
+      "bbox_norm": [0.62, 0.278, 0.74, 0.296],
       "description": "Box 7: Insured ZIP code"
     },
     {
@@ -152,7 +152,7 @@
       "label": "TELEPHONE",
       "field_type": "phone",
       "mode": "digital",
-      "bbox_norm": [0.77, 0.280, 0.96, 0.296],
+      "bbox_norm": [0.77, 0.278, 0.96, 0.296],
       "description": "Box 7: Insured phone number (area + number)"
     },
     {
@@ -175,64 +175,78 @@
       "id": "9_other_insured_name",
       "label": "OTHER INSURED'S NAME",
       "field_type": "text",
-      "bbox_norm": [0.08, 0.306, 0.39, 0.322],
+      "bbox_norm": [0.08, 0.308, 0.39, 0.324],
       "description": "Box 9: Other insured name (Last, First)"
     },
     {
       "id": "9a_other_insured_policy",
       "label": "OTHER INSURED'S POLICY NUMBER",
       "field_type": "text",
-      "bbox_norm": [0.08, 0.332, 0.39, 0.349],
+      "bbox_norm": [0.08, 0.334, 0.39, 0.352],
       "description": "Box 9a: Other insured policy/group number"
+    },
+    {
+      "id": "9b_reserved_nucc_use",
+      "label": "RESERVED FOR NUCC USE (9b)",
+      "field_type": "text",
+      "bbox_norm": [0.08, 0.358, 0.39, 0.376],
+      "description": "Box 9b: Reserved for NUCC use"
+    },
+    {
+      "id": "9c_reserved_nucc_use",
+      "label": "RESERVED FOR NUCC USE (9c)",
+      "field_type": "text",
+      "bbox_norm": [0.08, 0.380, 0.39, 0.400],
+      "description": "Box 9c: Reserved for NUCC use"
     },
     {
       "id": "9d_insurance_plan_name",
       "label": "INSURANCE PLAN NAME (Box 9d)",
       "field_type": "text",
-      "bbox_norm": [0.08, 0.405, 0.39, 0.422],
+      "bbox_norm": [0.08, 0.406, 0.39, 0.424],
       "description": "Box 9d: Insurance plan name or program name"
     },
     {
       "id": "10a_employment",
       "label": "EMPLOYMENT?",
       "field_type": "checkbox",
-      "bbox_norm": [0.40, 0.332, 0.615, 0.349],
+      "bbox_norm": [0.40, 0.334, 0.615, 0.352],
       "description": "Box 10a: Is patient's condition related to employment?"
     },
     {
       "id": "10b_auto_accident",
       "label": "AUTO ACCIDENT?",
       "field_type": "checkbox",
-      "bbox_norm": [0.40, 0.355, 0.615, 0.372],
+      "bbox_norm": [0.40, 0.358, 0.615, 0.376],
       "description": "Box 10b: Is patient's condition related to auto accident?"
     },
     {
       "id": "10c_other_accident",
       "label": "OTHER ACCIDENT?",
       "field_type": "checkbox",
-      "bbox_norm": [0.40, 0.375, 0.615, 0.392],
+      "bbox_norm": [0.40, 0.380, 0.615, 0.400],
       "description": "Box 10c: Is patient's condition related to other accident?"
     },
     {
       "id": "10d_claim_codes",
       "label": "CLAIM CODES",
       "field_type": "text",
-      "bbox_norm": [0.40, 0.405, 0.615, 0.422],
+      "bbox_norm": [0.40, 0.406, 0.615, 0.424],
       "description": "Box 10d: Claim codes (designated by NUCC)"
     },
     {
       "id": "11_insured_policy_group",
       "label": "INSURED'S POLICY GROUP OR FECA NUMBER",
       "field_type": "text",
-      "bbox_norm": [0.62, 0.306, 0.96, 0.322],
+      "bbox_norm": [0.62, 0.308, 0.96, 0.324],
       "description": "Box 11: Insured policy/group/FECA number"
     },
     {
       "id": "11a_insured_dob",
       "label": "INSURED'S DATE OF BIRTH",
       "field_type": "date",
-      "bbox_norm": [0.65, 0.337, 0.78, 0.353],
-      "description": "Box 11a: Insured DOB (MM DD YY)"
+      "bbox_norm": [0.63, 0.338, 0.77, 0.354],
+      "description": "Box 11a: Insured DOB data cells only (narrowed to avoid SEX checkboxes and labels)"
     },
     {
       "id": "11a_insured_sex_m",
@@ -252,140 +266,152 @@
       "id": "11b_other_claim_id",
       "label": "OTHER CLAIM ID",
       "field_type": "text",
-      "bbox_norm": [0.62, 0.355, 0.96, 0.372],
+      "bbox_norm": [0.62, 0.358, 0.96, 0.376],
       "description": "Box 11b: Other claim ID (designated by NUCC)"
     },
     {
       "id": "11c_insurance_plan_name",
       "label": "INSURANCE PLAN NAME",
       "field_type": "text",
-      "bbox_norm": [0.62, 0.387, 0.96, 0.403],
+      "bbox_norm": [0.62, 0.388, 0.96, 0.404],
       "description": "Box 11c: Insurance plan name or program name"
     },
     {
       "id": "11d_another_health_plan",
       "label": "IS THERE ANOTHER HEALTH BENEFIT PLAN?",
       "field_type": "checkbox",
-      "bbox_norm": [0.62, 0.405, 0.96, 0.422],
+      "bbox_norm": [0.62, 0.406, 0.96, 0.424],
       "description": "Box 11d: Is there another health benefit plan?"
     },
     {
       "id": "12_patient_signature",
       "label": "PATIENT SIGNATURE",
       "field_type": "signature",
-      "bbox_norm": [0.13, 0.465, 0.41, 0.482],
-      "description": "Box 12: Patient or authorized person's signature"
+      "bbox_norm": [0.08, 0.455, 0.42, 0.490],
+      "description": "Box 12: Patient or authorized person's signature (full signature line)"
     },
     {
       "id": "12_signature_date",
       "label": "DATE",
       "field_type": "date",
-      "bbox_norm": [0.46, 0.465, 0.615, 0.482],
+      "bbox_norm": [0.44, 0.455, 0.62, 0.490],
       "description": "Box 12: Signature date"
     },
     {
       "id": "13_insured_signature",
       "label": "INSURED'S SIGNATURE",
       "field_type": "signature",
-      "bbox_norm": [0.68, 0.465, 0.96, 0.482],
-      "description": "Box 13: Insured or authorized person's signature"
+      "bbox_norm": [0.64, 0.455, 0.96, 0.490],
+      "description": "Box 13: Insured or authorized person's signature (full signature line)"
     },
     {
       "id": "14_date_of_illness",
       "label": "DATE OF CURRENT ILLNESS/INJURY",
       "field_type": "date",
-      "bbox_norm": [0.08, 0.490, 0.39, 0.507],
+      "bbox_norm": [0.08, 0.500, 0.39, 0.518],
       "description": "Box 14: Date of current illness, injury, or pregnancy (LMP)"
     },
     {
       "id": "16_dates_unable_to_work",
       "label": "DATES PATIENT UNABLE TO WORK",
       "field_type": "text",
-      "bbox_norm": [0.08, 0.509, 0.39, 0.526],
+      "bbox_norm": [0.40, 0.500, 0.62, 0.518],
       "description": "Box 16: Dates patient unable to work in current occupation (FROM/TO)"
     },
     {
       "id": "17_referring_provider",
       "label": "NAME OF REFERRING PROVIDER",
       "field_type": "text",
-      "bbox_norm": [0.40, 0.509, 0.96, 0.526],
+      "bbox_norm": [0.08, 0.520, 0.62, 0.540],
       "description": "Box 17: Name of referring provider or other source"
     },
     {
       "id": "17b_referring_npi",
       "label": "REFERRING PROVIDER NPI",
       "field_type": "npi",
-      "bbox_norm": [0.62, 0.528, 0.96, 0.545],
+      "bbox_norm": [0.40, 0.540, 0.62, 0.556],
       "description": "Box 17b: NPI of referring provider"
     },
     {
       "id": "18_hospitalization_dates",
       "label": "HOSPITALIZATION DATES",
       "field_type": "text",
-      "bbox_norm": [0.08, 0.528, 0.615, 0.545],
+      "bbox_norm": [0.62, 0.500, 0.96, 0.518],
       "description": "Box 18: Hospitalization dates related to current services (FROM/TO)"
     },
     {
       "id": "19_additional_claim_info",
       "label": "ADDITIONAL CLAIM INFORMATION",
       "field_type": "text",
-      "bbox_norm": [0.08, 0.548, 0.615, 0.566],
+      "bbox_norm": [0.08, 0.558, 0.62, 0.576],
       "description": "Box 19: Additional claim information"
     },
     {
       "id": "20_outside_lab",
       "label": "OUTSIDE LAB",
       "field_type": "checkbox",
-      "bbox_norm": [0.64, 0.553, 0.72, 0.567],
+      "bbox_norm": [0.64, 0.558, 0.74, 0.576],
       "description": "Box 20: Outside lab? (Yes/No)"
     },
     {
       "id": "20_charges",
       "label": "$ CHARGES",
       "field_type": "money",
-      "bbox_norm": [0.775, 0.548, 0.885, 0.566],
+      "bbox_norm": [0.80, 0.558, 0.96, 0.576],
       "description": "Box 20: Outside lab charges"
     },
     {
       "id": "21_diagnosis_a",
       "label": "DIAGNOSIS A",
       "field_type": "icd10",
-      "bbox_norm": [0.095, 0.580, 0.18, 0.596],
-      "description": "Box 21: ICD-10 diagnosis code A"
+      "mode": "digital",
+      "bbox_norm": [0.095, 0.582, 0.19, 0.600],
+      "description": "Box 21: ICD-10 diagnosis code A (digital only; scan uses combined field)"
     },
     {
       "id": "21_diagnosis_b",
       "label": "DIAGNOSIS B",
       "field_type": "icd10",
-      "bbox_norm": [0.235, 0.580, 0.32, 0.596],
-      "description": "Box 21: ICD-10 diagnosis code B"
+      "mode": "digital",
+      "bbox_norm": [0.235, 0.582, 0.33, 0.600],
+      "description": "Box 21: ICD-10 diagnosis code B (digital only; scan uses combined field)"
     },
     {
       "id": "21_diagnosis_c",
       "label": "DIAGNOSIS C",
       "field_type": "icd10",
-      "bbox_norm": [0.375, 0.580, 0.46, 0.596],
-      "description": "Box 21: ICD-10 diagnosis code C"
+      "mode": "digital",
+      "bbox_norm": [0.375, 0.582, 0.47, 0.600],
+      "description": "Box 21: ICD-10 diagnosis code C (digital only; scan uses combined field)"
     },
     {
       "id": "21_diagnosis_d",
       "label": "DIAGNOSIS D",
       "field_type": "icd10",
-      "bbox_norm": [0.52, 0.580, 0.605, 0.596],
-      "description": "Box 21: ICD-10 diagnosis code D"
+      "mode": "digital",
+      "bbox_norm": [0.52, 0.582, 0.605, 0.600],
+      "description": "Box 21: ICD-10 diagnosis code D (digital only; scan uses combined field)"
+    },
+    {
+      "id": "21_diagnosis_all",
+      "label": "DIAGNOSIS CODES (A-L)",
+      "field_type": "text",
+      "mode": "scan",
+      "bbox_norm": [0.08, 0.576, 0.62, 0.612],
+      "description": "Box 21: Combined diagnosis area covering all codes A-L for robust scan OCR"
     },
     {
       "id": "22_resubmission_code",
       "label": "RESUBMISSION CODE",
       "field_type": "text",
-      "bbox_norm": [0.08, 0.610, 0.32, 0.628],
+      "bbox_norm": [0.08, 0.614, 0.32, 0.632],
       "description": "Box 22: Resubmission code + original ref no"
     },
     {
       "id": "23_prior_authorization",
       "label": "PRIOR AUTHORIZATION NUMBER",
       "field_type": "text",
-      "bbox_norm": [0.325, 0.610, 0.615, 0.628],
+      "bbox_norm": [0.325, 0.614, 0.615, 0.632],
       "description": "Box 23: Prior authorization number"
     },
     {
@@ -399,56 +425,63 @@
       "id": "25_federal_tax_id",
       "label": "FEDERAL TAX I.D. NUMBER",
       "field_type": "tax_id",
-      "bbox_norm": [0.08, 0.822, 0.25, 0.839],
-      "description": "Box 25: Provider federal tax ID"
+      "bbox_norm": [0.06, 0.820, 0.28, 0.842],
+      "description": "Box 25: Provider federal tax ID — widened to capture all digits"
     },
     {
       "id": "26_patient_account",
       "label": "PATIENT'S ACCOUNT NO.",
       "field_type": "text",
-      "bbox_norm": [0.315, 0.822, 0.48, 0.839],
-      "description": "Box 26: Patient account number"
+      "bbox_norm": [0.28, 0.820, 0.52, 0.842],
+      "description": "Box 26: Patient account number — widened for long account numbers"
     },
     {
       "id": "27_accept_assignment",
       "label": "ACCEPT ASSIGNMENT",
       "field_type": "checkbox",
-      "bbox_norm": [0.485, 0.826, 0.565, 0.840],
+      "bbox_norm": [0.52, 0.824, 0.58, 0.840],
       "description": "Box 27: Accept assignment? (Yes/No)"
     },
     {
       "id": "28_total_charge",
       "label": "TOTAL CHARGE",
       "field_type": "money",
-      "bbox_norm": [0.63, 0.822, 0.745, 0.839],
-      "description": "Box 28: Total charges"
+      "bbox_norm": [0.58, 0.820, 0.78, 0.842],
+      "description": "Box 28: Total charges — widened for dollar amounts"
     },
     {
       "id": "29_amount_paid",
       "label": "AMOUNT PAID",
       "field_type": "money",
-      "bbox_norm": [0.76, 0.822, 0.855, 0.839],
+      "bbox_norm": [0.78, 0.820, 0.89, 0.842],
       "description": "Box 29: Amount paid"
+    },
+    {
+      "id": "30_reserved_nucc_use",
+      "label": "RESERVED FOR NUCC USE (30)",
+      "field_type": "text",
+      "bbox_norm": [0.89, 0.820, 0.965, 0.842],
+      "description": "Box 30: Reserved for NUCC use"
     },
     {
       "id": "31_physician_signature",
       "label": "SIGNATURE OF PHYSICIAN",
       "field_type": "signature",
-      "bbox_norm": [0.08, 0.855, 0.315, 0.890],
+      "bbox_norm": [0.08, 0.855, 0.315, 0.892],
       "description": "Box 31: Physician or supplier signature"
     },
     {
       "id": "32_service_facility_name",
       "label": "SERVICE FACILITY NAME",
       "field_type": "text",
-      "bbox_norm": [0.315, 0.850, 0.615, 0.864],
+      "bbox_norm": [0.315, 0.850, 0.615, 0.866],
       "description": "Box 32: Service facility name"
     },
     {
       "id": "32_service_facility_address",
       "label": "SERVICE FACILITY ADDRESS",
       "field_type": "text",
-      "bbox_norm": [0.315, 0.864, 0.615, 0.878],
+      "bbox_norm": [0.315, 0.866, 0.615, 0.880],
       "description": "Box 32: Service facility address"
     },
     {
@@ -462,21 +495,21 @@
       "id": "33_billing_provider_phone",
       "label": "BILLING PROVIDER PHONE",
       "field_type": "phone",
-      "bbox_norm": [0.80, 0.840, 0.96, 0.853],
-      "description": "Box 33: Billing provider phone (area + number)"
+      "bbox_norm": [0.72, 0.838, 0.965, 0.856],
+      "description": "Box 33: Billing provider phone — widened left to capture area code"
     },
     {
       "id": "33_billing_provider_name",
       "label": "BILLING PROVIDER NAME",
       "field_type": "text",
-      "bbox_norm": [0.62, 0.853, 0.96, 0.866],
+      "bbox_norm": [0.62, 0.856, 0.96, 0.870],
       "description": "Box 33: Billing provider name"
     },
     {
       "id": "33_billing_provider_address",
       "label": "BILLING PROVIDER ADDRESS",
       "field_type": "text",
-      "bbox_norm": [0.62, 0.866, 0.96, 0.880],
+      "bbox_norm": [0.62, 0.870, 0.96, 0.885],
       "description": "Box 33: Billing provider address"
     },
     {

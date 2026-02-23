@@ -1,5 +1,11 @@
 """
 Configuration management for document processing pipeline.
+
+PURPOSE: Single source of truth for env vars (OLLAMA_HOST, USE_GPU, YOLO_MODEL_PATH,
+etc.). Defines PROJECT_ROOT, model paths, cache paths. PipelineConfig uses Config
+for default values.
+
+USE CASE: Import Config when you need model paths, Ollama host, or feature flags.
 """
 import os
 from pathlib import Path
@@ -17,7 +23,7 @@ class Config:
     # Ollama Configuration
     OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "localhost:11434")
     OLLAMA_MODEL_SLM: str = os.getenv("OLLAMA_MODEL_SLM", "llama3.2:3b")  # Fast, good for structured extraction
-    OLLAMA_MODEL_VLM: str = os.getenv("OLLAMA_MODEL_VLM", "llama3.2:3b")  # Fallback to SLM if no VLM
+    OLLAMA_MODEL_VLM: str = os.getenv("OLLAMA_MODEL_VLM", "minicpm-v")  # Vision model for OCR fallback (smaller/faster than llava)
     # SLM/VLM disabled by default - they cause hallucinated garbage text in results
     ENABLE_SLM: bool = os.getenv("ENABLE_SLM", "false").lower() == "true"
     ENABLE_VLM: bool = os.getenv("ENABLE_VLM", "false").lower() == "true"

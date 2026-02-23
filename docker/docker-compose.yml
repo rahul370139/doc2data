@@ -1,0 +1,36 @@
+# Doc2Data Docker Compose
+# Run from project root: docker-compose -f docker/docker-compose.yml up --build
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../cache:/app/cache
+      - ../data:/app/data
+      - ../models/weights:/app/models/weights
+      - ../logs:/app/logs
+    environment:
+      - OLLAMA_HOST=host.docker.internal:11434
+    command: python -m uvicorn app.api_main:app --host 0.0.0.0 --port 8000
+
+  streamlit:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8501:8501"
+    volumes:
+      - ../cache:/app/cache
+      - ../data:/app/data
+      - ../models/weights:/app/models/weights
+      - ../logs:/app/logs
+    environment:
+      - OLLAMA_HOST=host.docker.internal:11434
+    command: streamlit run app/streamlit_main.py --server.port 8501 --server.address 0.0.0.0
+
+  # Note: Ollama should be running separately on the host

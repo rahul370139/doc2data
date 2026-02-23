@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Test script to verify the full pipeline architecture."""
+"""
+Integration test for full pipeline architecture.
+
+PURPOSE: Loads sample PDF, runs MultiAgentPipeline end-to-end, prints results.
+Verifies form ID, layout, OCR, and business fields. Use to confirm pipeline
+works after code changes.
+
+USE CASE: python scripts/test_pipeline.py (run from project root or /app in Docker)
+"""
 
 import sys
 sys.path.insert(0, '/app')

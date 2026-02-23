@@ -78,5 +78,5 @@ wheels/
 .installed.cfg
 *.egg
 
-# Docker (keep docker-compose.yml and Dockerfile)
+# Docker (docker/ folder contains Dockerfile, docker-compose, etc.)
 *.dockerignore

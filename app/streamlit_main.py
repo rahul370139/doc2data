@@ -1,6 +1,13 @@
 """
-Doc2Data - Intelligent Document Extraction
-Production-ready Streamlit UI with dark theme and professional controls.
+Doc2Data - Intelligent Document Extraction (Streamlit UI).
+
+PURPOSE: Web interface for uploading documents, running extraction, and
+viewing results. Supports CMS-1500, UB-04, and generic forms. Configurable
+form type, alignment, SLM/VLM toggles. Displays JSON, business fields,
+and annotated image.
+
+USE CASE: Run with `streamlit run app/streamlit_main.py` for interactive
+demo and manual testing. Primary entry point for non-API users.
 """
 import json
 import sys
@@ -397,13 +404,11 @@ def draw_bounding_boxes(image, fields, highlight_id=None, ocr_blocks=None,
 # Pipeline Functions
 # ============================================================================
 
-@st.cache_resource
-def get_pipeline(pipeline_type: str, config: dict):
-    """Get cached pipeline instance."""
-    if pipeline_type == "multi_agent":
+def run_extraction(file_path: str, config: dict) -> dict:
+    """Run extraction via MultiAgentPipeline."""
+    try:
         from src.pipelines.multi_agent_pipeline import MultiAgentPipeline, PipelineConfig, FormType
         
-        # Parse form type override
         form_type_override = None
         if config.get("form_type"):
             try:
@@ -412,54 +417,22 @@ def get_pipeline(pipeline_type: str, config: dict):
                 pass
         
         pconfig = PipelineConfig(
-            enable_trocr=config.get("enable_trocr", False),  # Disabled - hallucinates
-            enable_slm_labeling=config.get("enable_slm", False),  # Disabled - hallucinates
-            enable_vlm_figures=config.get("enable_vlm", False),  # Disabled
-            enable_slm_field_cleaning=config.get("enable_slm_field_cleaning", False),  # Optional
+            enable_trocr=config.get("enable_trocr", True),
+            enable_vlm_ocr_fallback=config.get("enable_vlm_ocr_fallback", True),
+            vlm_ocr_model=config.get("vlm_ocr_model") or Config.OLLAMA_MODEL_VLM,
+            slm_model=config.get("slm_model") or Config.OLLAMA_MODEL_SLM,
+            vlm_model=config.get("vlm_model") or Config.OLLAMA_MODEL_VLM,
+            enable_slm_labeling=config.get("enable_slm", False),
+            enable_vlm_figures=config.get("enable_vlm", False),
+            enable_slm_field_cleaning=config.get("enable_slm_field_cleaning", False),
             enable_alignment=config.get("enable_alignment", True),
             ocr_confidence_threshold=config.get("confidence_threshold", 0.5),
             handwriting_threshold=config.get("handwriting_threshold", 0.35),
-            zone_padding_px=int(config.get("ocr_padding", 12)),
+            zone_padding_px=int(config.get("ocr_padding", 6)),
             form_type_override=form_type_override
         )
-        return MultiAgentPipeline(pconfig)
-    elif pipeline_type == "cms1500_production":
-        from src.pipelines.cms1500_production import CMS1500ProductionPipeline
-        return CMS1500ProductionPipeline(
-            use_trocr=config.get("enable_trocr", False),  # Disabled - hallucinates
-            use_llm_qa=config.get("enable_llm_qa", False),  # Disabled
-            confidence_threshold=config.get("confidence_threshold", 0.5),
-            handwriting_threshold=config.get("handwriting_threshold", 0.35),
-        )
-    else:
-        # Default form extractor
-        from src.pipelines.form_extractor import extract_with_full_pipeline
-        return extract_with_full_pipeline
-    return None
-
-
-def run_extraction(file_path: str, pipeline_type: str, config: dict) -> dict:
-    """Run extraction pipeline."""
-    try:
-        if pipeline_type == "multi_agent":
-            # Multi-Agent orchestrated pipeline (end-to-end)
-            pipeline = get_pipeline(pipeline_type, config)
-            return pipeline.process_sync(file_path)
-        elif pipeline_type == "agentic":
-            # CMS-1500 Agentic pipeline with template alignment + LLM
-            from src.pipelines.agentic_cms1500 import run_cms1500_agentic
-            return run_cms1500_agentic(
-                file_path,
-                use_icr=config.get("enable_trocr", False),  # Disabled - hallucinates
-                use_llm=config.get("enable_vlm", False),  # Disabled
-                align_template=config.get("enable_alignment", True)
-            )
-        else:
-            # General/Full-page LLM fallback
-            from src.pipelines.form_extractor import extract_with_full_pipeline
-            schema = load_form_schema("cms-1500") if "cms" in file_path.lower() else None
-            return extract_with_full_pipeline(file_path, schema=schema, 
-                                              use_vlm=config.get("enable_vlm", True))
+        pipeline = MultiAgentPipeline(pconfig)
+        return pipeline.process_sync(file_path)
     except Exception as e:
         import traceback
         return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
@@ -586,24 +559,14 @@ def main():
         # Pipeline Selection
         st.markdown('<p class="section-header">⚙️ Pipeline Configuration</p>', unsafe_allow_html=True)
         
-        with st.expander("🎯 **Pipeline Mode**", expanded=True):
-            pipeline_mode = st.selectbox(
-                "Select Pipeline",
-                [
-                    "Multi-Agent (Recommended)",
-                    "CMS-1500 (Agentic)",
-                    "General Pipeline"
-                ],
-                help="Multi-Agent = Full orchestrated pipeline, Agentic = Template + LLM, General = Layout-based"
-            )
-            
+        with st.expander("🧠 **Model Configuration**", expanded=False):
             # Form type detection
             col_form, col_auto = st.columns([2, 1])
             with col_form:
                 form_type_sel = st.selectbox(
                     "Form Type",
                     ["Auto-detect", "CMS-1500", "UB-04", "NCPDP", "Generic"],
-                    help="Manually specify form type or let the system detect"
+                    help="Manually specify form type or let the system auto-detect"
                 )
             with col_auto:
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -614,9 +577,6 @@ def main():
                     badge_class = "form-badge-cms1500" if "CMS" in form_type_sel else "form-badge-generic"
                     st.markdown(f'<span class="form-badge {badge_class}">{form_type_sel}</span>', 
                                unsafe_allow_html=True)
-        
-        # Model Selection
-        with st.expander("🧠 **Model Configuration**", expanded=False):
             col_layout, col_ocr = st.columns(2)
             
             with col_layout:
@@ -634,25 +594,32 @@ def main():
                 )
             
             col_slm, col_vlm = st.columns(2)
+            slm_opts = ["llama3.2:3b", "mistral-small", "mistral:latest", "qwen2.5:7b-instruct", "qwen2.5:3b"]
+            vlm_opts = ["minicpm-v", "llava", "llama3.2-vision", "llama3.2:3b"]
+            slm_default = Config.OLLAMA_MODEL_SLM if Config.OLLAMA_MODEL_SLM in slm_opts else slm_opts[0]
+            vlm_default = Config.OLLAMA_MODEL_VLM if Config.OLLAMA_MODEL_VLM in vlm_opts else vlm_opts[0]
             with col_slm:
                 slm_model = st.selectbox(
                     "SLM Model",
-                    ["llama3.2:3b", "mistral:latest", "qwen2.5:7b-instruct"],
-                    help="Small Language Model for labeling"
+                    slm_opts,
+                    index=slm_opts.index(slm_default),
+                    help="Ollama model for labeling (Mistral Small, Llama 3.2)"
                 )
             with col_vlm:
                 vlm_model = st.selectbox(
-                    "VLM Model",
-                    ["llama3.2:3b", "minicpm-v", "llava"],
-                    help="Vision-Language Model for figures"
+                    "VLM Model (OCR fallback & figures)",
+                    vlm_opts,
+                    index=vlm_opts.index(vlm_default),
+                    help="Ollama vision model — llava/minicpm-v best for handwriting"
                 )
         
         # Feature Toggles
         with st.expander("🔧 **Features**", expanded=False):
             col_f1, col_f2 = st.columns(2)
             with col_f1:
-                # TrOCR DISABLED by default - it hallucinates garbage on blank regions
-                enable_trocr = st.toggle("TrOCR (Handwriting)", value=False, help="Disabled by default - causes hallucinations")
+                # TrOCR-Large: best open-source handwriting OCR (~80% accuracy)
+                enable_trocr = st.toggle("TrOCR (Handwriting)", value=True, help="TrOCR-Large for handwritten text")
+                enable_vlm_ocr = st.toggle("VLM OCR Fallback", value=True, help="Ollama vision model when confidence low")
                 enable_alignment = st.toggle("Template Alignment", value=True)
                 enable_validators = st.toggle("Field Validators", value=True)
             with col_f2:
@@ -660,7 +627,6 @@ def main():
                 enable_slm = st.toggle("SLM Labeling", value=False, help="Disabled by default - can cause hallucinated text")
                 enable_vlm = st.toggle("VLM for Figures", value=False, help="Disabled by default")
                 enable_llm_qa = st.toggle("LLM QA Check", value=False, help="Disabled by default")
-                # SLM field cleaning removed - red template removal makes it unnecessary
         
         # Threshold Tuning
         with st.expander("📊 **Threshold Tuning**", expanded=False):
@@ -687,8 +653,8 @@ def main():
                 
                 ocr_padding = st.slider(
                     "OCR Zone Padding",
-                    0, 30, 10, 2,
-                    help="Padding around OCR zones (px)"
+                    0, 30, 6, 2,
+                    help="Padding around OCR zones (px) — lower = tighter boxes"
                 )
             
             brightness = st.slider(
@@ -713,6 +679,8 @@ def main():
                 # Build config
                 config = {
                     "enable_trocr": enable_trocr,
+                    "enable_vlm_ocr_fallback": enable_vlm_ocr,
+                    "vlm_ocr_model": vlm_model,
                     "enable_alignment": enable_alignment,
                     "enable_validators": enable_validators,
                     "enable_slm": enable_slm,
@@ -727,24 +695,11 @@ def main():
                     "vlm_model": vlm_model,
                 }
                 
-                # Map pipeline mode
-                pipeline_map = {
-                    "Multi-Agent (Recommended)": "multi_agent",
-                    "CMS-1500 (Agentic)": "agentic",
-                    "General Pipeline": "full_page_llm",
-                }
-                pipeline_type = pipeline_map.get(pipeline_mode, "multi_agent")
-                
-                # Auto-detect requires the multi-agent router
-                if form_type_sel == "Auto-detect" and pipeline_type != "multi_agent":
-                    pipeline_type = "multi_agent"
-                
-                # Pass explicit form type if selected
                 if form_type_sel != "Auto-detect":
                     config["form_type"] = form_type_sel.lower().replace(" ", "-")
                 
                 with st.spinner("🔄 Processing..."):
-                    result = run_extraction(file_path, pipeline_type, config)
+                    result = run_extraction(file_path, config)
                     st.session_state.extraction_result = result
                     st.rerun()
         
@@ -752,7 +707,14 @@ def main():
         if st.session_state.extraction_result:
             result = st.session_state.extraction_result
             
-            st.markdown('<p class="section-header">📊 Extraction Results</p>', unsafe_allow_html=True)
+            # Show error if extraction failed
+            if result.get("success") is False:
+                st.error(f"**Extraction failed:** {result.get('error', 'Unknown error')}")
+                if result.get("traceback"):
+                    with st.expander("Technical details"):
+                        st.code(result["traceback"])
+            else:
+                st.markdown('<p class="section-header">📊 Extraction Results</p>', unsafe_allow_html=True)
             
             # Metrics row
             fields = result.get("field_details", [])
@@ -799,8 +761,8 @@ def main():
                         st.json(profile)
             
             # Tabs
-            tab_table, tab_ocr, tab_business, tab_reducto = st.tabs([
-                "📋 Fields", "🔤 OCR JSON", "💼 Business", "📦 Export"
+            tab_table, tab_ocr, tab_business, tab_query, tab_reducto = st.tabs([
+                "📋 Fields", "🔤 OCR JSON", "💼 Business", "🤖 Query", "📦 Export"
             ])
             
             with tab_table:
@@ -859,11 +821,54 @@ def main():
                     st.json(business)
                 else:
                     st.info("Business schema mapping not available for this pipeline")
-            
+
+            with tab_query:
+                st.markdown("**Ask questions about the extracted data** — SLM answers using OCR JSON with source traceability.")
+                raw_fields = result.get("extracted_fields", {})
+                field_details = result.get("field_details", [])
+                form_type = result.get("form_type", "cms-1500")
+
+                col_json, col_chat = st.columns([1, 1])
+                with col_json:
+                    st.caption("OCR JSON (source data)")
+                    display_json = {k: v for k, v in raw_fields.items() if v and str(v).strip()}
+                    st.json(display_json)
+
+                with col_chat:
+                    query_prompt = st.text_area(
+                        "Your question",
+                        placeholder="e.g., What is the patient's name and address? Who is the insured?",
+                        height=80,
+                        key="query_prompt"
+                    )
+                    slm_opts = ["llama3.2:3b", "qwen2.5:3b", "mistral-small", "mistral:latest"]
+                    slm_model = st.selectbox("SLM Model", slm_opts, index=slm_opts.index(Config.OLLAMA_MODEL_SLM) if Config.OLLAMA_MODEL_SLM in slm_opts else 0, key="query_slm")
+                    if st.button("🔍 Ask", type="primary", use_container_width=True):
+                        if not query_prompt or not query_prompt.strip():
+                            st.warning("Enter a question first.")
+                        elif not display_json:
+                            st.warning("No extracted data to query.")
+                        else:
+                            with st.spinner("Querying SLM..."):
+                                try:
+                                    from src.chatbot.ocr_query import query_ocr_slm
+                                    answer, source_ids = query_ocr_slm(
+                                        query_prompt.strip(),
+                                        raw_fields,
+                                        field_details,
+                                        form_type,
+                                        model=slm_model,
+                                    )
+                                    st.markdown("**Answer:**")
+                                    st.markdown(answer)
+                                    if source_ids:
+                                        st.caption(f"Source fields: {', '.join(source_ids)}")
+                                except Exception as e:
+                                    st.error(f"Query failed: {e}")
+
             with tab_reducto:
                 try:
-                    from src.pipelines.reducto_adapter import adapt_result_to_reducto
-                    reducto = adapt_result_to_reducto(result)
+                    reducto = result.get("reducto_format", result)
                     st.json(reducto)
                     st.download_button(
                         "⬇️ Download Reducto JSON",

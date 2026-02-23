@@ -1,7 +1,11 @@
 """
-Doc2Data API Client
+Doc2Data API Client - CLI tool to call Doc2Data REST API.
 
-Usage:
+PURPOSE: Test API from command line. Health check, upload PDF, get extraction
+result. Supports --url, --format (cms1500/ub04).
+
+USE CASE: python scripts/api_client.py document.pdf --url http://host:8000
+"""
     python api_client.py <file_path> [--url API_URL] [--format FORMAT]
     python api_client.py --health [--url API_URL]
     

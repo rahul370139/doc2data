@@ -1,10 +1,11 @@
 """
-Grid-search threshold tuner for CMS-1500 registrar on handwritten failure samples.
+Grid-search threshold tuner for CMS-1500 alignment.
 
-Usage:
-  python3 scripts/tune_cms1500_thresholds.py \
-      --input-dir data/raw/handwritten_failures \
-      --glob "*.pdf"
+PURPOSE: Runs alignment on multiple PDFs with different CMS1500_* threshold
+combinations. Finds best params for handwritten/noisy scans. Prints
+recommended env vars for DGX deployment.
+
+USE CASE: python scripts/tune_cms1500_thresholds.py --input-dir data/sample_docs
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import os
 import cv2
 import numpy as np
 
-from src.pipelines.cms1500_register import CMS1500Registrar
+from src.pipelines.registration import CMS1500Registrar
 
 
 @dataclass

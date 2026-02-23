@@ -33,7 +33,7 @@ cd /home/radiant-dgx2/doc2data
 CONTAINER_NAME="doc2data-server"
 
 echo "🏗️ Building Docker image..."
-docker build -t doc2data-gpu .
+docker build -f docker/Dockerfile -t doc2data-gpu .
 
 echo "🛑 Stopping old container (if running)..."
 docker stop $CONTAINER_NAME 2>/dev/null || true
@@ -63,7 +63,8 @@ docker run --gpus all \
     -e CMS1500_QUAD_MIN_SCORE_HANDWRITTEN=0.34 \
     -e CMS1500_MIN_FEATURE_QUALITY=0.33 \
     -e DISABLE_MODEL_SOURCE_CHECK=true \
-    -e OLLAMA_PULL_ON_START=false \
+    -e OLLAMA_PULL_ON_START=true \
+    -e OLLAMA_MODEL_VLM=minicpm-v \
     --name $CONTAINER_NAME \
     doc2data-gpu
 

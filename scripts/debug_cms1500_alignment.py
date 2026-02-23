@@ -1,8 +1,11 @@
 """
-Debug utility for deterministic CMS-1500 registration.
+Debug utility for CMS-1500 alignment on a single PDF.
 
-Usage:
-  python3 scripts/debug_cms1500_alignment.py --input /path/to/form.pdf
+PURPOSE: Runs cms1500_register on one PDF, prints alignment result (success,
+quality, method). Optionally saves aligned image. Use to diagnose alignment
+failures on specific documents.
+
+USE CASE: python scripts/debug_cms1500_alignment.py --input cms1500.pdf
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ import cv2
 import numpy as np
 
 from utils.config import Config
-from src.pipelines.cms1500_register import get_cms1500_registrar
+from src.pipelines.registration import get_cms1500_registrar
 
 
 def _load_input(path: Path, dpi: int = 300) -> np.ndarray:

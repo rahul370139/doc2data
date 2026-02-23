@@ -1,6 +1,10 @@
 """
-Offline helper to recompute tuned thresholds from data/corrections.jsonl.
-Run: python scripts/recompute_thresholds.py
+Recompute tuned thresholds from user corrections.
+
+PURPOSE: Reads data/corrections.jsonl (user corrections from Streamlit),
+calls auto_tune_thresholds(), prints updated thresholds for data/thresholds.json.
+
+USE CASE: Run after users correct extractions to improve pipeline over time.
 """
 from utils.corrections import auto_tune_thresholds
 

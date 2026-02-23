@@ -1,3 +1,11 @@
+"""
+Grade extraction predictions against gold labels.
+
+PURPOSE: Compares prediction JSONs to gold JSONs. Computes F1 per field and
+overall. Reports mismatches. Use for evaluation and benchmarking.
+
+USE CASE: python scripts/grade_extraction.py --pred pred_dir --gold gold_dir
+"""
 import json
 import argparse
 from pathlib import Path

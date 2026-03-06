@@ -1,288 +1,276 @@
-# Doc2Data — Document-to-Data Pipeline
+# Doc2Data — Document-to-Data Extraction Pipeline
 
-**Version:** 1.2.0 (CMS-1500 Focus)  
-**Status:** ✅ Production-Ready (GPU-Accelerated)  
-**Live Demo:** http://100.126.216.92:8501
+**Implementation snapshot:** March 2026
 
-A production-ready document processing pipeline that converts PDFs and images into structured JSON data. Uses ML models (LayoutParser, TrOCR, Florence-2, Llama VLM) combined with heuristics, SLM/VLM enrichment, and GPU-aware preprocessing for layout detection, OCR, and content classification.
+Doc2Data converts healthcare forms (primarily **CMS-1500** and **UB-04**) from PDF or image into structured JSON:
 
-### What's New in v1.2
+- **extracted_fields** — schema-level field IDs and values
+- **field_details** — confidence, bounding box, source metadata per field
+- **business_fields** — normalized keys for downstream systems
+- **validation** — format and consistency diagnostics
+- **reducto_format** — optional Reducto-style export
 
-- **TrOCR + PaddleOCR** for text fields (pick best result)
-- **85% confidence gate:** Keep if conf >= 85% AND validation passes, else Florence-2 rescue
-- **Date fields → VLM directly** (handwritten dates need context for digit accuracy)
-- **Signatures → "[SIGNED]" only** (no OCR, just ink detection)
-- **Blank fields → no bounding box** (TrOCR hallucination fix for empty fields)
-- **Box 24 tables → Llama 3.2B VLM** with structured JSON prompt
-- **Refined coordinates:** Schema uses manually drawn `bbox_norm_new` for precision
+**Runtime entrypoint:** `src/pipelines/multi_agent_pipeline.py` (`process` / `process_sync`)
 
----
+**Service entrypoints:** `app/api_main.py` (FastAPI), `app/streamlit_main.py` (Streamlit)
 
-## Table of Contents
+## What the pipeline does
 
-- [Quick Start](#-quick-start)
-- [Architecture Overview](#-architecture-overview)
-- [Project Structure](#-project-structure)
-- [Scripts Reference](#-scripts-reference)
-- [Configuration](#-configuration)
-- [Usage](#-usage)
-- [Documentation](#-documentation)
+1. Loads page 1 from PDF/image at rendering resolution (PDF renders at 300 DPI).
+2. Identifies form type (`cms-1500`, `ub-04`, `ncpdp`, `generic`).
+3. Selects extraction path:
+   - Lane A: AcroForm widgets
+   - Lane B: digital text layer + zone matching
+   - Lane C: scan alignment + schema zones + OCR
+4. Runs OCR routing by block type (checkbox/signature/date/text/table).
+5. Runs table extraction for service lines when applicable.
+6. Validates fields (date, phone, NPI, ICD, money, etc.).
+7. Applies conservative targeted VLM rescue only for clearly bad fields.
+8. Maps schema fields to business schema.
+9. Returns full JSON and Reducto-like format.
 
----
+## Current architecture (code-accurate)
 
-## 🚀 Quick Start
-
-### Docker (Recommended)
-
-```bash
-# Build and run (API + Streamlit)
-docker-compose -f docker/docker-compose.yml up --build
-
-# Or build image only
-docker build -f docker/Dockerfile -t doc2data-gpu .
-
-# Run with GPU
-docker run -d --gpus all -p 8501:8501 -p 8000:8000 \
-  -v "$(pwd)/data:/app/data" \
-  -e USE_GPU=true doc2data-gpu
+```text
+Input PDF/Image
+  -> FormIdentificationAgent
+  -> Lane A/B/C selection
+  -> (optional) TemplateAlignmentAgent
+  -> Schema zones or LayoutDetectionAgent fallback
+  -> OCRAgent.process_blocks
+  -> LabelingAgent (tables/figures; optional SLM text labeling)
+  -> ValidationAgent
+  -> business_schema.map_to_business_schema
+  -> Final response + reducto_format
 ```
 
-**Access:** http://localhost:8501 (Streamlit) | http://localhost:8000 (API)
+### Three-lane extraction strategy
 
-### Local Development
+| Lane | Trigger | Method | Notes |
+|---|---|---|---|
+| A (widgets) | Fillable PDF with enough non-empty widgets | `_extract_widgets` + `_map_widgets_to_schema` | Fastest and most reliable. No OCR. |
+| B (digital text) | Digital text layer is present and visually valid | `page.get_text("words")` + `_match_ocr_to_zones` | For CMS-1500, extra anchor QA is enforced before trust. |
+| C (scan OCR) | No trustworthy text layer | Alignment + schema zones + per-field OCR | Default for scanned/handwritten forms. |
+
+## OCR routing summary
+
+| Field/block type | Runtime path |
+|---|---|
+| Checkbox | Fill-ratio detector after template subtraction/diff |
+| Signature | Ink detector only, returns `[SIGNED]` or empty |
+| Date/date_range (CMS) | Florence-2 first, VLM rescue for incomplete/empty-with-content |
+| Text/address/numeric (CMS) | Florence-2-first field pipeline + raw-crop fallback + structural filters |
+| General text (non-CMS) | PaddleOCR -> optional TrOCR -> VLM fallback |
+| Table (CMS Box 24) | VLM table extraction in `LabelingAgent`, with cell-OCR fallback |
+
+Important: blank-field suppression is active; fields marked blank are filtered from visual overlays/details.
+
+## Schemas and field coverage
+
+### CMS-1500 schema (`data/schemas/cms-1500.json`)
+
+- Total fields: **86**
+- Uses `bbox_norm_new` when available (preferred over `bbox_norm`)
+- Includes `mode` (`both`, `digital`, `scan`) for lane-aware field activation
+- Contains checkbox subfields, money fields, date fields, signatures, and Box 24 table region
+
+### UB-04 schema (`data/schemas/ub-04.json`)
+
+- Total fields: **98**
+- Includes `block_type` and optional `business_key`
+- Supports direct widget mapping for fillable UB-04 PDFs plus spatial fallback mapping
+
+## Output contract
+
+Top-level response (typical):
+
+```json
+{
+  "success": true,
+  "form_type": "cms-1500",
+  "extracted_fields": {"2_patient_name": "..."},
+  "field_details": [
+    {
+      "id": "2_patient_name",
+      "value": "...",
+      "confidence": 0.91,
+      "bbox": [x0, y0, x1, y1],
+      "metadata": {"source": "schema_zones", "ocr_engine": "florence2"}
+    }
+  ],
+  "business_fields": {"patient_name": "..."},
+  "validation": {"errors": [], "warnings": [], "qa_notes": []},
+  "debug": {
+    "alignment_used": true,
+    "alignment_success": true,
+    "alignment_quality": 0.88,
+    "digital_text_used": false,
+    "vlm_rescue_count": 1
+  },
+  "reducto_format": {"result": {"chunks": [...]}}
+}
+```
+
+## Quick start
+
+### Local development
 
 ```bash
 git clone https://github.com/rahul370139/doc2data.git
 cd doc2data
 python3.10 -m venv venv
-source venv/bin/activate   # or: venv\Scripts\activate on Windows
+source venv/bin/activate
 pip install -r requirements.txt
 streamlit run app/streamlit_main.py
 ```
 
----
-
-## 🏛 Architecture Overview
-
-```
-PDF/Image → Form ID → [Lane A/B/C] → Layout → OCR → Validation → JSON
-```
-
-| Stage | What Happens |
-|-------|---------------|
-| **Form Identification** | OCR header, match CMS-1500/UB-04 keywords, layout fingerprint |
-| **Lane A** | Fillable PDF → extract AcroForm widgets directly (no OCR) |
-| **Lane B** | Digital PDF → extract embedded text layer, zone matching |
-| **Lane C** | Scanned → align to template, OCR (TrOCR + Florence-2), zone match |
-| **Layout** | Detectron2/YOLOv8 → blocks (text, table, figure, form_field) |
-| **OCR (Text)** | TrOCR + PaddleOCR → if conf < 85% → Florence-2 rescue |
-| **OCR (Date)** | VLM directly (Florence-2 / Ollama) |
-| **OCR (Signature)** | "[SIGNED]" only (no OCR) |
-| **OCR (Table)** | Box 24 → Llama 3.2B VLM directly |
-| **Blank Fields** | Skipped — no bounding box drawn |
-| **Validation** | NPI, date, phone, ICD-10 validators + LLM QA |
-| **Assembly** | Map to business schema (patient_name, diagnosis, etc.) → JSON |
-
-### OCR Flow (v1.2)
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  BLANK      → skip, no bounding box                        │
-│  SIGNATURE  → "[SIGNED]" only (no OCR)                     │
-│  DATE       → VLM directly (Florence-2 / Ollama)           │
-│  TEXT       → TrOCR + PaddleOCR → best result              │
-│               conf >= 85% → KEEP                           │
-│               conf < 85%  → Florence-2 VLM rescue          │
-│  TABLE      → Llama 3.2B VLM (separate route)             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-See [PIPELINE_OVERVIEW.md](documents/PIPELINE_OVERVIEW.md) for detailed flowcharts.
-
----
-
-## 📁 Project Structure
-
-```
-doc2data/
-├── app/                      # Web interfaces
-│   ├── streamlit_main.py     # Streamlit UI (upload, extract, visualize)
-│   └── api_main.py          # FastAPI REST API (/extract, /health)
-│
-├── src/
-│   ├── pipelines/           # Core extraction pipeline
-│   │   ├── multi_agent_pipeline.py   # Main orchestrator (3-lane extraction)
-│   │   ├── core/            # Base types (BaseAgent, FormType, PipelineConfig)
-│   │   ├── agents/          # Pipeline agents
-│   │   │   ├── form_identification.py   # Detects CMS-1500, UB-04, etc.
-│   │   │   ├── template_alignment.py   # Aligns scanned form to template
-│   │   │   ├── layout_detection.py     # YOLO/Detectron2 block detection
-│   │   │   ├── ocr.py                  # TrOCR + Florence-2 VLM rescue
-│   │   │   # (Florence-2 OCR rescue merged into ocr.py)
-│   │   │   ├── labeling.py             # SLM semantic labels + Llama VLM for tables
-│   │   │   # ValidationAgent imported from validators
-│   │   ├── registration/    # CMS-1500 alignment (cms1500_register)
-│   │   ├── validators/      # validation.py: validators + ValidationAgent
-│   │   └── schemas/         # Business schema mapping
-│   │
-│   ├── processing/          # Image preprocessing
-│   │   ├── registration.py # Template loading (delegates to cms1500_register)
-│   │   └── preprocessing.py # Deskew, denoise, red removal
-│   │
-│   └── chatbot/             # Chat/query utilities
-│       └── ocr_query.py
-│
-├── utils/
-│   ├── config.py            # Environment, paths, model config
-│   ├── models.py            # Shared data models
-│   ├── corrections.py       # Correction logging, threshold tuning
-│   └── cache.py             # Caching utilities
-│
-├── scripts/                 # CLI and helper scripts
-│   ├── api_client.py        # Test API from command line
-│   ├── test_pipeline.py     # Full pipeline integration test
-│   ├── grade_extraction.py  # Grade predictions vs gold labels
-│   ├── debug_cms1500_alignment.py  # Debug alignment on a PDF
-│   ├── tune_cms1500_thresholds.py  # Grid search for alignment thresholds
-│   └── recompute_thresholds.py     # Recompute thresholds from corrections
-│
-├── docker/                  # Docker configuration
-│   ├── Dockerfile           # NVIDIA PyTorch base, Detectron2, PaddleOCR
-│   ├── requirements_docker.txt
-│   ├── start_services.sh    # Container entrypoint
-│   └── docker-compose.yml   # API + Streamlit services
-│
-├── data/
-│   ├── sample_docs/         # Sample PDFs for testing
-│   ├── schemas/             # CMS-1500, UB-04 field definitions
-│   ├── gold_labels/         # Ground truth for grading
-│   └── thresholds.json      # Tuned thresholds from corrections
-│
-├── deploy_and_run.sh        # Deploy to DGX via rsync + docker
-├── requirements.txt         # Local Python dependencies
-└── README.md
-```
-
----
-
-## 📜 Scripts Reference
-
-| Script | Purpose | Usage |
-|--------|---------|-------|
-| **api_client.py** | Call Doc2Data API from CLI | `python scripts/api_client.py document.pdf --url http://host:8000` |
-| **test_pipeline.py** | Run full pipeline on sample docs | `python scripts/test_pipeline.py` |
-| **grade_extraction.py** | Grade predictions vs gold JSON | `python scripts/grade_extraction.py --pred pred_dir --gold gold_dir` |
-| **debug_cms1500_alignment.py** | Debug CMS-1500 alignment on a PDF | `python scripts/debug_cms1500_alignment.py --input cms1500.pdf` |
-| **tune_cms1500_thresholds.py** | Grid search for alignment thresholds | `python scripts/tune_cms1500_thresholds.py --input data/sample_docs/` |
-| **recompute_thresholds.py** | Recompute thresholds from corrections.jsonl | `python scripts/recompute_thresholds.py` |
-| **start_api_server.sh** | Start FastAPI server (used in deployment) | `./scripts/start_api_server.sh` |
-
----
-
-## ⚙️ Configuration
-
-### Environment Variables
-
-Create `.env` (see `.env.example`):
+### Docker
 
 ```bash
-# LLM/VLM
-ENABLE_SLM=true
-ENABLE_VLM=true
-OLLAMA_HOST=localhost:11434
-OLLAMA_MODEL_SLM=qwen2.5:7b-instruct
-OLLAMA_MODEL_VLM=minicpm-v
-# OCR fallback model (optional; defaults to OLLAMA_MODEL_VLM if unset)
-# OLLAMA_MODEL_VLM_OCR=openbmb/minicpm-o4.5  # Higher accuracy, ~6GB
-
-# GPU
-USE_GPU=true
-CUDA_VISIBLE_DEVICES=0
-
-# Layout (optional)
-YOLO_MODEL_PATH=runs/detect/cms1500_yolo/weights/best.pt
+docker-compose -f docker/docker-compose.yml up --build
 ```
 
-### Streamlit UI Settings
+Services:
 
-- **Form Type:** CMS-1500, UB-04, or Auto
-- **Enable Alignment:** Template alignment for scanned forms
-- **Enable SLM/VLM:** Semantic labeling and figure understanding (requires Ollama)
-- **TrOCR Confidence Threshold:** TrOCR result kept if >= this (default 85%), else Florence-2 rescue
+- Streamlit UI: `http://localhost:8501`
+- FastAPI: `http://localhost:8000`
+- Swagger: `http://localhost:8000/docs`
 
-### Pipeline Config (v1.2)
+## API endpoints
 
-```python
-PipelineConfig(
-    enable_trocr=True,                    # Use TrOCR for primary OCR
-    trocr_confidence_threshold=0.85,      # Keep TrOCR if >= 85%, else Florence-2 rescue
-    enable_florence2_box24=True,          # Enable Florence-2 for VLM rescue
-    enable_vlm_tables=True,               # Use Llama VLM for table extraction
-)
-```
+Defined in `app/api_main.py`:
 
----
+- `POST /extract/v2`
+- `POST /extract/reducto`
+- `POST /extract/cms1500`
+- `POST /extract/ub04`
+- `POST /extract/generic`
+- `POST /chat/query`
+- `GET /health`
+- `GET /schemas`
 
-## 🔧 Usage
-
-### Streamlit
-
-1. Start: `streamlit run app/streamlit_main.py`
-2. Upload PDF or select sample
-3. Configure form type and options
-4. Run extraction → view JSON, business fields, annotated image
-
-### API
-
-```bash
-# Health check
-curl http://localhost:8000/health
-
-# Extract document
-curl -X POST -F "file=@cms1500.pdf" http://localhost:8000/extract/cms1500
-```
-
-### Python
+## Python usage
 
 ```python
 from src.pipelines.multi_agent_pipeline import MultiAgentPipeline, PipelineConfig
 
-config = PipelineConfig(enable_alignment=True)
+config = PipelineConfig(
+    enable_alignment=True,
+    enable_trocr=True,
+    enable_vlm_ocr_fallback=True,
+)
+
 pipeline = MultiAgentPipeline(config)
-result = pipeline.process_sync("document.pdf")
+result = pipeline.process_sync("data/sample_docs/cms1500.pdf")
 print(result["extracted_fields"])
-print(result["business_fields"])
+print(result.get("business_fields", {}))
 ```
 
----
+## Configuration
 
-## 📚 Documentation
+### Environment variables (`utils/config.py`)
+
+Core:
+
+- `OLLAMA_HOST` (default `localhost:11434`)
+- `OLLAMA_MODEL_SLM` (default `llama3.2:3b`)
+- `VLM_MODEL_RESCUE` (default `minicpm-v`)
+- `VLM_MODEL_TABLE` (default `openbmb/minicpm-o4.5:latest`)
+- `VLM_MODEL_TABLE_FALLBACK` (default `minicpm-v`)
+- `ENABLE_SLM` / `ENABLE_VLM` (both default `false`)
+- `YOLO_MODEL_PATH`, `YOLO_CONFIDENCE`, `YOLO_IOU`
+- `USE_GPU`, `CUDA_VISIBLE_DEVICES`
+
+CMS-1500 registration tuning (used by registrar):
+
+- `CMS1500_TEMPLATE_PATH`
+- `CMS1500_RED_S_MIN`, `CMS1500_RED_V_MIN`, `CMS1500_RED_RATIO_SWITCH`
+- `CMS1500_MATCH_RATIO_DEFAULT`, `CMS1500_MATCH_RATIO_HANDWRITTEN`
+- `CMS1500_MIN_KEYPOINTS_DEFAULT`, `CMS1500_MIN_KEYPOINTS_HANDWRITTEN`
+- `CMS1500_MIN_MATCHES_DEFAULT`, `CMS1500_MIN_MATCHES_HANDWRITTEN`
+- `CMS1500_RANSAC_REPROJ_DEFAULT`, `CMS1500_RANSAC_REPROJ_HANDWRITTEN`
+- `CMS1500_QUAD_MIN_SCORE_DEFAULT`, `CMS1500_QUAD_MIN_SCORE_HANDWRITTEN`
+- `CMS1500_MIN_FEATURE_QUALITY`
+
+### Runtime config (`PipelineConfig`)
+
+Common toggles:
+
+- `enable_form_detection`
+- `form_type_override`
+- `enable_alignment`
+- `layout_model` (`auto`, `detectron2`, `paddle`, `yolo`)
+- `enable_trocr`
+- `ocr_engine_mode`
+- `enable_vlm_ocr_fallback`
+- `zone_padding_px`, `zone_padding_ratio`
+- `enable_slm_labeling`
+- `enable_vlm_figures`
+- `enable_vlm_tables`
+- `enable_validators`
+
+## Key Components
+
+| Component | Script | Role |
+|-----------|--------|------|
+| Orchestrator | `multi_agent_pipeline.py` | Lane selection, alignment, OCR, validation, assembly |
+| Form ID | `form_identification.py` | Detect CMS-1500, UB-04, etc. |
+| Alignment | `template_alignment.py`, `cms1500_register.py` | Align scan to template |
+| OCR | `ocr.py` | Florence-2 primary, raw-crop fallback, blank detection |
+| Tables | `labeling.py` | Box 24 VLM extraction |
+| Validation | `validation.py` | NPI, date, phone, ICD, etc. |
+| Business mapping | `business_schema.py` | Schema ID → business keys |
+
+## Repository structure
+
+```text
+doc2data/
+├── app/
+│   ├── api_main.py
+│   └── streamlit_main.py
+├── src/
+│   ├── pipelines/
+│   │   ├── multi_agent_pipeline.py
+│   │   ├── core/
+│   │   ├── agents/
+│   │   ├── validators/
+│   │   ├── schemas/
+│   │   └── registration/
+│   ├── processing/
+│   └── chatbot/
+├── data/
+│   ├── schemas/
+│   ├── sample_docs/
+│   ├── gold_labels/
+│   └── templates/
+├── scripts/
+├── docker/
+└── utils/
+```
+
+## Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/test_pipeline.py` | End-to-end smoke test |
+| `scripts/grade_extraction.py` | Compare predictions vs gold labels |
+| `scripts/debug_cms1500_alignment.py` | Single-file alignment diagnostics |
+| `scripts/tune_cms1500_thresholds.py` | Registrar threshold grid search |
+| `scripts/recompute_thresholds.py` | Threshold suggestions from corrections log |
+| `scripts/api_client.py` | CLI client for REST endpoints |
+| `deploy_and_run.sh` | DGX deployment (rsync + Docker) |
+
+## Known limitations
+
+- Current pipeline processes **page 1** only.
+- CMS-1500 scan quality still depends heavily on registration quality and handwriting clarity.
+- First run can be slow due to model initialization/warmup.
+- Ollama-dependent features (SLM/VLM) require local model availability.
+
+## Additional Documentation
 
 | Document | Description |
-|----------|--------------|
-| [PIPELINE_OVERVIEW.md](documents/PIPELINE_OVERVIEW.md) | Detailed architecture, every script, methods, models |
-| [SCRUM_REPORT.md](documents/SCRUM_REPORT.md) | Status, roadmap, component inventory |
-| [docker/README.md](docker/README.md) | Docker build and run instructions |
-
----
-
-## 📦 Models
-
-| Purpose | Model |
-|---------|-------|
-| Layout | Detectron2 (PubLayNet), optional YOLOv8 (CMS-1500) |
-| **Primary OCR** | **TrOCR-large + PaddleOCR** |
-| **Text VLM Rescue** | **Florence-2-large (OCR task)** |
-| **Date Field OCR** | **Florence-2 / Ollama VLM (VLM-direct)** |
-| **Table Extraction** | **Llama 3.2B VLM (via Ollama)** |
-| Semantic Labels | Qwen (SLM) via Ollama |
-| Figure Analysis | MiniCPM-V (VLM) via Ollama |
-
-Models auto-download on first run. Florence-2 pre-downloaded on DGX for performance.
-
----
-
-## 📧 Contact
-
-**Repository:** https://github.com/rahul370139/doc2data  
-**Issues:** https://github.com/rahul370139/doc2data/issues
+|---------|-------------|
+| `documents/PIPELINE_OVERVIEW.md` | Architecture, Mermaid diagrams, script-to-function mapping, OCR pipeline details |
+| `documents/SCRUM_REPORT.md` | Structured process flow narrative, component status, risks, and roadmap (for manager review) |
+| `documents/system_prompt.md` | Engineering principles for reliability and traceability |

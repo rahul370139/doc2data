@@ -416,12 +416,41 @@ def run_extraction(file_path: str, config: dict) -> dict:
             except ValueError:
                 pass
         
+        # Map UI layout_model to pipeline values (layout_detection expects: auto, detectron2, paddle, yolo)
+        layout_ui_to_config = {
+            "Auto": "auto",
+            "YOLOv8 (Fine-tuned)": "yolo",
+            "Detectron2 (PubLayNet)": "detectron2",
+            "LayoutLMv3": "auto",  # LayoutLMv3 not yet wired; fallback to auto
+        }
+        layout_model = layout_ui_to_config.get(
+            config.get("layout_model", "Auto"), "auto"
+        )
+
+        # Map UI ocr_model to enable_trocr and ocr_engine_mode
+        ocr_choice = config.get("ocr_model", "Tiered (Paddle+TrOCR)")
+        if ocr_choice in ("PaddleOCR Only", "Tesseract"):
+            enable_trocr = False
+            ocr_engine_mode = "paddle_only"
+        elif ocr_choice == "TrOCR Only":
+            enable_trocr = True
+            ocr_engine_mode = "trocr_only"
+        else:
+            enable_trocr = config.get("enable_trocr", True)
+            ocr_engine_mode = "tiered"
+
+        # Ensure VLM OCR model from UI is used (not env default). OLLAMA_MODEL_VLM_OCR env overrides default.
+        vlm_ocr = config.get("vlm_ocr_model") or config.get("vlm_model") or Config.OLLAMA_MODEL_VLM_OCR
+        vlm_fig = config.get("vlm_model") or Config.OLLAMA_MODEL_VLM
+
         pconfig = PipelineConfig(
-            enable_trocr=config.get("enable_trocr", True),
+            layout_model=layout_model,
+            enable_trocr=config.get("enable_trocr", enable_trocr),
+            ocr_engine_mode=config.get("ocr_engine_mode", ocr_engine_mode),
             enable_vlm_ocr_fallback=config.get("enable_vlm_ocr_fallback", True),
-            vlm_ocr_model=config.get("vlm_ocr_model") or Config.OLLAMA_MODEL_VLM,
+            vlm_ocr_model=vlm_ocr,
             slm_model=config.get("slm_model") or Config.OLLAMA_MODEL_SLM,
-            vlm_model=config.get("vlm_model") or Config.OLLAMA_MODEL_VLM,
+            vlm_model=vlm_fig,
             enable_slm_labeling=config.get("enable_slm", False),
             enable_vlm_figures=config.get("enable_vlm", False),
             enable_slm_field_cleaning=config.get("enable_slm_field_cleaning", False),
@@ -590,14 +619,18 @@ def main():
                 ocr_model = st.selectbox(
                     "OCR Engine",
                     ["Tiered (Paddle+TrOCR)", "PaddleOCR Only", "TrOCR Only", "Tesseract"],
-                    help="OCR engine for text extraction"
+                    help="Tiered: both engines, pick best (recommended). Paddle: printed text. TrOCR: handwriting."
                 )
             
             col_slm, col_vlm = st.columns(2)
             slm_opts = ["llama3.2:3b", "mistral-small", "mistral:latest", "qwen2.5:7b-instruct", "qwen2.5:3b"]
-            vlm_opts = ["minicpm-v", "llava", "llama3.2-vision", "llama3.2:3b"]
+            vlm_opts = ["minicpm-v", "openbmb/minicpm-o4.5", "llava", "llama3.2-vision", "llama3.2:3b"]
             slm_default = Config.OLLAMA_MODEL_SLM if Config.OLLAMA_MODEL_SLM in slm_opts else slm_opts[0]
-            vlm_default = Config.OLLAMA_MODEL_VLM if Config.OLLAMA_MODEL_VLM in vlm_opts else vlm_opts[0]
+            vlm_default = (
+                Config.OLLAMA_MODEL_VLM_OCR if Config.OLLAMA_MODEL_VLM_OCR in vlm_opts
+                else Config.OLLAMA_MODEL_VLM if Config.OLLAMA_MODEL_VLM in vlm_opts
+                else vlm_opts[0]
+            )
             with col_slm:
                 slm_model = st.selectbox(
                     "SLM Model",
@@ -610,6 +643,7 @@ def main():
                     "VLM Model (OCR fallback & figures)",
                     vlm_opts,
                     index=vlm_opts.index(vlm_default),
+                    key="vlm_model_select",
                     help="Ollama vision model — llava/minicpm-v best for handwriting"
                 )
         
@@ -676,8 +710,10 @@ def main():
             if not file_path:
                 st.error("Please select a document first!")
             else:
-                # Build config
+                # Build config (include layout_model and ocr_model so pipeline uses them)
                 config = {
+                    "layout_model": layout_model,
+                    "ocr_model": ocr_model,
                     "enable_trocr": enable_trocr,
                     "enable_vlm_ocr_fallback": enable_vlm_ocr,
                     "vlm_ocr_model": vlm_model,
@@ -727,7 +763,11 @@ def main():
             
             extracted = sum(1 for f in fields if has_value(f.get("value")))
             total = len(fields)
-            confs = [f.get("confidence", 0) for f in fields if has_value(f.get("value"))]
+            confs = [
+                f.get("confidence", 0) for f in fields
+                if has_value(f.get("value"))
+                and "checkbox" not in str(f.get("type", "")).lower()
+            ]
             avg_conf = sum(confs) / len(confs) if confs else 0
             
             col_m1, col_m2, col_m3, col_m4 = st.columns(4)
@@ -742,23 +782,34 @@ def main():
                 proc_time = result.get("processing_time", 0)
                 st.metric("Time", f"{proc_time:.1f}s")
 
-            # Alignment diagnostics (useful for CMS handwritten tuning)
+            # Alignment diagnostics + pipeline config used (verify models took effect)
             dbg = result.get("debug", {}) if isinstance(result, dict) else {}
-            if dbg:
+            cfg = result.get("config", {}) if isinstance(result, dict) else {}
+            if dbg or cfg:
                 with st.expander("🧭 Alignment Diagnostics", expanded=False):
-                    c1, c2, c3 = st.columns(3)
-                    with c1:
-                        st.caption("Method")
-                        st.code(str(dbg.get("alignment_method", "n/a")))
-                    with c2:
-                        st.caption("Quality")
-                        st.code(str(round(float(dbg.get("alignment_quality", 0.0)), 4)))
-                    with c3:
-                        st.caption("Success")
-                        st.code(str(bool(dbg.get("alignment_success", False))))
-                    profile = dbg.get("alignment_profile")
-                    if profile:
-                        st.json(profile)
+                    if cfg:
+                        st.caption("Pipeline config used")
+                        st.code(f"VLM OCR: {cfg.get('vlm_ocr_model', 'n/a')} | TrOCR: {cfg.get('enable_trocr')} | VLM fallback: {cfg.get('enable_vlm_ocr_fallback')}")
+                    if dbg:
+                        vlm_esc = dbg.get("vlm_escalation_count", 0)
+                        vlm_rescue = dbg.get("vlm_rescue_count", 0)
+                        if vlm_esc is not None or vlm_rescue is not None:
+                            st.caption("VLM usage")
+                            st.code(f"OCR phase: {vlm_esc} fields escalated | Rescue: {vlm_rescue} fields")
+                    if dbg:
+                        c1, c2, c3 = st.columns(3)
+                        with c1:
+                            st.caption("Method")
+                            st.code(str(dbg.get("alignment_method", "n/a")))
+                        with c2:
+                            st.caption("Quality")
+                            st.code(str(round(float(dbg.get("alignment_quality", 0.0)), 4)))
+                        with c3:
+                            st.caption("Success")
+                            st.code(str(bool(dbg.get("alignment_success", False))))
+                        profile = dbg.get("alignment_profile")
+                        if profile:
+                            st.json(profile)
             
             # Tabs
             tab_table, tab_ocr, tab_business, tab_query, tab_reducto = st.tabs([
@@ -769,11 +820,17 @@ def main():
                 df_data = []
                 for f in fields:
                     conf = f.get("confidence", 0)
+                    meta = f.get("metadata", {})
+                    source = (
+                        meta.get("ocr_engine")
+                        or meta.get("source")
+                        or f.get("detected_by", "")
+                    ) or "unknown"
                     df_data.append({
                         "Field": f.get("label", f.get("id", "")),
                         "Value": f.get("value", ""),
                         "Confidence": conf,
-                        "Source": f.get("metadata", {}).get("ocr_engine", f.get("source", ""))
+                        "Source": source
                     })
                 
                 if df_data:

@@ -245,36 +245,70 @@ def preprocess_image(
 
 def remove_red_template_text(image: np.ndarray) -> np.ndarray:
     """
-    Safe red removal for CMS-1500 per-field crops.
-    
-    Designed to be safe on small crops where handwriting may touch red grid lines.
-    Rules:
-    - HSV only, high saturation (S >= 70) to catch only true dropout reds
-    - NO low-saturation ranges (would catch brown ink, shadows, paper yellowing)
-    - NO RGB dominance check (would catch warm-toned handwriting)
-    - NO dilation (would eat into adjacent handwriting strokes)
-    - Never binarize — preserve grayscale strokes for OCR
-    - Only whiten strongly-red pixels, leave everything else untouched
+    Adaptive red removal for CMS-1500 per-field crops.
+
+    Scanned/compressed PDFs often desaturate the CMS-1500 dropout-red so it
+    falls below a fixed HSV saturation threshold.  This version uses two
+    complementary color-space strategies so muted reds are caught too.
+
+    Strategy 1 — LAB 'a' channel:
+        The 'a' axis encodes red-vs-green independent of lightness.  Template
+        red sits at a > ~138 (out of 255, where 128 = neutral).  Robust to
+        JPEG compression and scanner colour-profile shifts.
+    Strategy 2 — HSV with *relaxed* saturation (S >= 35 instead of 70):
+        Catches any remaining vivid reds.  The lower threshold is safe because
+        dark ink is excluded by the brightness guard below.
+    Safety guards:
+        1. Pixels darker than gray=100 are NEVER removed — protects faded
+           handwriting, gray pencil, and light-blue ink (gray 80-120 range).
+        2. Canny edge strokes are NEVER removed — structural text contours
+           are preserved regardless of their color, preventing accidental
+           erasure of handwriting that overlaps red detection thresholds.
+    Rules preserved from the original:
+        - NO dilation (would eat adjacent handwriting strokes)
+        - Never binarise — preserve grayscale strokes for OCR
     """
     img = image.copy()
     if img.ndim == 2:
         return img
-    
+
+    # --- Strategy 1: LAB colour space (most robust for muted scans) --------
+    lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+    a_ch = lab[:, :, 1]
+    l_ch = lab[:, :, 0]
+    lab_red = (a_ch > 133) & (l_ch > 55)
+
+    # --- Strategy 2: HSV with relaxed saturation ---------------------------
     hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
-    
-    # Only strongly saturated reds (S >= 70). This catches the CMS-1500
-    # dropout-red ink but NOT dark handwriting, brown ink, or scan artifacts.
-    # Red hue wraps around 0/180 in OpenCV HSV.
-    mask1 = cv2.inRange(hsv, np.array([0, 70, 50], dtype=np.uint8),
-                              np.array([12, 255, 255], dtype=np.uint8))
-    mask2 = cv2.inRange(hsv, np.array([168, 70, 50], dtype=np.uint8),
-                              np.array([180, 255, 255], dtype=np.uint8))
-    red_mask = cv2.bitwise_or(mask1, mask2)
-    
-    # NO dilation — do not expand mask into adjacent handwriting
-    # NO binarization — keep original pixel values for non-red areas
-    
-    img[red_mask > 0] = [255, 255, 255]
+    m1 = cv2.inRange(hsv, np.array([0,  25, 45], dtype=np.uint8),
+                           np.array([15, 255, 255], dtype=np.uint8))
+    m2 = cv2.inRange(hsv, np.array([165, 25, 45], dtype=np.uint8),
+                           np.array([180, 255, 255], dtype=np.uint8))
+    hsv_red = (cv2.bitwise_or(m1, m2) > 0)
+
+    # --- Strategy 3: Pinkish/light-red that scanners produce ───────────────
+    pink_red = (a_ch > 130) & (l_ch > 100)
+
+    # --- Combine & safety guards -------------------------------------------
+    combined = lab_red | hsv_red | pink_red
+
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+
+    # Guard 1: Protect ALL dark-ish pixels.  Raised from 70 → 100 because
+    # faded handwriting, gray pencil, and light-blue ink sit at gray 80-120
+    # and were being erased.
+    combined[gray < 100] = False
+
+    # Guard 2: Edge-based text stroke protection.  Canny detects structural
+    # contours (pen strokes).  Any pixel that is part of a text stroke is
+    # preserved, even if its colour looks "red" to the detectors above.
+    edges = cv2.Canny(gray, 40, 120)
+    stroke_mask = cv2.dilate(
+        edges, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1
+    )
+    combined[stroke_mask > 0] = False
+
+    img[combined] = [255, 255, 255]
     return img
 
 

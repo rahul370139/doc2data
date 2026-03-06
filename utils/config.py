@@ -23,7 +23,15 @@ class Config:
     # Ollama Configuration
     OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "localhost:11434")
     OLLAMA_MODEL_SLM: str = os.getenv("OLLAMA_MODEL_SLM", "llama3.2:3b")  # Fast, good for structured extraction
-    OLLAMA_MODEL_VLM: str = os.getenv("OLLAMA_MODEL_VLM", "minicpm-v")  # Vision model for OCR fallback (smaller/faster than llava)
+    # VLM model routing — Florence-2 is primary for all field OCR.
+    # VLM (Ollama) is rescue-only: fires when Florence-2 confidence < threshold.
+    VLM_MODEL_RESCUE: str = os.getenv("VLM_MODEL_RESCUE", "minicpm-v")   # 5.5GB — text/date/number rescue
+    VLM_MODEL_TABLE: str = os.getenv("VLM_MODEL_TABLE", "openbmb/minicpm-o4.5:latest")  # 6.1GB — best table extraction
+    VLM_MODEL_TABLE_FALLBACK: str = os.getenv("VLM_MODEL_TABLE_FALLBACK", "minicpm-v")  # 5.5GB — table fallback
+
+    # Legacy aliases — kept for backward compat with streamlit UI / models.py
+    OLLAMA_MODEL_VLM: str = os.getenv("OLLAMA_MODEL_VLM", VLM_MODEL_RESCUE)
+    OLLAMA_MODEL_VLM_OCR: str = OLLAMA_MODEL_VLM
     # SLM/VLM disabled by default - they cause hallucinated garbage text in results
     ENABLE_SLM: bool = os.getenv("ENABLE_SLM", "false").lower() == "true"
     ENABLE_VLM: bool = os.getenv("ENABLE_VLM", "false").lower() == "true"

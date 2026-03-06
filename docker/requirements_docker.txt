@@ -19,6 +19,7 @@ pytesseract>=0.3.10
 # LLM/VLM (Ollama client)
 ollama>=0.1.0
 requests>=2.31.0
+aiohttp>=3.9.0  # Async HTTP client for parallel VLM calls
 
 # Table processing
 transformers>=4.30.0

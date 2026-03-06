@@ -87,13 +87,16 @@ class PipelineConfig:
     yolo_confidence: float = 0.25
     detectron_threshold: float = 0.30
 
-    # OCR
+    # OCR (v1.3: multi-engine consensus — PaddleOCR + TrOCR + Florence-2 + VLM rescue)
     enable_trocr: bool = True
+    ocr_engine_mode: str = "consensus"  # "consensus" | "trocr_only"
     trocr_model: str = "large"
+    trocr_confidence_threshold: float = 0.85  # TrOCR fallback threshold
     ocr_confidence_threshold: float = 0.5
     handwriting_threshold: float = 0.35
-    enable_vlm_ocr_fallback: bool = True
-    vlm_ocr_model: str = field(default_factory=lambda: Config.OLLAMA_MODEL_VLM)
+    enable_vlm_ocr_fallback: bool = True  # Enable VLM for all text fields
+    vlm_ocr_model: str = field(default_factory=lambda: Config.OLLAMA_MODEL_VLM_OCR)
+    vlm_parallel_calls: int = 8  # Max concurrent VLM calls for parallel processing
     zone_padding_px: int = 6
     zone_padding_ratio: float = 0.08
 

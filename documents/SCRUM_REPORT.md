@@ -100,7 +100,7 @@ CMS-1500 extraction now uses a **priority-based 3-lane strategy**:
 | `src/pipelines/multi_agent_pipeline.py` | Streamlit (default), FastAPI `/extract/*` | End-to-end orchestrator: form ID → (CMS align + schema zones) or (general layout) → OCR → optional SLM/VLM labeling → validation → business mapping → Reducto export. |
 | `src/processing/registration.py` | Multi-Agent, Agentic CMS | Reference template loading and homography utilities used for template alignment + zone projection. |
 | `src/processing/preprocessing.py` | Multi-Agent, ingest | Deskew/denoise/contrast + CMS helpers (`remove_form_lines`, `extract_ink_by_subtraction`). |
-| `src/ocr/paddle_ocr.py` | Multi-Agent, Agentic CMS, legacy OCR | PaddleOCR wrapper (PaddleX-compatible) returning word boxes with bboxes + confidences. |
+| `src/pipelines/agents/ocr.py` | Multi-Agent, Agentic CMS | PaddleOCRWrapper + OCRAgent (PaddleX-compatible word boxes; tiered TrOCR/VLM pipeline). |
 | `src/pipelines/business_schema.py` | Multi-Agent, Agentic CMS | Maps schema-level field IDs → business keys; applies validators + normalization. |
 | `src/pipelines/validators.py` | Multi-Agent, business_schema, legacy OCR | Regex-based validators/normalizers (NPI/ICD/date/phone/zip/money/member_id). |
 | `utils/config.py` | All | Central config (paths, model settings, toggles). |
@@ -112,7 +112,7 @@ CMS-1500 extraction now uses a **priority-based 3-lane strategy**:
 |------|---------|----------------|
 | `src/pipelines/agentic_cms1500.py` | Streamlit “CMS-1500 (Agentic)” | CMS-specific pipeline (registration → zones → OCR → optional LLM extraction). |
 | `src/pipelines/cms1500_production.py` | Multi-Agent **optional flag** (off by default) | Production-style per-field extraction with ink subtraction + validators. Currently **disabled by default** in Multi-Agent because per-field crop OCR is brittle on scans; kept for experimentation. |
-| `src/ocr/trocr_wrapper.py` | Agentic CMS, `cms1500_production.py` | TrOCR handwriting OCR wrapper for harder handwritten fields/signatures. |
+| `src/pipelines/agents/ocr.py` (TrOCR) | Agentic CMS, `cms1500_production.py` | TrOCR handwriting OCR for handwritten fields/signatures (inside OCRAgent). |
 | `src/pipelines/form_extractor.py` | Streamlit “General Pipeline”, graph prototype | LLM extraction using OCR text context + grounding heuristic back to OCR boxes. |
 | `src/pipelines/reducto_adapter.py` | Streamlit export tab | Adapts our result JSON to a Reducto-like JSON structure. |
 
@@ -459,11 +459,10 @@ doc2data/
 ├── src/
 │   ├── pipelines/
 │   │   ├── multi_agent_pipeline.py  # Core extraction logic
-│   │   └── business_schema.py       # Schema mapping
-│   ├── processing/
-│   │   └── preprocessing.py         # Image enhancement
-│   └── ocr/
-│       └── paddle_ocr.py            # PaddleOCR wrapper
+│   │   ├── business_schema.py       # Schema mapping
+│   │   └── agents/ocr.py            # PaddleOCR + OCRAgent(TrOCR)
+│   └── processing/
+│       └── preprocessing.py        # Image enhancement
 ├── data/
 │   ├── schemas/cms-1500.json        # Field definitions
 │   └── sample_docs/                 # Test documents

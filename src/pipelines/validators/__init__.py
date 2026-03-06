@@ -1,5 +1,6 @@
-"""Field validators and normalizers for forms pipeline."""
-from src.pipelines.validators.field_validators import (
+"""Field validators and ValidationAgent — single validation module."""
+from src.pipelines.validators.validation import (
+    ValidationAgent,
     validate_field,
     guess_field_type,
     FIELD_VALIDATORS,
@@ -19,6 +20,7 @@ from src.pipelines.validators.field_validators import (
 )
 
 __all__ = [
+    "ValidationAgent",
     "validate_field",
     "guess_field_type",
     "FIELD_VALIDATORS",

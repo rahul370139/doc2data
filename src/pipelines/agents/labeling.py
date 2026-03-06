@@ -85,31 +85,49 @@ class LabelingAgent(BaseAgent):
             self.log(f"SLM call failed: {e}")
         return ""
     
-    def _call_vlm(self, prompt: str, image: np.ndarray) -> str:
-        """Call VLM via Ollama with image."""
+    @property
+    def VLM_TABLE_MODEL(self):
+        return Config.VLM_MODEL_TABLE
+
+    @property
+    def VLM_TABLE_FALLBACK(self):
+        return Config.VLM_MODEL_TABLE_FALLBACK
+
+    def _call_vlm(self, prompt: str, image: np.ndarray, max_tokens: int = 500,
+                   timeout: int = 180, model: str = "", temperature: float = 0.1) -> str:
+        """Call VLM via Ollama with image. ``model`` overrides config default."""
+        if not self._ollama_available:
+            self.log("VLM skipped: Ollama has no models")
+            return ""
         try:
             import requests
             import base64
-            
-            # Encode image
-            _, buffer = cv2.imencode('.jpg', image)
+
+            use_model = model or self.config.vlm_model
+
+            if image.ndim == 3 and image.shape[2] == 3:
+                bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            else:
+                bgr = image
+            _, buffer = cv2.imencode('.jpg', bgr)
             img_base64 = base64.b64encode(buffer).decode('utf-8')
-            
+
+            self.log(f"VLM call: model={use_model}, max_tokens={max_tokens}, timeout={timeout}, temp={temperature}")
             response = requests.post(
                 f"http://{Config.OLLAMA_HOST}/api/generate",
                 json={
-                    "model": self.config.vlm_model,
+                    "model": use_model,
                     "prompt": prompt,
                     "images": [img_base64],
                     "stream": False,
-                    "options": {"temperature": 0.1, "num_predict": 500}
+                    "options": {"temperature": temperature, "num_predict": max_tokens}
                 },
-                timeout=60
+                timeout=timeout,
             )
             if response.ok:
                 return response.json().get("response", "")
         except Exception as e:
-            self.log(f"VLM call failed: {e}")
+            self.log(f"VLM call failed ({model or 'default'}): {e}")
         return ""
     
     def clean_cms1500_field_with_slm(
@@ -292,82 +310,205 @@ Respond in JSON format:
         return block
     
     async def process_table(self, image: np.ndarray, block: DetectedBlock) -> Dict[str, Any]:
-        """Process table block using VLM for structured extraction.
-        
-        For CMS-1500 service lines (Box 24), extract:
-        - Date of service (FROM/TO)
-        - Place of service
-        - EMG
-        - CPT/HCPCS codes
-        - Diagnosis pointer
-        - Charges
-        - Days/Units
-        - NPI
+        """Process table block: VLM for Box 24 service lines extraction.
+
+        Box 24 goes DIRECTLY to VLM (minicpm-v / llava) with a structured
+        extraction prompt.  Florence-2 only supports fixed task prompts like
+        ``<OCR>`` — it cannot do structured table extraction.  Florence-2 is
+        used elsewhere for text-field OCR rescue only.
         """
         h, w = image.shape[:2]
         x0, y0, x1, y1 = [int(v) for v in block.bbox]
         x0, y0 = max(0, x0), max(0, y0)
         x1, y1 = min(w, x1), min(h, y1)
         crop = image[y0:y1, x0:x1]
-        
+
         table_data = {
             "type": "table",
             "bbox": block.bbox,
             "rows": [],
-            "raw_text": block.text
+            "raw_text": block.text,
         }
-        
-        # Use VLM for table extraction (more accurate for handwritten forms)
-        use_vlm = getattr(self.config, 'enable_vlm_tables', True) or self.config.enable_vlm_figures
-        if use_vlm and crop.size > 0:
-            prompt = """Extract service line data from this CMS-1500 form table (Box 24).
-For each row, extract:
-- date_from: MM/DD/YY format
-- date_to: MM/DD/YY format  
-- place_of_service: 2-digit code
-- cpt_code: 5-digit procedure code
-- modifier: optional modifier codes
-- diagnosis_pointer: letter A-L
-- charges: dollar amount
-- days_units: number of units
-- npi: 10-digit provider number
 
-Return as JSON array of objects, one per service line. Only include rows with actual data."""
-            
+        if crop.size == 0:
+            table_data["extraction_method"] = "skipped_empty_crop"
+            return table_data
+
+        try:
+            from src.processing.preprocessing import remove_red_template_text
+            clean_crop = remove_red_template_text(crop)
+        except Exception:
+            clean_crop = crop
+
+        # Upscale small table crops for better VLM accuracy
+        ch, cw = clean_crop.shape[:2]
+        if ch < 400 or cw < 800:
+            scale = max(2, min(3, 800 // max(1, cw)))
+            clean_crop = cv2.resize(clean_crop, (cw * scale, ch * scale), interpolation=cv2.INTER_CUBIC)
+            self.log(f"Table crop upscaled {scale}x to {clean_crop.shape[1]}x{clean_crop.shape[0]}")
+
+        # ── Box 24 → VLM directly (minicpm-v understands custom prompts) ──
+        is_box24 = "service_lines" in (block.id or "")
+
+        if is_box24:
+            self.log("Table Box 24 → VLM direct (structured extraction)")
+            prompt = """You are reading a CMS-1500 Box 24 service lines table from a medical claim form.
+The table has 6 numbered rows on the left. Some rows have handwritten data, others are blank.
+
+For EACH row that has handwritten data, output one line in this exact format:
+ROW | date_from | date_to | place | CPT_code | modifier | charges | units | rendering_NPI
+
+Column guide:
+- ROW: row number (1-6)
+- date_from, date_to: MM/DD/YY
+- place: 2-digit place of service code
+- CPT_code: 5-character CPT/HCPCS code (e.g., 99213, H2557, V5259)
+- modifier: modifier code if present, else empty
+- charges: dollar amount (e.g., 83.40)
+- units: days or units count
+- rendering_NPI: 10-digit NPI number on the far right
+
+RULES:
+- Read ONLY rows with actual handwritten data. Skip blank rows.
+- Read the exact values written — do not guess, invent, or repeat rows.
+- Output ONLY pipe-separated data lines. No headers, no commentary, no markdown."""
             try:
-                response = self._call_vlm(prompt, crop)
+                resp_primary = self._call_vlm(
+                    prompt, clean_crop, max_tokens=2000, timeout=300,
+                    model=self.VLM_TABLE_MODEL, temperature=0.0,
+                )
+                primary_lines = len([l for l in (resp_primary or '').strip().split('\n') if '|' in l]) if resp_primary else 0
+                self.log(f"Primary VLM ({self.VLM_TABLE_MODEL}): {primary_lines} pipe-rows, {len(resp_primary or '')} chars")
+
+                resp_fallback = self._call_vlm(
+                    prompt, clean_crop, max_tokens=2000, timeout=300,
+                    model=self.VLM_TABLE_FALLBACK, temperature=0.0,
+                )
+                fallback_lines = len([l for l in (resp_fallback or '').strip().split('\n') if '|' in l]) if resp_fallback else 0
+                self.log(f"Fallback VLM ({self.VLM_TABLE_FALLBACK}): {fallback_lines} pipe-rows, {len(resp_fallback or '')} chars")
+
+                if fallback_lines > primary_lines:
+                    self.log(f"Using fallback ({fallback_lines} > {primary_lines} rows)")
+                    response = resp_fallback
+                else:
+                    response = resp_primary
+                self.log(f"VLM Box 24 raw response ({len(response) if response else 0} chars): {(response or '')[:300]}")
                 if response:
-                    # Try to parse JSON from response
-                    import re
-                    json_match = re.search(r'\[[\s\S]*\]', response)
+                    json_match = re.search(r'\[[\s\S]*?\]', response)
                     if json_match:
-                        rows = json.loads(json_match.group())
-                        table_data["rows"] = rows
-                        table_data["extraction_method"] = "vlm"
-                    else:
-                        table_data["vlm_response"] = response
-                        table_data["extraction_method"] = "vlm_text"
+                        try:
+                            rows = json.loads(json_match.group())
+                            if rows and isinstance(rows, list):
+                                table_data["rows"] = rows
+                                table_data["extraction_method"] = "vlm_direct"
+                        except json.JSONDecodeError:
+                            pass
+
+                    if not table_data["rows"]:
+                        parsed_rows = []
+                        for line in response.strip().split('\n'):
+                            line = line.strip()
+                            if not line or line.startswith('#') or 'example' in line.lower() or 'row' in line.lower()[:4] and 'date' in line.lower():
+                                continue
+                            parts = [p.strip() for p in line.split('|')]
+                            if len(parts) >= 4 and any(c.isdigit() for c in line):
+                                offset = 0
+                                if len(parts) >= 8 and parts[0].strip().isdigit():
+                                    offset = 1
+                                row = {
+                                    "date_from": parts[offset] if len(parts) > offset else "",
+                                    "date_to": parts[offset + 1] if len(parts) > offset + 1 else "",
+                                    "place_of_service": parts[offset + 2] if len(parts) > offset + 2 else "",
+                                    "cpt_code": parts[offset + 3] if len(parts) > offset + 3 else "",
+                                    "modifier": parts[offset + 4] if len(parts) > offset + 4 else "",
+                                    "charges": parts[offset + 5] if len(parts) > offset + 5 else "",
+                                    "units": parts[offset + 6] if len(parts) > offset + 6 else "",
+                                    "npi": parts[offset + 7] if len(parts) > offset + 7 else "",
+                                }
+                                parsed_rows.append(row)
+                        if parsed_rows:
+                            table_data["rows"] = parsed_rows
+                            table_data["extraction_method"] = "vlm_direct_parsed"
+
+                    if table_data["rows"]:
+                        seen = set()
+                        unique_rows = []
+                        for r in table_data["rows"]:
+                            cpt = re.sub(r'\s+', '', str(r.get("cpt_code", ""))).upper()
+                            chg = re.sub(r'[^\d.]', '', str(r.get("charges", "")))
+                            key = (cpt, chg)
+                            if key not in seen and cpt:
+                                seen.add(key)
+                                unique_rows.append(r)
+                        if len(unique_rows) < len(table_data["rows"]):
+                            self.log(f"Deduped {len(table_data['rows'])} → {len(unique_rows)} rows")
+                        table_data["rows"] = unique_rows
+                        table_data["total_rows"] = len(unique_rows)
+                        parts = []
+                        for r in unique_rows:
+                            p = []
+                            if r.get("date_from"):
+                                p.append(str(r["date_from"]))
+                            if r.get("date_to"):
+                                p.append(str(r["date_to"]))
+                            if r.get("place_of_service"):
+                                p.append(str(r["place_of_service"]))
+                            if r.get("cpt_code"):
+                                p.append(str(r["cpt_code"]))
+                            if r.get("modifier"):
+                                p.append(str(r["modifier"]))
+                            if r.get("charges"):
+                                p.append(f"${r.get('charges', '')}")
+                            if r.get("units"):
+                                p.append(f"{r.get('units', '')} units")
+                            if r.get("npi"):
+                                p.append(str(r["npi"]))
+                            if p:
+                                parts.append(" | ".join(p))
+                        table_data["summary"] = "\n".join(parts)
+                        self.log(f"VLM extracted {len(unique_rows)} service line rows")
             except Exception as e:
                 table_data["vlm_error"] = str(e)
+                self.log(f"VLM table extraction failed: {e}")
         
-        # Fallback: use OCR text + SLM parsing
+        # ── Fallback for non-Box24 tables or when VLM fails: SLM parsing ────
         if not table_data["rows"] and self.config.enable_slm_labeling and block.text:
-            prompt = f"""Parse CMS-1500 service line data from this OCR text:
-"{block.text}"
+            prompt = f"""Extract structured table data from this OCR text of a medical claim form.
+The text represents service line entries from a table. Parse every distinct row.
 
-Extract each service line with: date_from, date_to, place_of_service, cpt_code, charges, days_units.
-Return as JSON array."""
-            
+OCR text:
+\"\"\"
+{block.text}
+\"\"\"
+
+For each row, extract these fields (leave empty if not found):
+- date_from: service start date (MM/DD/YY)
+- date_to: service end date (MM/DD/YY)
+- place_of_service: 2-digit code
+- cpt_code: CPT/HCPCS procedure code
+- modifier: modifier code if any
+- charges: dollar amount
+- units: days or units
+- npi: rendering provider NPI (10 digits)
+
+Return ONLY a JSON array of objects. No explanation.
+Example: [{{"date_from":"09/20/12","date_to":"09/20/12","place_of_service":"12","cpt_code":"99213","modifier":"","charges":"150.00","units":"1","npi":"1234567890"}}]"""
+
             try:
                 response = self._call_slm(prompt)
                 if response:
-                    import re
-                    json_match = re.search(r'\[[\s\S]*\]', response)
+                    json_match = re.search(r'\[[\s\S]*?\]', response)
                     if json_match:
-                        table_data["rows"] = json.loads(json_match.group())
-                        table_data["extraction_method"] = "slm"
-            except:
+                        rows = json.loads(json_match.group())
+                        if isinstance(rows, list):
+                            table_data["rows"] = rows
+                            table_data["extraction_method"] = "slm_fallback"
+                            table_data["total_rows"] = len(rows)
+            except Exception:
                 pass
+        
+        if not table_data.get("total_rows") and table_data.get("rows"):
+            table_data["total_rows"] = len(table_data["rows"])
         
         return table_data
     

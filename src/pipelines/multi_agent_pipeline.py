@@ -247,6 +247,19 @@ class MultiAgentPipeline:
         self.labeling_agent = LabelingAgent(self.config)
         self.validation_agent = ValidationAgent(self.config)
         self._template_word_blacklist: Dict[str, set] = {}
+        self._shared_paddle = None
+        self._pipeline_template_rgb: Optional[np.ndarray] = None
+
+    async def _get_shared_paddle(self):
+        """Return shared PaddleOCR instance (avoids 30-60s re-init per use)."""
+        if self._shared_paddle is not None:
+            return self._shared_paddle
+        await self.ocr_agent.initialize()
+        self._shared_paddle = self.ocr_agent._paddle
+        if self._shared_paddle is None:
+            from src.pipelines.agents.ocr import PaddleOCRWrapper
+            self._shared_paddle = PaddleOCRWrapper()
+        return self._shared_paddle
 
     # ──────────────────────────────────────────────────────────────────
     # LANE A: AcroForm widget extraction (highest accuracy for fillable PDFs)
@@ -1103,7 +1116,7 @@ class MultiAgentPipeline:
             words = set(self._CMS1500_TEMPLATE_WORDS)
             try:
                 from src.processing.registration import load_and_process_reference
-                from src.ocr.paddle_ocr import PaddleOCRWrapper
+                from src.pipelines.agents.ocr import PaddleOCRWrapper
                 ref_data = load_and_process_reference(key)
                 if ref_data and ref_data.get("image") is not None:
                     paddle = PaddleOCRWrapper()
@@ -1121,7 +1134,7 @@ class MultiAgentPipeline:
         # Other templates: OCR-based blacklist (fallback)
         try:
             from src.processing.registration import load_and_process_reference
-            from src.ocr.paddle_ocr import PaddleOCRWrapper
+            from src.pipelines.agents.ocr import PaddleOCRWrapper
             ref_data = load_and_process_reference(key)
             if not ref_data or ref_data.get("image") is None:
                 return set()
@@ -1244,12 +1257,30 @@ class MultiAgentPipeline:
         btype = block.block_type.value if hasattr(block.block_type, 'value') else str(block.block_type)
         return btype.upper()
     
-    def _has_ink_in_bbox(self, image: np.ndarray, bbox: Tuple[float, float, float, float], 
-                         threshold: float = 0.018) -> bool:
-        """
-        Detect if a crop contains handwritten/printed ink (dark pixels).
-        Used to filter empty fields — only show bounding boxes where there is actual content.
-        threshold: minimum ratio of dark pixels (0.018 ≈ 1.8% catches thin handwriting).
+    def _get_pipeline_template_rgb(self) -> Optional[np.ndarray]:
+        """Load CMS-1500 template RGB once for the pipeline (cached)."""
+        if self._pipeline_template_rgb is not None:
+            return self._pipeline_template_rgb
+        try:
+            from src.pipelines.registration import get_cms1500_registrar
+            registrar = get_cms1500_registrar()
+            tdata = registrar.get_template_data()
+            rgb = tdata.get("image_rgb")
+            if rgb is not None and rgb.size > 0:
+                self._pipeline_template_rgb = rgb
+                return rgb
+        except Exception:
+            pass
+        return None
+
+    def _has_ink_in_bbox(self, image: np.ndarray, bbox: Tuple[float, float, float, float],
+                         threshold: float = 0.008) -> bool:
+        """Detect if a crop contains handwritten/printed ink.
+
+        Uses a simple dark-pixel ratio heuristic. This is only used as a
+        secondary check in ``_should_show_field`` for blocks that were NOT
+        processed by the OCR agent (e.g. un-mapped zones).  The OCR agent's
+        own blank detection (via actually running OCR) is the primary signal.
         """
         if image is None or image.size == 0:
             return False
@@ -1260,11 +1291,11 @@ class MultiAgentPipeline:
             x1, y1 = min(w, x1), min(h, y1)
             if x1 <= x0 + 2 or y1 <= y0 + 2:
                 return False
-            crop = image[int(y0):int(y1), int(x0):int(x1)]
+            crop = image[y0:y1, x0:x1]
             if crop.size < 50:
                 return False
+
             gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY) if crop.ndim == 3 else crop
-            # Use adaptive threshold (ink = dark pixels below median)
             thr = int(np.clip(np.median(gray) - 20, 80, 200))
             dark = np.count_nonzero(gray < thr)
             ink_ratio = dark / float(crop.size)
@@ -1424,7 +1455,12 @@ class MultiAgentPipeline:
                 if crop.size == 0:
                     continue
 
-                cand_raw, cand_conf = self.ocr_agent._vlm_ocr(crop)
+                cand_raw, cand_conf = self.ocr_agent._vlm_ocr_field(
+                    crop, field_name=fid, field_type=field_type,
+                    model=Config.VLM_MODEL_RESCUE, timeout=90,
+                )
+                if cand_raw and self.ocr_agent._is_vlm_template_text(cand_raw):
+                    continue
                 candidate = self._normalize_vlm_candidate(cand_raw, field_type)
                 if not candidate:
                     continue
@@ -2057,7 +2093,8 @@ class MultiAgentPipeline:
             blocks = []
             skipped_mode = 0
             for field in schema.get("fields", []):
-                bbox_norm = field.get("bbox_norm")
+                # Prefer bbox_norm_new (manually refined coordinates) over bbox_norm
+                bbox_norm = field.get("bbox_norm_new") or field.get("bbox_norm")
                 if not bbox_norm or len(bbox_norm) != 4:
                     continue
                 
@@ -2230,11 +2267,9 @@ class MultiAgentPipeline:
         return result
     
     async def _extract_service_lines_ocr(self, image: np.ndarray, table_bbox: Tuple[float, float, float, float]) -> Dict[str, Any]:
-        """Extract Box 24 service lines using cell-by-cell OCR.
+        """Extract Box 24 service lines: full-table PaddleOCR + TrOCR fallback for empty cells.
         
-        CMS-1500 Box 24 has exactly 6 data rows with a fixed column layout.
-        Instead of VLM (which hallucinates), we divide the table into cells
-        and run PaddleOCR + TrOCR on each cell individually.
+        Respects ocr_engine_mode: tiered/paddle_only use Paddle; trocr_only uses TrOCR per cell.
         """
         from src.processing.preprocessing import remove_red_template_text
         
@@ -2247,15 +2282,12 @@ class MultiAgentPipeline:
         if table_crop.size == 0:
             return {"type": "table", "rows": [], "extraction_method": "cell_ocr"}
         
-        # Remove red template lines from table crop
         try:
             clean_crop = remove_red_template_text(table_crop)
         except Exception:
             clean_crop = table_crop
         
         th, tw = clean_crop.shape[:2]
-        
-        # CMS-1500 Box 24 column layout (relative to table width)
         columns = [
             ("date_from",    0.00, 0.13),
             ("date_to",      0.13, 0.21),
@@ -2267,70 +2299,82 @@ class MultiAgentPipeline:
             ("days_units",   0.73, 0.79),
             ("provider_id",  0.80, 1.00),
         ]
-        
-        # Skip header row (~18% of table height), then 6 equal data rows
         header_frac = 0.18
         data_start = int(th * header_frac)
         data_height = th - data_start
         row_height = data_height // 6
         
-        rows = []
-        from src.ocr.paddle_ocr import PaddleOCRWrapper
-        paddle = PaddleOCRWrapper()
-        
-        for row_idx in range(6):
-            ry0 = data_start + row_idx * row_height
-            ry1 = min(th, ry0 + row_height)
-            
-            if ry1 - ry0 < 5:
-                continue
-            
-            row_data = {"line_number": row_idx + 1}
-            has_content = False
-            
-            for col_name, cx0_frac, cx1_frac in columns:
-                cx0 = int(tw * cx0_frac)
-                cx1 = int(tw * cx1_frac)
-                
-                # Crop the cell with a small vertical padding
-                cell_pad_y = max(2, int(row_height * 0.05))
-                cell_y0 = max(0, ry0 - cell_pad_y)
-                cell_y1 = min(th, ry1 + cell_pad_y)
-                cell_crop = clean_crop[cell_y0:cell_y1, cx0:cx1]
-                
-                if cell_crop.size == 0:
-                    row_data[col_name] = ""
+        mode = getattr(self.config, "ocr_engine_mode", "tiered") or "tiered"
+        cell_texts: Dict[Tuple[int, int], str] = {}
+
+        if mode in ("tiered", "paddle_only"):
+            paddle = await self._get_shared_paddle()
+            try:
+                all_word_boxes = paddle.extract_text(clean_crop) or []
+            except Exception:
+                all_word_boxes = []
+            cell_parts: Dict[Tuple[int, int], List[Tuple[str, float]]] = {}
+            for wb in all_word_boxes:
+                if not wb.text or wb.confidence < 0.2:
                     continue
-                
-                # Run PaddleOCR on the cell
-                try:
-                    word_boxes = paddle.extract_text(cell_crop)
-                    if word_boxes:
-                        cell_text = " ".join(wb.text for wb in word_boxes if wb.confidence >= 0.2)
-                        cell_conf = max(wb.confidence for wb in word_boxes)
-                    else:
-                        cell_text = ""
-                        cell_conf = 0.0
-                except Exception:
-                    cell_text = ""
-                    cell_conf = 0.0
-                
-                # TrOCR fallback for low-confidence cells
-                if (not cell_text or cell_conf < 0.3) and getattr(self.config, 'enable_trocr', False):
+                wx0, wy0, wx1, wy1 = wb.bbox
+                cx, cy = (wx0 + wx1) / 2.0, (wy0 + wy1) / 2.0
+                if cy < data_start:
+                    continue
+                row_idx = min(5, max(0, int((cy - data_start) / row_height) if row_height > 0 else 0))
+                col_idx = -1
+                for i, (_, cx0_frac, cx1_frac) in enumerate(columns):
+                    if tw * cx0_frac <= cx <= tw * cx1_frac:
+                        col_idx = i
+                        break
+                if col_idx >= 0:
+                    key = (row_idx, col_idx)
+                    if key not in cell_parts:
+                        cell_parts[key] = []
+                    cell_parts[key].append((wb.text.strip(), cx))
+            for key, parts in cell_parts.items():
+                cell_texts[key] = " ".join(t for t, _ in sorted(parts, key=lambda x: x[1]))
+
+        if mode == "trocr_only" or (mode == "tiered" and getattr(self.config, "enable_trocr", True)):
+            cells_to_ocr: List[Tuple[int, int, str, np.ndarray]] = []
+            for row_idx in range(6):
+                ry0, ry1 = data_start + row_idx * row_height, min(th, data_start + (row_idx + 1) * row_height)
+                if ry1 - ry0 < 5:
+                    continue
+                cell_pad_y = max(2, int(row_height * 0.05))
+                cell_y0, cell_y1 = max(0, ry0 - cell_pad_y), min(th, ry1 + cell_pad_y)
+                for col_idx, (col_name, cx0_frac, cx1_frac) in enumerate(columns):
+                    cx0, cx1 = int(tw * cx0_frac), int(tw * cx1_frac)
+                    cell_crop = clean_crop[cell_y0:cell_y1, cx0:cx1]
+                    if cell_crop.size > 10 and (mode == "trocr_only" or not cell_texts.get((row_idx, col_idx))):
+                        cells_to_ocr.append((row_idx, col_idx, col_name, cell_crop.copy()))
+            if cells_to_ocr:
+                async def _ocr_cell(item):
+                    r, c, _, crop = item
                     try:
-                        trocr_text, trocr_conf = self.ocr_agent._trocr_ocr(cell_crop)
-                        if trocr_text and len(trocr_text.strip()) > 0:
-                            if not self.ocr_agent._is_hallucination(trocr_text.strip()):
-                                if trocr_conf > cell_conf or not cell_text:
-                                    cell_text = trocr_text.strip()
+                        t, _ = await asyncio.to_thread(self.ocr_agent._trocr_ocr, crop)
+                        if t and not self.ocr_agent._is_hallucination(t.strip()):
+                            return (r, c, t.strip())
                     except Exception:
                         pass
-                
-                cell_text = cell_text.strip()
+                    return (r, c, "")
+                results = await asyncio.gather(*[_ocr_cell(x) for x in cells_to_ocr])
+                for r, c, t in results:
+                    if t:
+                        cell_texts[(r, c)] = t
+
+        rows = []
+        for row_idx in range(6):
+            ry0, ry1 = data_start + row_idx * row_height, min(th, data_start + (row_idx + 1) * row_height)
+            if ry1 - ry0 < 5:
+                continue
+            row_data = {"line_number": row_idx + 1}
+            has_content = False
+            for col_idx, (col_name, _, _) in enumerate(columns):
+                cell_text = cell_texts.get((row_idx, col_idx), "").strip()
                 if cell_text:
                     has_content = True
                 row_data[col_name] = cell_text
-            
             if has_content:
                 rows.append(row_data)
         
@@ -2356,7 +2400,7 @@ class MultiAgentPipeline:
             "extraction_method": "cell_ocr",
             "total_rows": len(rows)
         }
-    
+
     def _to_reducto_format(self, result: Dict[str, Any], width: int, height: int) -> Dict[str, Any]:
         """Convert pipeline result to Reducto-like JSON format with full enrichment."""
         import uuid
@@ -2458,6 +2502,13 @@ class MultiAgentPipeline:
         Returns comprehensive extraction result.
         """
         start_time = time.time()
+        t_last = start_time
+        def _elapsed(label: str):
+            nonlocal t_last
+            dt = time.time() - t_last
+            print(f"[Pipeline] ⏱ {label}: {dt:.1f}s")
+            t_last = time.time()
+
         print(f"[Pipeline] Processing {path}")
         
         # Load image (+ optional digital text layer boxes)
@@ -2488,6 +2539,7 @@ class MultiAgentPipeline:
             )
         
         print(f"[Pipeline] Detected Form Type: {form_id.form_type}")
+        _elapsed("Form ID")
 
         # ══════════════════════════════════════════════════════════════
         # LANE A: AcroForm widget extraction (fillable PDFs)
@@ -2677,6 +2729,7 @@ class MultiAgentPipeline:
                     print("[Pipeline] Alignment failed; will NOT use schema zones on raw scan.")
             except Exception as e:
                 print(f"[Pipeline] Alignment exception: {e}")
+        _elapsed("Alignment")
 
         # Write an aligned preview image for UI overlays (optional but very useful for debugging)
         try:
@@ -2724,6 +2777,7 @@ class MultiAgentPipeline:
                         b.metadata["form_type"] = "cms-1500"
                     scan_ocr_source = aligned_image
                     print(f"[Pipeline] CMS-1500 scan (Lane C): loaded {len(blocks)} schema zones for per-field crop OCR")
+                    _elapsed("Layout (schema zones)")
                 else:
                     # Alignment failed — still try per-field crop OCR on raw image
                     blocks = await self._load_schema_zones(aligned_image, width, height)
@@ -2778,8 +2832,7 @@ class MultiAgentPipeline:
 
                 if len(blocks) < 3:
                     print("[Pipeline] ⚠️ Layout too coarse (<3 blocks), using OCR line grouping fallback")
-                    from src.ocr.paddle_ocr import PaddleOCRWrapper
-                    paddle = PaddleOCRWrapper()
+                    paddle = await self._get_shared_paddle()
                     word_boxes = paddle.extract_text(aligned_image)
                     if word_boxes:
                         blocks = self._group_words_into_blocks(word_boxes, width, height)
@@ -2787,8 +2840,7 @@ class MultiAgentPipeline:
             except Exception as e:
                 print(f"[Pipeline] Layout detection failed: {e}")
                 # Fallback to OCR
-                from src.ocr.paddle_ocr import PaddleOCRWrapper
-                paddle = PaddleOCRWrapper()
+                paddle = await self._get_shared_paddle()
                 word_boxes = paddle.extract_text(aligned_image)
                 if word_boxes:
                     blocks = self._group_words_into_blocks(word_boxes, width, height)
@@ -2796,8 +2848,7 @@ class MultiAgentPipeline:
         # If still no blocks, use full-page OCR with intelligent word grouping
         if not blocks:
             print("[Pipeline] No layout blocks detected, using full-page OCR with word grouping")
-            from src.ocr.paddle_ocr import PaddleOCRWrapper
-            paddle = PaddleOCRWrapper()
+            paddle = await self._get_shared_paddle()
             word_boxes = paddle.extract_text(aligned_image)
             
             if word_boxes:
@@ -2829,11 +2880,22 @@ class MultiAgentPipeline:
         ocr_image = aligned_image
 
         blocks = await self.ocr_agent.process_blocks(ocr_image, blocks)
+        _elapsed("OCR (process_blocks)")
+
+        vlm_escalation_count = sum(
+            1 for b in blocks
+            if any(tag in ((b.metadata or {}).get("ocr_engine") or "")
+                   for tag in ("florence2", "vlm_date", "vlm_ocr"))
+        )
 
         # Post-clean CMS-1500 zone OCR: strip printed labels from OCR text.
-        # ONLY for scan/OCR path (not use_digital_text). Digital text layer values
-        # are already clean ground truth. _clean_field_value corrupts them:
-        #   "8340 Baltimore Aveune" → regex strips "8340 B" → "altimore Aveune"
+        # SKIP for numeric field types — _clean_field_value has a regex that
+        # strips leading 1-2 digits (CMS box numbers) which corrupts dates,
+        # phone numbers, NPI, zip, money, and tax_id values.
+        _NUMERIC_FIELD_TYPES = frozenset({
+            "date", "date_range", "phone", "npi", "zip", "money", "tax_id",
+            "checkbox", "signature", "address", "account",
+        })
         if form_id.form_type == FormType.CMS1500 and not use_digital_text:
             for b in blocks:
                 try:
@@ -2841,6 +2903,9 @@ class MultiAgentPipeline:
                     if src not in ("schema_zones", "ocr_zone_matching"):
                         continue
                     if not b.text:
+                        continue
+                    ft = (b.metadata or {}).get("field_type", "")
+                    if ft in _NUMERIC_FIELD_TYPES:
                         continue
                     field_label = (b.metadata or {}).get("field_name") or (b.metadata or {}).get("label") or b.id
                     cleaned = self._clean_field_value(str(b.text), str(field_label), str(b.id))
@@ -2854,20 +2919,26 @@ class MultiAgentPipeline:
         # Step 5: SLM/VLM Labeling
         # For CMS-1500: 
         #   - Skip SLM for text/form_field blocks (already schema-identified)
-        #   - ALWAYS process table blocks (service lines) via VLM for structured extraction
-        #   - Process figure blocks via VLM if enabled
+        #   - Tables and figures go to labeling agent (Florence-2 for Box 24, VLM for others)
         # For general forms: full SLM labeling on all blocks.
         if form_id.form_type == FormType.CMS1500:
-            # Box 24 service lines: use cell-by-cell OCR (not VLM which hallucinates)
+            await self.labeling_agent.initialize()
             for block in blocks:
-                if block.block_type == BlockType.TABLE and "service_lines" in block.id:
-                    print(f"[Pipeline] Extracting service lines via cell-by-cell OCR: {block.id}")
-                    table_data = await self._extract_service_lines_ocr(aligned_image, block.bbox)
+                if block.block_type == BlockType.TABLE:
+                    table_data = await self.labeling_agent.process_table(aligned_image, block)
+                    method = table_data.get("extraction_method", "")
+                    # Cell OCR fallback when VLM returned no rows
+                    if not table_data.get("rows") and "service_lines" in (block.id or ""):
+                        print(f"[Pipeline] VLM returned no rows (method={method}), falling back to cell OCR")
+                        table_data = await self._extract_service_lines_ocr(aligned_image, block.bbox)
+                        method = table_data.get("extraction_method", "cell_ocr_fallback")
                     block.metadata["table_data"] = table_data
+                    block.metadata["ocr_engine"] = method or "vlm_table"
                     if table_data.get("summary"):
                         block.text = table_data["summary"]
-                        block.metadata["cell_ocr_extracted"] = True
-                    print(f"[Pipeline] Service lines: {table_data.get('total_rows', 0)} rows extracted")
+                        block.metadata["table_extracted"] = True
+                    print(f"[Pipeline] Table {block.id}: {table_data.get('total_rows', len(table_data.get('rows', [])))} rows ({method})")
+                    _elapsed("Table extraction")
                 elif block.block_type == BlockType.FIGURE and self.config.enable_vlm_figures:
                     figure_data = await self.labeling_agent.process_figure(aligned_image, block)
                     block.metadata["figure_data"] = figure_data
@@ -2881,6 +2952,7 @@ class MultiAgentPipeline:
         # For CMS-1500, always use block.id as the key (schema field ID).
         # For general forms, use semantic_label if SLM provided one.
         extracted_fields = {}
+        _field_conf = {}
         for block in blocks:
             if block.text:
                 val = str(block.text).strip()
@@ -2890,7 +2962,13 @@ class MultiAgentPipeline:
                     label = block.id
                 else:
                     label = block.metadata.get("semantic_label", block.id)
-                extracted_fields[label] = val
+                # For duplicate field IDs, keep the one with higher confidence
+                # (schema_zones + VLM beats ocr_zone_matching with stripped text)
+                prev_conf = _field_conf.get(label, -1.0)
+                this_conf = float(block.confidence or 0.0)
+                if label not in extracted_fields or this_conf > prev_conf:
+                    extracted_fields[label] = val
+                    _field_conf[label] = this_conf
         
         # Post-process composite address blocks for CMS-1500 scans:
         # Parse full-address OCR into individual sub-fields (city, state, zip, phone)
@@ -2938,20 +3016,38 @@ class MultiAgentPipeline:
                 return False  # Placeholder without real signature
             return True
 
+        _BLANK_PLACEHOLDERS = frozenset({"-", "–", "—", ".", "_", "|", "~", "*"})
+
         def _should_show_field(b: DetectedBlock) -> bool:
-            src = (b.metadata or {}).get("source", "")
+            meta = b.metadata or {}
+            src = meta.get("source", "")
+
+            if b.block_type == BlockType.TABLE:
+                return True
+
+            if meta.get("is_blank", False):
+                has_text = (b.text or "").strip()
+                if not has_text:
+                    return False
+
+            if b.block_type == BlockType.SIGNATURE and not meta.get("has_ink", True):
+                return False
+
+            txt = (b.text or "").strip()
+            if txt in _BLANK_PLACEHOLDERS:
+                return False
+
+            if txt:
+                return True
+
             if src not in ("schema_zones", "ocr_zone_matching"):
                 return True
             if use_digital_text:
                 return True
-            # Reducto-style: always show schema zones for full form coverage (every field gets a bbox)
-            if src == "schema_zones":
-                return True
+
             check_bbox = _field_bbox_for_check(b)
             has_ink = self._has_ink_in_bbox(aligned_image, check_bbox)
             if has_ink:
-                return True
-            if _has_meaningful_text(b):
                 return True
             return False
 
@@ -2995,6 +3091,7 @@ class MultiAgentPipeline:
         
         # Build final result dict
         processing_time = time.time() - start_time
+        print(f"[Pipeline] ⏱ Total: {processing_time:.1f}s")
         if use_digital_text:
             alignment_quality_value = 1.0
         elif alignment_quality_override is not None:
@@ -3024,19 +3121,39 @@ class MultiAgentPipeline:
                 }
             for b in filtered_blocks
         ]
-        # Add parsed sub-fields (e.g. 5_patient_city) so they appear in Fields table and match OCR JSON
+        # Add parsed sub-fields (e.g. 5_patient_city) and raw address (5_patient_raw, 7_insured_raw)
+        # Raw fields = direct OCR output → inherit parent block's ocr_engine (trocr/vlm), not "parsed"
+        # Parsed sub-fields (city, state, zip) = derived from raw → also inherit parent's ocr_engine
+        block_by_id = {b.id: b for b in filtered_blocks}
+        raw_ids = {"5_patient_raw", "7_insured_raw"}
+
+        def _source_for_field(fid: str) -> tuple:
+            """Return (source, derived) for a field. Raw = OCR output; parsed = derived from composite."""
+            if fid.startswith("5_patient_"):
+                parent = block_by_id.get("5_patient_address_full")
+            elif fid.startswith("7_insured_"):
+                parent = block_by_id.get("7_insured_address_full")
+            else:
+                return ("parsed", True)
+            src = (parent.metadata or {}).get("ocr_engine") if parent else None
+            src = src or "trocr"
+            # Raw address = direct OCR, not derived; city/state/zip = parsed from raw
+            derived = fid not in raw_ids
+            return (src, derived)
+
         for fid, val in extracted_fields.items():
             if fid not in block_ids and val and str(val).strip():
+                src, derived = _source_for_field(fid)
                 field_details_list.append({
                     "id": fid,
                     "label": fid.replace("_", " ").title(),
                     "type": "form_field",
-                    "bbox": [0, 0, 0, 0],  # No box — derived from composite
+                    "bbox": [0, 0, 0, 0],  # No box — from composite block
                     "value": val,
                     "text": val,
                     "confidence": 0.8,
-                    "detected_by": "parsed",
-                    "metadata": {"source": "parsed", "derived": True}
+                    "detected_by": src,
+                    "metadata": {"source": src, "derived": derived}
                 })
         
         # Sort extracted_fields and field_details by schema order (Reducto-style serial reading order)
@@ -3071,6 +3188,8 @@ class MultiAgentPipeline:
             "config": {
                 "layout_model": self.config.layout_model,
                 "enable_trocr": self.config.enable_trocr,
+                "enable_vlm_ocr_fallback": getattr(self.config, "enable_vlm_ocr_fallback", True),
+                "vlm_ocr_model": getattr(self.config, "vlm_ocr_model", "minicpm-v"),
                 "enable_slm": self.config.enable_slm_labeling,
                 "enable_vlm": self.config.enable_vlm_figures
             },
@@ -3094,6 +3213,8 @@ class MultiAgentPipeline:
                 "digital_words_count": int(len(digital_words)) if digital_words is not None else 0,
                 "vlm_rescue_count": int(vlm_rescue.get("count", 0)),
                 "vlm_rescue_fields": vlm_rescue.get("fields", []),
+                "vlm_escalation_count": int(vlm_escalation_count),
+                "vlm_ocr_model": getattr(self.config, "vlm_ocr_model", None),
             },
         }
         

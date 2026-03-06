@@ -1,17 +1,21 @@
-# Pipeline Overview — Scripts, Purpose, and Architecture
+# Pipeline Overview — Architecture, Scripts, and Technical Details
 
-This document describes every script and module in the Doc2Data pipeline: what it does, why it exists, and how it fits together.
+This document describes the Doc2Data pipeline: architecture, extraction lanes, OCR strategy, and how each component fits together.
 
 ---
 
 ## Table of Contents
 
 1. [High-Level Architecture](#high-level-architecture)
-2. [Scripts Reference (Every File)](#scripts-reference-every-file)
-3. [Pipeline Modules](#pipeline-modules)
-4. [App Layer](#app-layer)
-5. [Utils and Helpers](#utils-and-helpers)
-6. [Configuration and Data](#configuration-and-data)
+2. [Three-Lane Extraction](#three-lane-extraction)
+3. [CMS-1500 OCR Pipeline (Lane C)](#cms-1500-ocr-pipeline-lane-c)
+4. [Blank Field Detection](#blank-field-detection)
+5. [Template Subtraction](#template-subtraction)
+6. [Table Extraction (Box 24)](#table-extraction-box-24)
+7. [Scripts Reference](#scripts-reference)
+8. [Configuration and Data](#configuration-and-data)
+9. [Models in Use](#models-in-use)
+10. [Roadmap and Known Limitations](#roadmap-and-known-limitations)
 
 ---
 
@@ -21,456 +25,418 @@ This document describes every script and module in the Doc2Data pipeline: what i
 PDF/Image → Form ID → [Lane A | Lane B | Lane C] → Layout → OCR → Validation → JSON
 ```
 
-- **Lane A:** Fillable PDF → AcroForm widgets (no OCR)
-- **Lane B:** Digital PDF → embedded text layer + zone matching
-- **Lane C:** Scanned → template alignment + OCR + zone matching
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         Doc2Data Pipeline v2.0                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌──────────┐    ┌───────────────────────────────────────────────────┐    │
+│   │  PDF /   │───▶│               Form Identification                  │    │
+│   │  Image   │    │  (CMS-1500, UB-04, Generic)                       │    │
+│   └──────────┘    └───────────────────────────────────────────────────┘    │
+│                                        │                                    │
+│                    ┌───────────────────┼───────────────────┐               │
+│                    ▼                   ▼                   ▼               │
+│            ┌─────────────┐     ┌─────────────┐     ┌─────────────┐        │
+│            │   LANE A    │     │   LANE B    │     │   LANE C    │        │
+│            │  (Widgets)  │     │  (Digital)  │     │  (Scanned)  │        │
+│            │  AcroForm   │     │  Text Layer │     │   OCR +     │        │
+│            │  No OCR     │     │  + Matching │     │  Alignment  │        │
+│            └──────┬──────┘     └──────┬──────┘     └──────┬──────┘        │
+│                   │                   │                   │                │
+│                   └───────────────────┴───────────────────┘                │
+│                                       │                                    │
+│                                       ▼                                    │
+│                          ┌────────────────────────┐                        │
+│                          │  Layout → OCR → Valid  │                        │
+│                          │  → Business Mapping    │                        │
+│                          └────────────────────────┘                        │
+│                                       │                                    │
+│                                       ▼                                    │
+│                              ┌──────────────┐                              │
+│                              │  JSON Output │                              │
+│                              └──────────────┘                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## Scripts Reference (Every File)
+## Three-Lane Extraction
 
-### `app/streamlit_main.py`
+### Lane A: Fillable PDF (AcroForm Widgets)
+**When:** PDF contains interactive form widgets with values
+**Method:** Extract widget values directly — no OCR needed
+**Accuracy:** Near-perfect (digital text, no recognition errors)
+**Latency:** <1 second
 
-**Purpose:** Streamlit web UI for document extraction.
+```python
+# Lane A extracts from AcroForm widgets
+if pdf_has_acroform_widgets():
+    return extract_widget_values()  # No OCR
+```
 
-**What it does:**
-- Renders upload form, sample document selector, config options
-- Calls `MultiAgentPipeline.process_sync()` when user runs extraction
-- Displays results: JSON, business fields, annotated image, download buttons
-- Handles form type override (CMS-1500, UB-04), alignment toggle, SLM/VLM toggles
+### Lane B: Digital PDF (Embedded Text Layer)
+**When:** PDF has selectable/copyable text (printed + flattened)
+**Method:** Extract text layer + zone matching to schema fields
+**Accuracy:** Very high (digital text, minimal OCR)
+**Latency:** 2-5 seconds
 
-**Use case:** Interactive demo and manual testing.
+```python
+# Lane B uses embedded text layer
+if pdf_has_text_layer():
+    words = extract_text_layer()
+    return match_words_to_schema_zones(words)
+```
 
----
+### Lane C: Scanned Form (Image-based)
+**When:** PDF is a scan, photo, or image-only document
+**Method:** Align to template → Template subtraction → Per-field OCR
+**Accuracy:** High with proper alignment (see OCR pipeline below)
+**Latency:** 60-180 seconds (first run with model loading: 5-7 minutes)
 
-### `app/api_main.py`
-
-**Purpose:** FastAPI REST API for document extraction.
-
-**What it does:**
-- Exposes `/extract/cms1500`, `/extract/ub04`, `/extract/v2`, `/health`
-- Accepts PDF/image upload via multipart form
-- Returns structured JSON with `extracted_fields`, `business_fields`, metadata
-- Used by external clients, scripts, and integrations
-
-**Use case:** Programmatic access, DGX deployment, API clients.
-
----
-
-### `src/pipelines/multi_agent_pipeline.py`
-
-**Purpose:** Main orchestrator for the multi-agent document pipeline.
-
-**What it does:**
-- Implements 3-lane extraction (Lane A: widgets, Lane B: digital text, Lane C: scanned)
-- Chooses lane based on PDF type (AcroForm, text layer, or scanned)
-- Runs `FormIdentificationAgent`, `TemplateAlignmentAgent`, `LayoutDetectionAgent`, `OCRAgent`, `LabelingAgent`, `ValidationAgent`
-- Assembles final JSON with `extracted_fields`, `business_fields`, `field_details`
-- Includes VLM rescue pass for low-confidence fields
-- Exposes `process_sync(path)` for synchronous usage
-
-**Use case:** Core entry point for extraction. Used by Streamlit, API, and CLI.
-
----
-
-### `src/pipelines/core/base.py`
-
-**Purpose:** Base class for all pipeline agents.
-
-**What it does:**
-- Defines `BaseAgent` abstract class with `initialize()`, `process()`, `log()`
-- All agents (form_id, alignment, layout, ocr, labeling, validation) inherit from it
-
-**Use case:** Shared interface for agents.
+```python
+# Lane C: Full OCR pipeline
+aligned_image = template_alignment(scan)
+for field in schema_zones:
+    crop = extract_crop(aligned_image, field.bbox)
+    clean_crop, ink_ratio = template_subtract(crop)
+    text = florence2_ocr(clean_crop, ink_ratio)
+    if not text and ink_ratio_interior > 0.10:
+        text = florence2_ocr(crop_raw)  # Raw fallback
+```
 
 ---
 
-### `src/pipelines/core/models.py`
+## CMS-1500 OCR Pipeline (Lane C)
 
-**Purpose:** Shared data models and enums.
+The CMS-1500 OCR pipeline is optimized for scanned healthcare claim forms with handwritten and printed content.
 
-**What it does:**
-- `FormType`: CMS1500, UB04, NCPDP, GENERIC, UNKNOWN
-- `BlockType`: TEXT, TABLE, FIGURE, CHECKBOX, SIGNATURE, etc.
-- `DetectedBlock`: id, block_type, bbox, confidence, text, metadata
-- `FormIdentification`: form_type, confidence, version
-- `AlignmentResult`: success, aligned_image, homography_matrix, quality
-- `PipelineConfig`: all pipeline options (enable_trocr, enable_alignment, etc.)
+### Architecture (v2.0)
 
-**Use case:** Type consistency across pipeline.
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    CMS-1500 Field OCR Pipeline                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Step 1: Template Subtraction                                         │   │
+│  │   • Subtract registered template from scan                          │   │
+│  │   • Output: clean crop (content only) + ink_ratio                   │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                              │
+│                              ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Step 2: Florence-2 Primary OCR                                       │   │
+│  │   • Run Florence-2-large <OCR> on template-subtracted crop          │   │
+│  │   • Apply filters: hallucination, template keywords, box numbers    │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                              │                                              │
+│              ┌───────────────┴───────────────┐                             │
+│              ▼                               ▼                             │
+│     ┌─────────────────┐            ┌─────────────────┐                     │
+│     │ F2 has text     │            │ F2 empty        │                     │
+│     │ (conf > 0)      │            │ (conf = 0)      │                     │
+│     └────────┬────────┘            └────────┬────────┘                     │
+│              │                              │                              │
+│              ▼                              ▼                              │
+│  ┌───────────────────────┐    ┌───────────────────────────────────────┐   │
+│  │ Case B/C: Validate    │    │ Case A: Try Recovery                   │   │
+│  │ • CCA structure check │    │ 1. Upscale retry (if ink > 0.008)     │   │
+│  │ • Self-consistency    │    │ 2. Raw crop fallback (if inner_ink    │   │
+│  │ • Use F2 result       │    │    > 0.10 — excludes padding edges)   │   │
+│  └───────────────────────┘    │ 3. Otherwise → BLANK                   │   │
+│                               └───────────────────────────────────────┘   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
----
+### Field Type Routing
 
-### `src/pipelines/agents/form_identification.py`
-
-**Purpose:** Identifies the form type (CMS-1500, UB-04, etc.).
-
-**What it does:**
-- OCRs header region
-- Matches tokens (CMS-1500, UB-04, HCFA, etc.)
-- Optionally uses layout fingerprint (checkbox density, structure)
-- Returns `FormIdentification` with form_type and confidence
-
-**Use case:** First step to decide which processing path to use.
-
----
-
-### `src/pipelines/agents/template_alignment.py`
-
-**Purpose:** Aligns scanned form image to reference template.
-
-**What it does:**
-- For CMS-1500: calls `cms1500_register.register()` (classical CV)
-- For other forms: tries optional YOLO boundary detection, fallback to ORB/feature matching
-- Returns `AlignmentResult` with aligned image and homography matrix
-- Used for Lane C (scanned forms) before zone-based OCR
-
-**Use case:** Correct geometric distortion before OCR.
-
----
-
-### `src/pipelines/agents/layout_detection.py`
-
-**Purpose:** Detects layout blocks (text, table, figure, form_field, checkbox).
-
-**What it does:**
-- For CMS-1500: uses YOLOv8 (if configured) or template zones from schema
-- For general forms: uses Detectron2 (PubLayNet) or PaddleDetection
-- Returns list of `DetectedBlock` with bbox, type, confidence
-
-**Use case:** Segment page into regions for OCR and labeling.
-
----
-
-### `src/pipelines/agents/ocr.py`
-
-**Purpose:** Performs OCR on extracted blocks.
-
-**What it does:**
-- PaddleOCR for printed text
-- TrOCR for handwriting/signatures
-- Checkbox state via fill-ratio heuristic
-- Field-type validation (regex) and normalization
-- Escalation to VLM when confidence is low
-- Returns text + confidence per block
-
-**Use case:** Convert image regions to text.
+| Field Type | Method | Notes |
+|------------|--------|-------|
+| **Text** | Florence-2 on subtracted crop | Keyword/hallucination filters |
+| **Address** | Florence-2 + raw fallback | Multi-line needs raw crop recovery |
+| **Date** | Florence-2 + VLM for incomplete | Dates need handwriting context |
+| **Phone/NPI/Zip** | Florence-2 + upscale retry | Digit fields benefit from 2x upscale |
+| **Money** | Florence-2 (left 22% masked for "$") | Pre-printed "$" excluded from CCA |
+| **Checkbox** | Fill-ratio detector | Template subtraction isolates check mark |
+| **Signature** | Ink detection only | Returns "[SIGNED]" or blank |
+| **Table (Box 24)** | VLM directly (MiniCPM-o4.5) | Structured extraction, separate route |
 
 ---
 
-### `src/pipelines/agents/labeling.py`
+## Blank Field Detection
 
-**Purpose:** Adds semantic labels to blocks (SLM).
+### The Problem
+Blank fields on scanned forms contain:
+- Template gridlines and box borders
+- Pre-printed labels ("PATIENT NAME", "$", etc.)
+- Alignment noise from registration
+- Dust, scanner artifacts
 
-**What it does:**
-- Uses Ollama (Qwen, etc.) to label text blocks (e.g., "patient_name", "diagnosis")
-- Supports table and figure processing (TATR, VLM)
-- Returns blocks with `field_type` metadata
+Traditional ink-ratio thresholds fail because blank fields (0.03–0.11 ink) overlap with content fields (0.10–0.20 ink).
 
-**Use case:** Map raw text to schema field IDs.
+### The Solution: Florence-2 as Blank Detector
 
----
+**Key Insight:** Florence-2's <OCR> task returns empty string on truly blank regions — it doesn't hallucinate text from gridlines or noise. This is more reliable than pixel-based ink detection.
 
-### `src/pipelines/agents/validation.py`
+```
+Florence-2 empty + filters pass → BLANK (no VLM rescue, no hallucination)
+Florence-2 text + filters pass  → Use text
+Florence-2 text + filters fail  → Try raw crop fallback
+```
 
-**Purpose:** Validates extracted fields and runs LLM QA.
+### Multi-Layer Filtering (Step 2)
 
-**What it does:**
-- Uses `validators.py` for format checks (NPI, date, phone, ICD, etc.)
-- Returns validation errors and warnings
-- Optional LLM QA check on extracted data
+When Florence-2 returns text, we apply filters to catch template residue:
 
-**Use case:** Catch format errors and inconsistencies.
+1. **Hallucination Filter:** Too many words, repeated chars, low alphanum ratio
+2. **Template Keyword Filter (density-based):** Only blank when keywords > 50% of text
+3. **Box Number Filter:** Short numeric patterns like "23" (box labels)
+4. **Placeholder Filter:** Single chars like "-", ".", "_"
 
----
+```python
+# Density-based keyword filter (won't blank "927 Main St." just because it contains "St")
+if keyword_chars / len(text) > 0.5:
+    text = ""  # Template label, not content
+```
 
-### `src/pipelines/registration/cms1500_register.py`
+### Raw Crop Fallback (Recovery for Damaged Content)
 
-**Purpose:** CMS-1500 template alignment (classical CV only).
+Template subtraction can damage real content (especially multi-line addresses where text overlaps template lines). When Florence-2 returns empty on the subtracted crop but the field has genuine content:
 
-**What it does:**
-- Loads template, builds dropout-red mask, structural line mask
-- AKAZE/ORB feature matching + RANSAC homography
-- Quad fallback when feature quality is low
-- Warps input to canonical template space
-- Returns `CMS1500RegistrationResult` with aligned image and homography
+```python
+# Gate: inner ink ratio (center 70% of crop, excludes padding bleed from neighbors)
+h, w = crop.shape[:2]
+interior = crop[int(h*0.15):int(h*0.85), int(w*0.15):int(w*0.85)]
+inner_ink = compute_ink_ratio(interior)
 
-**Use case:** Deterministic alignment for scanned CMS-1500 forms.
+if inner_ink > 0.10:
+    # Try Florence-2 on RAW crop (before template subtraction)
+    raw_text = florence2_ocr(crop_raw)
+    if raw_text and passes_all_filters(raw_text):
+        return raw_text  # Recovered!
 
----
+return ""  # Truly blank
+```
 
-### `src/processing/registration.py`
-
-**Purpose:** Template loading and reference resolution.
-
-**What it does:**
-- `get_reference_image_path()`: resolves path to template (CMS-1500, UB-04)
-- `load_and_process_reference()`: loads template, computes ORB features (or delegates to cms1500_register for CMS-1500)
-- Caches template data for reuse
-
-**Use case:** Provide template data to alignment and zone matching.
-
----
-
-### `src/processing/preprocessing.py`
-
-**Purpose:** Image preprocessing utilities.
-
-**What it does:**
-- `remove_red_template_text()`: removes red template text (HSV) for better OCR
-- `preprocess_image()`: deskew, denoise, contrast, binarization
-- Used before OCR and alignment
-
-**Use case:** Improve OCR quality on scanned forms.
+**Why inner ink?** Padded bounding boxes can bleed in content from neighboring fields, inflating the overall ink_ratio. The interior (center 70%) excludes edge padding, giving accurate measurement of the field's actual content.
 
 ---
 
-### `src/pipelines/validators/field_validators.py`
+## Template Subtraction
 
-**Purpose:** Field-level format validation and normalization.
+### Purpose
+Remove pre-printed template elements (gridlines, labels, boxes) from scanned crops, leaving only handwritten/typed content.
 
-**What it does:**
-- Validators: NPI (checksum), NDC, ICD, HCPCS, CPT, date, phone, member_id, SSN, zip, money, tax_id
-- `validate_field()`: run validator by type, return (passed, info)
-- `guess_field_type()`: heuristic mapping from label text to validator type
+### Method
+1. **Register scan to template** using AKAZE/ORB features + RANSAC homography
+2. **Extract corresponding regions** from both scan and template
+3. **Pixel-wise subtraction** with adaptive thresholding
+4. **Compute ink_ratio** = non-template pixels / total pixels
 
-**Use case:** Ensure extracted values match expected formats.
+```python
+def template_subtract(scan_crop, template_rgb, bbox):
+    template_crop = template_rgb[y0:y1, x0:x1]
+    diff = cv2.absdiff(scan_crop, template_crop)
+    gray = cv2.cvtColor(diff, cv2.COLOR_RGB2GRAY)
+    binary = cv2.threshold(gray, threshold, 255, BINARY)[1]
+    ink_ratio = np.count_nonzero(binary) / binary.size
+    return clean_crop, ink_ratio
+```
 
----
+### Ink Ratio Interpretation
 
-### `src/pipelines/schemas/business_schema.py`
-
-**Purpose:** Maps OCR/schema fields to business-friendly keys.
-
-**What it does:**
-- `map_to_business_schema()`: maps `2_patient_name` → `patient_name`, etc.
-- Applies validators, composes addresses, sex from checkboxes
-- `merge_business_with_ocr()`: merges business schema with raw OCR output
-
-**Use case:** Produce clean JSON for downstream systems.
-
----
-
-### `src/ocr/paddle_ocr.py`
-
-**Purpose:** PaddleOCR wrapper.
-
-**What it does:**
-- Wraps PaddleOCR for text detection and recognition
-- Returns word boxes and text for given image regions
-
-**Use case:** Primary OCR engine for printed text.
+| Ink Ratio | Meaning |
+|-----------|---------|
+| 0.00–0.03 | Empty (dust/noise only) |
+| 0.03–0.09 | Likely blank (template alignment noise) |
+| 0.09–0.12 | Ambiguous (may have faint content) |
+| 0.12–0.20 | Content present |
+| 0.20+ | Heavy content (multi-line, signatures) |
 
 ---
 
-### `utils/config.py`
+## Table Extraction (Box 24)
 
-**Purpose:** Central configuration.
+Box 24 (service lines) requires structured extraction of tabular data.
 
-**What it does:**
-- Loads env vars (OLLAMA_HOST, USE_GPU, YOLO_MODEL_PATH, etc.)
-- Defines PROJECT_ROOT, model paths, cache paths
+### Method
+1. **VLM Direct Extraction:** MiniCPM-o4.5 (primary) or MiniCPM-V (fallback)
+2. **Temperature 0.0** for deterministic output
+3. **Structured Prompt** with explicit column definitions
+4. **Deduplication** by (CPT code, charges) to prevent row duplication
 
-**Use case:** Single source for all config.
+```python
+# Table extraction uses VLM directly (not the text OCR pipeline)
+table_data = vlm_extract_table(
+    crop=box24_crop,
+    model="openbmb/minicpm-o4.5:latest",
+    temperature=0.0,
+    prompt=BOX24_PROMPT
+)
+```
 
----
-
-### `utils/corrections.py`
-
-**Purpose:** Correction logging and threshold tuning.
-
-**What it does:**
-- Logs user corrections to `data/corrections.jsonl`
-- `auto_tune_thresholds()`: recomputes thresholds from corrections
-
-**Use case:** Improve pipeline over time from user feedback.
-
----
-
-### `utils/models.py`
-
-**Purpose:** Shared data models (outside pipelines).
-
-**Use case:** Common structures used across app and utils.
-
----
-
-### `utils/cache.py`
-
-**Purpose:** Caching utilities.
-
-**Use case:** Cache model loads, OCR results, etc.
-
----
-
-### `scripts/api_client.py`
-
-**Purpose:** CLI client for Doc2Data API.
-
-**What it does:**
-- `--health`: health check
-- `document.pdf`: upload and extract, print result
-
-**Use case:** Test API from command line.
+### Output Format
+```json
+{
+  "rows": [
+    {
+      "date_from": "09/20/12",
+      "date_to": "09/20/12",
+      "place_of_service": "11",
+      "cpt_code": "99213",
+      "modifier": "",
+      "charges": "125.00",
+      "units": "1",
+      "rendering_npi": "1234567890"
+    }
+  ],
+  "total_rows": 3,
+  "extraction_method": "vlm_primary"
+}
+```
 
 ---
 
-### `scripts/test_pipeline.py`
+## Scripts Reference
 
-**Purpose:** Full pipeline integration test.
-
-**What it does:**
-- Loads sample PDF, runs `MultiAgentPipeline.process()`, prints results
-
-**Use case:** Verify pipeline works end-to-end.
-
----
-
-### `scripts/grade_extraction.py`
-
-**Purpose:** Grade predictions against gold labels.
-
-**What it does:**
-- Compares prediction JSONs to gold JSONs
-- Computes F1, reports mismatches
-
-**Use case:** Evaluate extraction quality.
-
----
-
-### `scripts/debug_cms1500_alignment.py`
-
-**Purpose:** Debug CMS-1500 alignment on a single PDF.
-
-**What it does:**
-- Runs `get_cms1500_registrar().register()` on input PDF
-- Prints alignment result, quality, method
-- Optionally saves aligned image
-
-**Use case:** Diagnose alignment failures.
-
----
-
-### `scripts/tune_cms1500_thresholds.py`
-
-**Purpose:** Grid search for alignment thresholds.
-
-**What it does:**
-- Runs alignment on multiple PDFs with different threshold combinations
-- Prints recommended `CMS1500_*` env vars
-
-**Use case:** Tune alignment for handwritten scans.
-
----
-
-### `scripts/recompute_thresholds.py`
-
-**Purpose:** Recompute thresholds from corrections.
-
-**What it does:**
-- Reads `data/corrections.jsonl`
-- Calls `auto_tune_thresholds()`, prints updated thresholds
-
-**Use case:** Update thresholds after user corrections.
-
----
-
-### `deploy_and_run.sh`
-
-**Purpose:** Deploy Doc2Data to DGX server.
-
-**What it does:**
-- Rsyncs project to DGX
-- Builds Docker image
-- Runs container with GPU, restart policy
-
-**Use case:** Production deployment.
-
----
-
-## Pipeline Modules
-
-### Module Summary
-
-| Module | Path | Purpose |
-|--------|------|---------|
-| Core | `src/pipelines/core/` | BaseAgent, models, PipelineConfig |
-| Agents | `src/pipelines/agents/` | Form ID, alignment, layout, OCR, labeling, validation |
-| Registration | `src/pipelines/registration/` | CMS-1500 alignment |
-| Validators | `src/pipelines/validators/` | Field format validation |
-| Schemas | `src/pipelines/schemas/` | Business schema mapping |
-
----
-
-## App Layer
+### Core Pipeline
 
 | File | Purpose |
 |------|---------|
-| `app/streamlit_main.py` | Streamlit UI |
+| `src/pipelines/multi_agent_pipeline.py` | Main orchestrator (3-lane extraction) |
+| `src/pipelines/agents/ocr.py` | Florence-2 OCR, blank detection, field routing |
+| `src/pipelines/agents/labeling.py` | Table extraction, semantic labeling |
+| `src/pipelines/agents/form_identification.py` | Form type detection |
+| `src/pipelines/agents/template_alignment.py` | Alignment orchestration |
+| `src/pipelines/registration/cms1500_register.py` | CMS-1500 classical CV alignment |
+
+### App Layer
+
+| File | Purpose |
+|------|---------|
 | `app/api_main.py` | FastAPI REST API |
+| `app/streamlit_main.py` | Streamlit web UI |
 
----
-
-## Utils and Helpers
+### Utilities
 
 | File | Purpose |
 |------|---------|
-| `utils/config.py` | Configuration |
-| `utils/corrections.py` | Correction logging, threshold tuning |
-| `utils/models.py` | Shared models |
-| `utils/cache.py` | Caching |
+| `utils/config.py` | Central configuration |
+| `src/pipelines/validators/validation.py` | Field format validation |
+| `src/pipelines/schemas/business_schema.py` | Business-friendly field mapping |
+
+### Scripts
+
+| File | Purpose |
+|------|---------|
+| `scripts/api_client.py` | CLI client for API |
+| `scripts/test_pipeline.py` | Integration test |
+| `scripts/grade_extraction.py` | Accuracy evaluation |
+| `deploy_and_run.sh` | DGX deployment |
 
 ---
 
 ## Configuration and Data
 
-| Path | Purpose |
-|------|---------|
-| `data/sample_docs/` | Sample PDFs |
-| `data/schemas/` | CMS-1500, UB-04 field definitions |
-| `data/gold_labels/` | Ground truth for grading |
-| `data/templates/` | Template boxes |
-| `data/thresholds.json` | Tuned thresholds |
-| `data/corrections.jsonl` | User correction log |
-| `docker/` | Dockerfile, compose, requirements |
+### Schema Files
+```
+data/schemas/
+├── cms-1500.json    # Field definitions with bbox_norm_new (refined coordinates)
+└── ub-04.json       # UB-04 field definitions
+```
+
+Schema fields include:
+- `id`: Field identifier (e.g., "33_billing_provider_address")
+- `label`: Human-readable name
+- `field_type`: text, address, date, phone, npi, money, checkbox, signature, table
+- `bbox_norm_new`: Manually refined normalized coordinates [x0, y0, x1, y1]
+- `mode`: "scan", "digital", or "both"
+
+### Environment Variables
+```bash
+OLLAMA_HOST=http://localhost:11434
+VLM_MODEL_TABLE=openbmb/minicpm-o4.5:latest
+VLM_MODEL_RESCUE=minicpm-v
+USE_GPU=true
+```
 
 ---
 
 ## Models in Use
 
-| Purpose | Model |
-|---------|-------|
-| CMS-1500 Layout | YOLOv8 (optional, fine-tuned) |
-| General Layout | Detectron2 PubLayNet, PaddleDetection |
-| Printed OCR | PaddleOCR |
-| Handwriting OCR | TrOCR |
-| Table Structure | TATR (Table Transformer) |
-| Semantic Labels | Qwen (SLM) via Ollama |
-| Figure Analysis | MiniCPM-V (VLM) via Ollama |
+| Purpose | Model | Location |
+|---------|-------|----------|
+| **Primary OCR** | Florence-2-large | HuggingFace (cached on DGX) |
+| **Table Extraction** | MiniCPM-o4.5 | Ollama |
+| **VLM Fallback** | MiniCPM-V | Ollama |
+| **Handwriting OCR** | TrOCR-large | HuggingFace (optional) |
+| **Printed Text** | PaddleOCR v5 | PaddlePaddle |
+| **Semantic Labels** | Qwen 2.5 3B | Ollama |
+| **Layout (optional)** | YOLOv8 | Custom trained |
+
+### Model Loading
+- Florence-2 is pre-loaded on first request (~45s load time)
+- Subsequent requests use cached model
+- All Ollama models are pre-warmed at container startup
 
 ---
 
-## Template Alignment Code Map
+## Roadmap and Known Limitations
 
-| File | Purpose |
-|------|---------|
-| `src/pipelines/registration/cms1500_register.py` | Core CMS-1500 alignment (classical CV) |
-| `src/processing/registration.py` | Template loading, delegates to cms1500_register for CMS-1500 |
-| `src/pipelines/agents/template_alignment.py` | Orchestrates alignment, calls cms1500_register for CMS-1500 |
+### Current Limitations
+1. **First-run latency:** Model loading adds 5-7 minutes on first extraction
+2. **Multi-line addresses:** May require raw crop fallback (adds ~200ms)
+3. **Table dates:** Year sometimes truncated in service lines
+4. **Handwritten cursive:** Challenging for all OCR models
+
+### Completed (v2.0)
+- [x] Florence-2 as primary OCR (replaces TrOCR+PaddleOCR consensus)
+- [x] Blank field detection via Florence-2 (no pixel-based heuristics)
+- [x] Template subtraction with ink_ratio
+- [x] Raw crop fallback with inner-ink gating
+- [x] Removed VLM rescue for text fields (latency reduction)
+- [x] MiniCPM-o4.5 for table extraction
+- [x] Density-based keyword filtering
+
+### Planned
+- [ ] Confidence calibration for business metrics
+- [ ] Active learning from user corrections
+- [ ] Multi-page document support
+- [ ] Real-time streaming extraction
+- [ ] Field-level uncertainty quantification
 
 ---
 
-## Quick Reference: What Calls What
+## Quick Reference: Processing Flow
 
 ```
-Streamlit/API → multi_agent_pipeline.process_sync()
-    → form_id_agent.process()
-    → layout_agent.process() [uses layout_detection.py]
-    → ocr_agent.process() [uses paddle_ocr, validators]
-    → validation_agent.process() [uses validators]
-    → map_to_business_schema() [uses schemas/business_schema.py]
+1. Form Identification
+   └─ OCR header region → detect form type
 
-For Lane C (scanned):
-    → template_alignment_agent.process() [uses cms1500_register]
-    → registration.load_and_process_reference() [for template]
+2. Lane Selection
+   ├─ Lane A: AcroForm widgets → direct extraction
+   ├─ Lane B: Text layer → zone matching
+   └─ Lane C: Scan → alignment + OCR
+
+3. Lane C OCR Pipeline (per field)
+   ├─ Template subtraction → clean crop + ink_ratio
+   ├─ Florence-2 primary OCR
+   ├─ Multi-layer filters (hallucination, keywords, box numbers)
+   ├─ Case A (F2 empty): upscale retry → raw fallback → blank
+   ├─ Case B/C (F2 text): CCA check → consistency → use result
+   └─ Tables: VLM direct extraction (separate route)
+
+4. Post-Processing
+   ├─ Checkbox resolution (paired yes/no, mutually exclusive groups)
+   ├─ Field validation (NPI checksum, date format, etc.)
+   └─ Business schema mapping
+
+5. Output
+   └─ JSON with extracted_fields, business_fields, statistics
 ```
+
+---
+
+*Last updated: March 2026*

@@ -1,19 +1,25 @@
 """
-Field validators and normalizers for healthcare forms.
+Field validators and ValidationAgent — single module for all validation.
 
-PURPOSE: Validates and normalizes extracted field values (NPI, date, phone,
-ICD-10, HCPCS, SSN, zip, money, etc.). Each validator returns (passed, info)
-with optional normalized value. Used by ValidationAgent and business_schema.
+PURPOSE:
+- Validates and normalizes extracted field values (NPI, date, phone, ICD-10,
+  HCPCS, SSN, zip, money, etc.). Each validator returns (passed, info).
+- ValidationAgent runs field-level validation over blocks and optional LLM QA.
 
-USE CASE: Call validate_field(field_type, value) to check format and get
-normalized output. Use guess_field_type(label_text) to infer validator from
-field label (e.g. "NPI" -> "npi").
+USE CASE: Pipeline calls ValidationAgent.process() after assembly. Other
+modules (business_schema, multi_agent_pipeline) use validate_field() directly.
 """
 from __future__ import annotations
-import re
-from typing import Dict, Any, Optional, Tuple
 
-# Precompiled regex patterns
+import re
+from typing import Any, Dict, List, Optional, Tuple
+
+from src.pipelines.core import BaseAgent, DetectedBlock, PipelineConfig
+from utils.config import Config
+
+# ---------------------------------------------------------------------------
+# Validator functions (field-level format checks)
+# ---------------------------------------------------------------------------
 NPI_PATTERN = re.compile(r"^[0-9]{10}$")
 NDC_PATTERN = re.compile(r"^[0-9]{4,5}-?[0-9]{3,4}-?[0-9]{1,2}$")
 ICD_PATTERN = re.compile(r"^[A-TV-Z][0-9][0-9A-Z](?:\.[0-9A-Z]{1,4})?$", re.IGNORECASE)
@@ -29,7 +35,6 @@ TAXID_PATTERN = re.compile(r"^\d{2}-?\d{7}$")
 
 
 def validate_npi(value: str) -> Tuple[bool, Dict[str, Any]]:
-    """Validate NPI (10-digit, Luhn checksum). Use for provider NPI fields."""
     digits = re.sub(r"[^0-9]", "", value)
     if len(digits) != 10:
         return False, {"reason": "length"}
@@ -47,7 +52,6 @@ def validate_npi(value: str) -> Tuple[bool, Dict[str, Any]]:
 
 
 def validate_ndc(value: str) -> Tuple[bool, Dict[str, Any]]:
-    """Validate NDC drug code (4-5-1/2 format). Use for drug/NDC fields."""
     if not value:
         return False, {"reason": "empty"}
     cleaned = value.replace(" ", "").upper()
@@ -157,7 +161,6 @@ def validate_tax_id(value: str) -> Tuple[bool, Dict[str, Any]]:
 
 
 def validate_cpt(value: str) -> Tuple[bool, Dict[str, Any]]:
-    """CPT procedure code: 5 digits."""
     if not value:
         return False, {"reason": "empty"}
     digits = re.sub(r"[^0-9]", "", value)
@@ -185,7 +188,7 @@ FIELD_VALIDATORS = {
 
 
 def validate_field(field_type: str, value: str) -> Tuple[bool, Dict[str, Any]]:
-    """Run validator by type. Returns (passed, info). Use for any field validation."""
+    """Run validator by type. Returns (passed, info)."""
     validator = FIELD_VALIDATORS.get(field_type)
     if not validator:
         return False, {"reason": "unknown_validator"}
@@ -193,7 +196,7 @@ def validate_field(field_type: str, value: str) -> Tuple[bool, Dict[str, Any]]:
 
 
 def guess_field_type(label_text: Optional[str]) -> Optional[str]:
-    """Heuristic mapping from label text to validator type. Use when field_type unknown."""
+    """Heuristic mapping from label text to validator type."""
     if not label_text:
         return None
     text = label_text.lower()
@@ -215,10 +218,86 @@ def guess_field_type(label_text: Optional[str]) -> Optional[str]:
         return "numeric"
     if "ssn" in text or "social" in text:
         return "ssn"
-    if "zip" in text:
-        return "zip"
     if "amount" in text or "paid" in text or "charge" in text:
         return "money"
     if "tax" in text and "id" in text:
         return "tax_id"
     return None
+
+
+# ---------------------------------------------------------------------------
+# ValidationAgent
+# ---------------------------------------------------------------------------
+
+class ValidationAgent(BaseAgent):
+    """Field validation and optional LLM QA. Runs after assembly."""
+
+    def __init__(self, config: PipelineConfig):
+        super().__init__("ValidationAgent")
+        self.config = config
+
+    async def initialize(self):
+        self._initialized = True
+
+    def validate_field(self, value: str, field_type: str) -> Tuple[bool, str]:
+        """Validate a field value using validators."""
+        if not value or not field_type:
+            return True, ""
+        passed, info = validate_field(field_type, value)
+        if passed:
+            return True, ""
+        if info.get("reason") == "unknown_validator":
+            return True, ""
+        reason = info.get("reason", "format")
+        return False, f"Invalid {field_type} ({reason})"
+
+    async def llm_qa_check(self, extracted_data: Dict[str, Any]) -> List[str]:
+        """Run LLM QA check on extracted data."""
+        if not self.config.enable_llm_qa:
+            return []
+        notes = []
+        try:
+            import requests
+            fields_str = "\n".join([f"- {k}: {v}" for k, v in extracted_data.items() if v])
+            prompt = f"""Review this medical form extraction for errors:
+{fields_str}
+
+List only obvious errors (max 3). If all looks good, say "OK"."""
+            response = requests.post(
+                f"http://{Config.OLLAMA_HOST}/api/generate",
+                json={
+                    "model": self.config.slm_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {"temperature": 0.1, "num_predict": 200}
+                },
+                timeout=30
+            )
+            if response.ok:
+                result = response.json().get("response", "").strip()
+                if result and "ok" not in result.lower():
+                    notes.append(result)
+        except Exception:
+            pass
+        return notes
+
+    async def process(self, blocks: List[DetectedBlock], extracted_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate all data."""
+        await self.initialize()
+        validation_results = {
+            "errors": [],
+            "warnings": [],
+            "qa_notes": []
+        }
+        for block in blocks:
+            field_type = block.metadata.get("field_type")
+            if field_type:
+                valid, msg = self.validate_field(block.text, field_type)
+                if not valid:
+                    validation_results["errors"].append({
+                        "field_id": block.id,
+                        "message": msg
+                    })
+        qa_notes = await self.llm_qa_check(extracted_data)
+        validation_results["qa_notes"] = qa_notes
+        return validation_results

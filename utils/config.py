@@ -28,6 +28,15 @@ class Config:
     VLM_MODEL_RESCUE: str = os.getenv("VLM_MODEL_RESCUE", "minicpm-v")   # 5.5GB — text/date/number rescue
     VLM_MODEL_TABLE: str = os.getenv("VLM_MODEL_TABLE", "openbmb/minicpm-o4.5:latest")  # 6.1GB — best table extraction
     VLM_MODEL_TABLE_FALLBACK: str = os.getenv("VLM_MODEL_TABLE_FALLBACK", "minicpm-v")  # 5.5GB — table fallback
+    # Section extractor — mid-size VLM reading one semantic section at a
+    # time (small crop + ~5 field schema in the prompt).  Default is the
+    # same mid-size model used for tables; fallback stays small.
+    VLM_MODEL_SECTION: str = os.getenv(
+        "VLM_MODEL_SECTION", "openbmb/minicpm-o4.5:latest"
+    )
+    VLM_MODEL_SECTION_FALLBACK: str = os.getenv(
+        "VLM_MODEL_SECTION_FALLBACK", "minicpm-v"
+    )
 
     # Legacy aliases — kept for backward compat with streamlit UI / models.py
     OLLAMA_MODEL_VLM: str = os.getenv("OLLAMA_MODEL_VLM", VLM_MODEL_RESCUE)

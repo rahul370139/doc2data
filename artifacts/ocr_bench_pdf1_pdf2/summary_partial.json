@@ -1,0 +1,51 @@
+{
+  "engines": {
+    "florence2_raw_upscale": {
+      "total": 46,
+      "non_empty": 16,
+      "valid": 0,
+      "agrees_with_reference": 0,
+      "winner_on_type": {},
+      "latency_ms_p50": 581.9
+    },
+    "florence2_aggressive": {
+      "total": 46,
+      "non_empty": 17,
+      "valid": 0,
+      "agrees_with_reference": 0,
+      "winner_on_type": {},
+      "latency_ms_p50": 596.0
+    },
+    "got_ocr": {
+      "total": 46,
+      "non_empty": 46,
+      "valid": 0,
+      "agrees_with_reference": 0,
+      "winner_on_type": {},
+      "latency_ms_p50": 1125.2
+    },
+    "vlm": {
+      "total": 46,
+      "non_empty": 46,
+      "valid": 11,
+      "agrees_with_reference": 11,
+      "winner_on_type": {
+        "zip": 3,
+        "state": 3,
+        "text": 5
+      },
+      "latency_ms_p50": 16881.2
+    }
+  },
+  "winners_per_field_type": {
+    "zip": {
+      "vlm": 3
+    },
+    "state": {
+      "vlm": 3
+    },
+    "text": {
+      "vlm": 5
+    }
+  }
+}

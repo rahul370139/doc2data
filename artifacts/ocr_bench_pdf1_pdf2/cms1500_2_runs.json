@@ -1,0 +1,1241 @@
+[
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "header_top_right_notes",
+    "field_type": "text",
+    "field_name": "TOP RIGHT NOTES",
+    "reference_text": "",
+    "reference_engine": "blank_confirmed",
+    "bbox": [
+      1340,
+      61,
+      2301,
+      505
+    ],
+    "blank": true,
+    "per_engine": {}
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "1a_insured_id",
+    "field_type": "text",
+    "field_name": "INSURED'S I.D. NUMBER",
+    "reference_text": "",
+    "reference_engine": "blank_confirmed",
+    "bbox": [
+      1503,
+      532,
+      2319,
+      618
+    ],
+    "blank": true,
+    "per_engine": {}
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "2_patient_name",
+    "field_type": "text",
+    "field_name": "PATIENT'S NAME",
+    "reference_text": "Shama,Rmt",
+    "reference_engine": "florence2",
+    "bbox": [
+      178,
+      618,
+      958,
+      704
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 740.013599395752,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 734.0574264526367,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "2. PATIENT' S NAME( Last Name, First Name, Middle, Initial)  S harm a,  5. PATIENT' S ADDRESS( N 5. S tree t)",
+        "confidence": 0.7887517920760221,
+        "latency_ms": 1424.621820449829,
+        "valid": null,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "Sharma, Rohit",
+        "confidence": 0.8,
+        "latency_ms": 17222.246170043945,
+        "valid": null,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "3_patient_dob",
+    "field_type": "date",
+    "field_name": "PATIENT'S BIRTH DATE",
+    "reference_text": "11/09/1999",
+    "reference_engine": "rescue_deterministic",
+    "bbox": [
+      961,
+      622,
+      1318,
+      708
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 530.5631160736084,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "3. PATIENT'S BIRTH DATE\nDD\n11109",
+        "confidence": 0.82,
+        "latency_ms": 508.1024169921875,
+        "valid": false,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "3. PATIENT' S BIRTH DATE",
+        "confidence": 0.8395201414823532,
+        "latency_ms": 966.1116600036621,
+        "valid": false,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "11/09/58",
+        "confidence": 0.8,
+        "latency_ms": 7592.510223388672,
+        "valid": true,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "4_insured_name",
+    "field_type": "text",
+    "field_name": "INSURED'S NAME",
+    "reference_text": "Kraken,John",
+    "reference_engine": "florence2",
+    "bbox": [
+      1497,
+      616,
+      2321,
+      699
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 712.5117778778076,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 698.3916759490967,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "4. INSURED' S NAME( Last Name First Name, Middle In it al)  KraK en, John 7. INSURED' S ADDRESS( No.",
+        "confidence": 0.7816408357104739,
+        "latency_ms": 1295.1691150665283,
+        "valid": null,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "Kraken, John",
+        "confidence": 0.8,
+        "latency_ms": 16996.25325202942,
+        "valid": null,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "5_patient_address",
+    "field_type": "address",
+    "field_name": "PATIENT'S ADDRESS",
+    "reference_text": "PATTERT SADMESS Pd. Street 834 Baltimore At",
+    "reference_engine": "florence2",
+    "bbox": [
+      182,
+      706,
+      957,
+      798
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 557.3160648345947,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 597.9375839233398,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "5. PATIENT' S ADDRESS( N 6. Street)  8343 Baltimore Avenue CITY STATE",
+        "confidence": 0.7666274458169937,
+        "latency_ms": 1138.4577751159668,
+        "valid": null,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "8341 Baltimore Avenue",
+        "confidence": 0.8,
+        "latency_ms": 17258.4867477417,
+        "valid": null,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "5_patient_city",
+    "field_type": "text",
+    "field_name": "CITY",
+    "reference_text": "College Park",
+    "reference_engine": "florence2",
+    "bbox": [
+      178,
+      797,
+      858,
+      885
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 543.3604717254639,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 517.2629356384277,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "CITY",
+        "confidence": 0.7010137438774109,
+        "latency_ms": 875.6225109100342,
+        "valid": null,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "College Park",
+        "confidence": 0.8,
+        "latency_ms": 16208.556413650513,
+        "valid": null,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "5_patient_state",
+    "field_type": "state",
+    "field_name": "STATE",
+    "reference_text": "MD",
+    "reference_engine": "rescue_vlm",
+    "bbox": [
+      854,
+      797,
+      956,
+      886
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "STATE",
+        "confidence": 0.82,
+        "latency_ms": 365.05722999572754,
+        "valid": false,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "STATE",
+        "confidence": 0.82,
+        "latency_ms": 342.64683723449707,
+        "valid": false,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "STATE",
+        "confidence": 0.9871948957443237,
+        "latency_ms": 857.3100566864014,
+        "valid": false,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "MD",
+        "confidence": 0.8,
+        "latency_ms": 7048.073530197144,
+        "valid": true,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "5_patient_zip",
+    "field_type": "zip",
+    "field_name": "ZIP CODE",
+    "reference_text": "20749",
+    "reference_engine": "florence2",
+    "bbox": [
+      178,
+      889,
+      531,
+      980
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "ZIP CODE\n20 74",
+        "confidence": 0.82,
+        "latency_ms": 417.5562858581543,
+        "valid": false,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "ZIP CODE\n2o 74",
+        "confidence": 0.82,
+        "latency_ms": 425.426721572876,
+        "valid": false,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "ZIP CODE 26748",
+        "confidence": 0.8267580535676744,
+        "latency_ms": 925.1887798309326,
+        "valid": false,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "20748",
+        "confidence": 0.8,
+        "latency_ms": 7411.317586898804,
+        "valid": true,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "5_patient_phone",
+    "field_type": "phone",
+    "field_name": "TELEPHONE",
+    "reference_text": "(249) 199-2117",
+    "reference_engine": "rescue_deterministic",
+    "bbox": [
+      530,
+      889,
+      958,
+      981
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 622.4837303161621,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 596.0490703582764,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "TELEPHONE (Inducts Area Codo) \n(240) 9982117",
+        "confidence": 0.7799900386195916,
+        "latency_ms": 1143.7809467315674,
+        "valid": false,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "(240) 998.8217",
+        "confidence": 0.8,
+        "latency_ms": 16039.835453033447,
+        "valid": true,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "7_insured_address",
+    "field_type": "address",
+    "field_name": "INSURED'S ADDRESS",
+    "reference_text": "4740 Marbroik R",
+    "reference_engine": "florence2",
+    "bbox": [
+      1502,
+      707,
+      2321,
+      794
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 624.2401599884033,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 619.194507598877,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "7. INSURED' S ADDRESS( No. Steet)  4740 H az two ick STATE",
+        "confidence": 0.8092612675749339,
+        "latency_ms": 1119.3938255310059,
+        "valid": null,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "4740 Harwoodick Road",
+        "confidence": 0.8,
+        "latency_ms": 18141.687870025635,
+        "valid": null,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "7_insured_city",
+    "field_type": "text",
+    "field_name": "CITY",
+    "reference_text": "College Park",
+    "reference_engine": "florence2",
+    "bbox": [
+      1496,
+      795,
+      2142,
+      886
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "CITY\nCollege Park\nZIP CODE\nTELEPHONE (include Area",
+        "confidence": 0.82,
+        "latency_ms": 518.6030864715576,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "CITY\nCollege Park\nZIP CODE\nTELEPHONE (include Area",
+        "confidence": 0.82,
+        "latency_ms": 538.2637977600098,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "CITY",
+        "confidence": 0.7199062556028366,
+        "latency_ms": 844.6407318115234,
+        "valid": null,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "College Park",
+        "confidence": 0.8,
+        "latency_ms": 15806.089401245117,
+        "valid": null,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "7_insured_state",
+    "field_type": "state",
+    "field_name": "STATE",
+    "reference_text": "MD",
+    "reference_engine": "rescue_vlm",
+    "bbox": [
+      2141,
+      796,
+      2317,
+      886
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "STATE\nMD",
+        "confidence": 0.82,
+        "latency_ms": 402.3857116699219,
+        "valid": false,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "STATE\nMD",
+        "confidence": 0.82,
+        "latency_ms": 366.80150032043457,
+        "valid": false,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "STATE MD",
+        "confidence": 0.9801445802052816,
+        "latency_ms": 842.3962593078613,
+        "valid": false,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "MD",
+        "confidence": 0.8,
+        "latency_ms": 7076.94673538208,
+        "valid": true,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "7_insured_zip",
+    "field_type": "zip",
+    "field_name": "ZIP CODE",
+    "reference_text": "207413",
+    "reference_engine": "florence2",
+    "bbox": [
+      1499,
+      888,
+      1851,
+      981
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "ZIP CODE\n207413",
+        "confidence": 0.82,
+        "latency_ms": 395.07389068603516,
+        "valid": false,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "ZIP CODE\n207413",
+        "confidence": 0.82,
+        "latency_ms": 379.65989112854004,
+        "valid": false,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "ZIP CODE 20743",
+        "confidence": 0.9531887372334799,
+        "latency_ms": 952.9623985290527,
+        "valid": false,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "207413",
+        "confidence": 0.8,
+        "latency_ms": 7339.7321701049805,
+        "valid": false,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "7_insured_phone",
+    "field_type": "phone",
+    "field_name": "TELEPHONE",
+    "reference_text": "(024) 061-0722",
+    "reference_engine": "rescue_deterministic",
+    "bbox": [
+      1848,
+      888,
+      2320,
+      979
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "TELEPHONE (include Area Code)\n(240) 610 7223",
+        "confidence": 0.82,
+        "latency_ms": 481.3673496246338,
+        "valid": false,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "TELEPHONE (include Area Code)\n(240) 610 7223",
+        "confidence": 0.82,
+        "latency_ms": 494.4741725921631,
+        "valid": false,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "TELEPHONE(Induc",
+        "confidence": 0.6947618297168187,
+        "latency_ms": 892.9052352905273,
+        "valid": false,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "(240) 6107223",
+        "confidence": 0.8,
+        "latency_ms": 16324.461698532104,
+        "valid": true,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "9_other_insured_name",
+    "field_type": "text",
+    "field_name": "OTHER INSURED'S NAME",
+    "reference_text": "Care Core International",
+    "reference_engine": "florence2",
+    "bbox": [
+      182,
+      982,
+      958,
+      1061
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 682.10768699646,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 690.3963088989258,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "9. OTHER INSURED' S NAME( Last Name, First Name, Middle Initial)  Care Core Tnt ern at ional a. OTHER INSURED' S POLICY OR GROUP NUMBER",
+        "confidence": 0.8533034227788449,
+        "latency_ms": 1359.879970550537,
+        "valid": null,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "Care Core International",
+        "confidence": 0.8,
+        "latency_ms": 17261.693954467773,
+        "valid": null,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "9a_other_insured_policy",
+    "field_type": "text",
+    "field_name": "OTHER INSURED'S POLICY NUMBER",
+    "reference_text": "4DME-4Y3535",
+    "reference_engine": "florence2",
+    "bbox": [
+      183,
+      1067,
+      957,
+      1155
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 649.9626636505127,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 674.2796897888184,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "a. OTHER INSURED' S POLICY OR GROUP NUMBER 1 D ME- 48355 b. RESERVED FOR NUCC USE",
+        "confidence": 0.8985689551599564,
+        "latency_ms": 1242.6443099975586,
+        "valid": null,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "1DME - 408355",
+        "confidence": 0.8,
+        "latency_ms": 17780.282020568848,
+        "valid": null,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "9b_reserved_nucc_use",
+    "field_type": "text",
+    "field_name": "RESERVED FOR NUCC USE (9b)",
+    "reference_text": "",
+    "reference_engine": "blank_fast",
+    "bbox": [
+      186,
+      1156,
+      955,
+      1250
+    ],
+    "blank": true,
+    "per_engine": {}
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "9c_reserved_nucc_use",
+    "field_type": "text",
+    "field_name": "RESERVED FOR NUCC USE (9c)",
+    "reference_text": "L. HESPEDENTRANUCCIST",
+    "reference_engine": "florence2",
+    "bbox": [
+      180,
+      1247,
+      959,
+      1341
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 528.2444953918457,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 537.3244285583496,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "C. RESERVED FOR NUCCUSE d. INSURANCE PLAN NAME OR PROGRAM NAME",
+        "confidence": 0.8874411450492011,
+        "latency_ms": 1070.2073574066162,
+        "valid": null,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "RESERVED FOR NUCC USE",
+        "confidence": 0.8,
+        "latency_ms": 16881.216526031494,
+        "valid": null,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "9d_insurance_plan_name",
+    "field_type": "text",
+    "field_name": "INSURANCE PLAN NAME (Box 9d)",
+    "reference_text": "Claim 2X7 Support",
+    "reference_engine": "florence2",
+    "bbox": [
+      181,
+      1340,
+      956,
+      1430
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 593.3938026428223,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 607.0139408111572,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "d. INSURANCE PLAN NAME OR PROGRAM NAME Cia in 24 X 7 Supp or t READ BACK OF FORM BEFORE COMPLETING",
+        "confidence": 0.8299793559126556,
+        "latency_ms": 1233.8964939117432,
+        "valid": null,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "Claim 24x7 Support",
+        "confidence": 0.8,
+        "latency_ms": 17189.910173416138,
+        "valid": null,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "10_patient_condition",
+    "field_type": "text",
+    "field_name": "PATIENT CONDITION",
+    "reference_text": "",
+    "reference_engine": "blank_confirmed",
+    "bbox": [
+      964,
+      982,
+      1495,
+      1061
+    ],
+    "blank": true,
+    "per_engine": {}
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "10d_claim_codes",
+    "field_type": "text",
+    "field_name": "CLAIM CODES",
+    "reference_text": "Frezo",
+    "reference_engine": "florence2",
+    "bbox": [
+      960,
+      1344,
+      1498,
+      1421
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "100. CLAIM CODES (Designed by NUCC)\nFree20",
+        "confidence": 0.82,
+        "latency_ms": 474.3309020996094,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "100. CLAIM CODES (Designed by NUCC)\nFree20",
+        "confidence": 0.82,
+        "latency_ms": 489.2890453338623,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "10 d. CLAIM CC DES( Designated by NUCC)  Free 20",
+        "confidence": 0.8533260658383369,
+        "latency_ms": 1102.6256084442139,
+        "valid": null,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "Free20",
+        "confidence": 0.8,
+        "latency_ms": 15450.929641723633,
+        "valid": null,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "11_insured_policy_group",
+    "field_type": "text",
+    "field_name": "INSURED'S POLICY GROUP OR FECA NUMBER",
+    "reference_text": "",
+    "reference_engine": "blank_confirmed",
+    "bbox": [
+      1499,
+      980,
+      2318,
+      1068
+    ],
+    "blank": true,
+    "per_engine": {}
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "11a_insured_dob",
+    "field_type": "date",
+    "field_name": "INSURED'S DATE OF BIRTH",
+    "reference_text": "",
+    "reference_engine": "blank_confirmed",
+    "bbox": [
+      1502,
+      1070,
+      1902,
+      1165
+    ],
+    "blank": true,
+    "per_engine": {}
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "11b_other_claim_id",
+    "field_type": "text",
+    "field_name": "OTHER CLAIM ID",
+    "reference_text": "a CITICELAND O",
+    "reference_engine": "florence2",
+    "bbox": [
+      1500,
+      1159,
+      2319,
+      1244
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 681.959867477417,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 739.4497394561768,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "b. OTHER CLAIM ID( Designated by NUcc)  TD C 3-14370 C. INSURANCE PLAN NAME OR PROGRAM NAME",
+        "confidence": 0.8651652564020718,
+        "latency_ms": 1295.2709197998047,
+        "valid": null,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "IDC3 - 14370",
+        "confidence": 0.8,
+        "latency_ms": 18374.393701553345,
+        "valid": null,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "11c_insurance_plan_name",
+    "field_type": "text",
+    "field_name": "INSURANCE PLAN NAME",
+    "reference_text": "Get well full validity",
+    "reference_engine": "florence2",
+    "bbox": [
+      1502,
+      1246,
+      2320,
+      1332
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 614.4559383392334,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 647.2697257995605,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "C. INSURANCE PLAN NAME OR PROGRAM NAME Get we l full validity",
+        "confidence": 0.7268549734726548,
+        "latency_ms": 998.2621669769287,
+        "valid": null,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "Get well full validity",
+        "confidence": 0.8,
+        "latency_ms": 17723.49524497986,
+        "valid": null,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "12_signature_date",
+    "field_type": "date",
+    "field_name": "DATE",
+    "reference_text": "12-10-20",
+    "reference_engine": "florence2",
+    "bbox": [
+      1052,
+      1526,
+      1496,
+      1596
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "12-10-2015\nDATE",
+        "confidence": 0.82,
+        "latency_ms": 437.056303024292,
+        "valid": false,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "DATE\n12-10-2015",
+        "confidence": 0.82,
+        "latency_ms": 432.4455261230469,
+        "valid": false,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "DATE 12-10-2025",
+        "confidence": 0.984129969890301,
+        "latency_ms": 972.754955291748,
+        "valid": false,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "12/01/2025",
+        "confidence": 0.8,
+        "latency_ms": 15549.021244049072,
+        "valid": true,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "14_date_of_illness",
+    "field_type": "date",
+    "field_name": "DATE OF CURRENT ILLNESS/INJURY",
+    "reference_text": "08/10/2025",
+    "reference_engine": "rescue_vlm",
+    "bbox": [
+      187,
+      1605,
+      901,
+      1697
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 849.5068550109863,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 850.6712913513184,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "14. DATE OF CURREN T ILLNESS, INJURY, Or PREGNANCY( LMP)  MM DD YY 08102025 QU AL 17. NAME OF REFERRING PROVIDER CR OTHER SOURCE",
+        "confidence": 0.803489559575131,
+        "latency_ms": 1595.9863662719727,
+        "valid": false,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "08 10 2025 QUAL.",
+        "confidence": 0.8,
+        "latency_ms": 17433.851957321167,
+        "valid": false,
+        "error": ""
+      }
+    }
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "15_Other_date",
+    "field_type": "date",
+    "field_name": "OTHER DATE",
+    "reference_text": "",
+    "reference_engine": "blank_confirmed",
+    "bbox": [
+      907,
+      1613,
+      1501,
+      1701
+    ],
+    "blank": true,
+    "per_engine": {}
+  },
+  {
+    "pdf": "cms1500_2.pdf",
+    "field_id": "16_dates_unable_to_work",
+    "field_type": "date_range",
+    "field_name": "DATES PATIENT UNABLE TO WORK",
+    "reference_text": "10/10/2025",
+    "reference_engine": "rescue_final_cleanup",
+    "bbox": [
+      1500,
+      1611,
+      2317,
+      1694
+    ],
+    "blank": false,
+    "per_engine": {
+      "florence2_raw_upscale": {
+        "engine": "florence2_raw_upscale",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 897.4137306213379,
+        "valid": null,
+        "error": ""
+      },
+      "florence2_aggressive": {
+        "engine": "florence2_aggressive",
+        "text": "",
+        "confidence": 0.0,
+        "latency_ms": 914.3266677856445,
+        "valid": null,
+        "error": ""
+      },
+      "got_ocr": {
+        "engine": "got_ocr",
+        "text": "16. DATES PATIENT UNABLE TO WORK IN CURRENT OCCUPATION MM DD FROM 10102025 TO 11212025 18. HOSPITALIZATION DATES RELATED TO CURRENT SERVICES",
+        "confidence": 0.8655297742137369,
+        "latency_ms": 1506.0057640075684,
+        "valid": false,
+        "error": ""
+      },
+      "vlm": {
+        "engine": "vlm",
+        "text": "FROM 10/10/2023 TO 11/24/2025",
+        "confidence": 0.8,
+        "latency_ms": 18228.808403015137,
+        "valid": false,
+        "error": ""
+      }
+    }
+  }
+]

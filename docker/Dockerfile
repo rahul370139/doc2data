@@ -35,16 +35,20 @@ RUN pip install paddlepaddle || echo "PaddlePaddle install failed, continuing...
 # Re-enforce NumPy 1.x
 RUN pip install "numpy<2" --force-reinstall
 
-# Install Ollama binary directly (install.sh fails silently on aarch64 without sudo)
+# Install Ollama binary with robust fallback.
+# We intentionally FAIL the build if ``ollama`` is unavailable so we
+# never ship a container where VLM/SLM silently disable themselves.
 RUN apt-get update -qq && apt-get install -y -qq zstd && rm -rf /var/lib/apt/lists/* && \
     ARCH=$(uname -m) && \
     if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then OLLAMA_ARCH="arm64"; else OLLAMA_ARCH="amd64"; fi && \
     echo "Downloading Ollama for ${OLLAMA_ARCH}..." && \
-    curl -fsSL -L -o /tmp/ollama.tar.zst "https://github.com/ollama/ollama/releases/download/v0.17.4/ollama-linux-${OLLAMA_ARCH}.tar.zst" && \
-    cd /tmp && zstd -d ollama.tar.zst -o ollama.tar && tar -xf ollama.tar && \
-    cp bin/ollama /usr/local/bin/ollama && chmod +x /usr/local/bin/ollama && \
+    (curl -fsSL -L -o /tmp/ollama.tar.zst "https://github.com/ollama/ollama/releases/download/v0.17.4/ollama-linux-${OLLAMA_ARCH}.tar.zst" && \
+     cd /tmp && zstd -d ollama.tar.zst -o ollama.tar && tar -xf ollama.tar && \
+     cp bin/ollama /usr/local/bin/ollama && chmod +x /usr/local/bin/ollama) || \
+    (echo "Tarball install failed; trying official install.sh fallback..." && \
+     curl -fsSL https://ollama.com/install.sh | sh) && \
     rm -f /tmp/ollama.tar.zst /tmp/ollama.tar /tmp/bin/ollama && \
-    ollama --version || echo "Ollama install failed"
+    test -x /usr/local/bin/ollama && /usr/local/bin/ollama --version
 
 # Copy source code
 COPY . .

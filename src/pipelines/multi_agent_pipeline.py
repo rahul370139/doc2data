@@ -246,6 +246,18 @@ class MultiAgentPipeline:
         self.ocr_agent = OCRAgent(self.config)
         self.labeling_agent = LabelingAgent(self.config)
         self.validation_agent = ValidationAgent(self.config)
+        # GOT-OCR 2.0 rescue engine — constructed unconditionally so
+        # rescue_strategies can probe ``config.enable_got_ocr`` at call
+        # time and lazy-load the model.  Keeps start-up light when the
+        # engine is disabled.
+        from src.pipelines.agents.got_ocr import GOTOCRAgent
+        self.got_ocr_agent = GOTOCRAgent(self.config)
+        # PARSeq stays optional for experiments/benchmarks only.
+        # Production ladders do not include it by default.
+        self.parseq_agent = None
+        if getattr(self.config, "enable_parseq", False):
+            from src.pipelines.agents.parseq_ocr import ParseqAgent
+            self.parseq_agent = ParseqAgent(self.config)
         self._template_word_blacklist: Dict[str, set] = {}
         self._shared_paddle = None
         self._pipeline_template_rgb: Optional[np.ndarray] = None
@@ -2087,8 +2099,14 @@ class MultiAgentPipeline:
             
             x_offset = getattr(self.config, "alignment_x_offset", -0.008)
             y_offset = getattr(self.config, "alignment_y_offset", 0.0)
-            pad_ratio = getattr(self.config, "zone_padding_ratio", 0.08)
-            pad_px = getattr(self.config, "zone_padding_px", 6)
+            # PADDING v2: schema padding is now the ONLY padding step.
+            # _process_impl no longer adds its own pad, so there is no
+            # double expansion causing neighbour-field bleed.  Use a small
+            # fixed pad (2-3 px) to absorb ±1 px alignment jitter only.
+            pad_px = max(2, int(getattr(self.config, "zone_padding_px", 3)))
+            # Ratio-based padding is disabled here — it was the source of
+            # 8%+ of the bbox bleeding into the next field on tall rows.
+            pad_ratio = float(getattr(self.config, "zone_padding_ratio", 0.0))
             
             blocks = []
             skipped_mode = 0
@@ -2122,8 +2140,10 @@ class MultiAgentPipeline:
                 
                 box_w = x1 - x0
                 box_h = y1 - y0
-                pad_x = max(int(box_w * pad_ratio), pad_px)
-                pad_y = max(int(box_h * pad_ratio), pad_px)
+                # Pad: small absolute pad for alignment jitter, optionally a
+                # tiny ratio component capped by pad_px * 2.
+                pad_x = min(pad_px * 2, max(pad_px, int(box_w * pad_ratio))) if pad_ratio > 0 else pad_px
+                pad_y = min(pad_px * 2, max(pad_px, int(box_h * pad_ratio))) if pad_ratio > 0 else pad_px
                 
                 x0_padded = max(0, x0 - pad_x)
                 y0_padded = max(0, y0 - pad_y)

@@ -21,15 +21,41 @@ ollama>=0.1.0
 requests>=2.31.0
 aiohttp>=3.9.0  # Async HTTP client for parallel VLM calls
 
-# Table processing
-transformers>=4.30.0
+# Table processing + native GOT-OCR 2.0 support (merged in 4.49)
+# Florence-2 native classes (Florence2ForConditionalGeneration) also
+# require a recent transformers build, so keep this floor high.
+transformers>=4.49.0
 timm>=0.9.0  # Required for Table Transformer backbone
+# accelerate is *optional* for single-GPU inference (we do our own
+# ``.to(device)``), but several transformers paths — including some
+# ``AutoModelForImageTextToText`` variants and the ``device_map``
+# shorthand used by example code — fail loudly without it.  Install
+# it so GOT-OCR 2.0 / Florence-2 loads aren't blocked if a caller
+# ever passes ``device_map="auto"``.
+accelerate>=0.30.0
+# huggingface_hub gates model downloads behind its token plumbing;
+# pinning the floor avoids the occasional breaking-change regression.
+huggingface_hub>=0.23.0
+# pytorch_lightning — required by PARSeq (baudm/parseq) which loads
+# via torch.hub and depends on pl.LightningModule.  Without this the
+# ParseqAgent logs a warning and marks itself unavailable, and the
+# numeric rescue ladder silently skips PARSeq.  ~250MB on disk but
+# uses the same torch as everything else so no CUDA version pain.
+pytorch_lightning>=2.0.0
+# PARSeq's strhub/models/base.py imports ``from nltk import edit_distance``
+# at module load time (used during training), so we need nltk even for
+# pure inference.  Tiny package, pure Python, no CUDA/OS concerns.
+nltk>=3.8
 
 # Web framework
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 streamlit>=1.28.0
 python-multipart>=0.0.6  # Required for FastAPI file uploads
+
+# LangGraph orchestrator
+langgraph>=0.2.0
+langchain-core>=0.3.0
 
 # YOLOv8 (required to actually run the fine-tuned model)
 ultralytics>=8.2.0

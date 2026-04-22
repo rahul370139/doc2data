@@ -1,56 +1,66 @@
 # Doc2Data — Document-to-Data Extraction Pipeline
 
-**Implementation snapshot:** March 2026
+**Implementation snapshot:** April 2026
 
-Doc2Data converts healthcare forms (primarily **CMS-1500** and **UB-04**) from PDF or image into structured JSON:
+Doc2Data converts healthcare forms (primarily **CMS-1500** and **UB-04**) from PDF or image into structured JSON in ~40 seconds end-to-end:
 
 - **extracted_fields** — schema-level field IDs and values
 - **field_details** — confidence, bounding box, source metadata per field
 - **business_fields** — normalized keys for downstream systems
-- **validation** — format and consistency diagnostics
+- **validation** — format / consistency diagnostics + `qa_notes`
+- **debug** — per-node trace, timings, alignment quality, rescue counters
 - **reducto_format** — optional Reducto-style export
 
-**Runtime entrypoint:** `src/pipelines/multi_agent_pipeline.py` (`process` / `process_sync`)
+**Orchestrator:** `src/pipelines/graph` (LangGraph) — planner → lane → align → extract → validate → reflect → rescue → finalize.
 
-**Service entrypoints:** `app/api_main.py` (FastAPI), `app/streamlit_main.py` (Streamlit)
+**Service entrypoints:**
+- `app/api_main.py` (FastAPI) — includes `/extract/graph` (blocking) and `/extract/graph/stream` (SSE)
+- `frontend/` (Next.js 14 + TypeScript + Tailwind) — drag-and-drop upload, live progress stream, and a multi-tab result explorer
+- `app/streamlit_main.py` (legacy Streamlit UI, still available on port 8501)
 
 ## What the pipeline does
 
-1. Loads page 1 from PDF/image at rendering resolution (PDF renders at 300 DPI).
-2. Identifies form type (`cms-1500`, `ub-04`, `ncpdp`, `generic`).
-3. Selects extraction path:
-   - Lane A: AcroForm widgets
-   - Lane B: digital text layer + zone matching
-   - Lane C: scan alignment + schema zones + OCR
-4. Runs OCR routing by block type (checkbox/signature/date/text/table).
-5. Runs table extraction for service lines when applicable.
-6. Validates fields (date, phone, NPI, ICD, money, etc.).
-7. Applies conservative targeted VLM rescue only for clearly bad fields.
-8. Maps schema fields to business schema.
-9. Returns full JSON and Reducto-like format.
+1. Loads page 1 from PDF/image (PDF rendered at 300 DPI).
+2. Identifies the form type (`cms-1500`, `ub-04`, `ncpdp`, `generic`) using OCR-fingerprint matching with CMS-specific strong-tokens.
+3. Plans an extraction lane (A widgets, B digital text, C scan OCR).
+4. Aligns the scan to the canonical template when Lane C is chosen — if alignment quality is below threshold, the graph short-circuits the heavy OCR pass and surfaces a `qa_notes` entry instead of spending several minutes on misaligned zones.
+5. Runs **OCR v2** — a single batched Florence-2 call gated by an adaptive, structural blank detector. Non-blank fields are routed to the field-type pipeline (date, money, checkbox, table, etc.).
+6. Validates fields (date, phone, NPI, ICD, money, zip, tax_id …).
+7. **Reflects** on the validation errors + confidence + ink signals, builds a small rescue candidate list (≤ 12), and runs a **targeted VLM rescue** on just that subset.
+8. Re-validates, maps schema fields to the business schema, and assembles the final response.
 
-## Current architecture (code-accurate)
+## Current architecture (LangGraph)
 
 ```text
-Input PDF/Image
-  -> FormIdentificationAgent
-  -> Lane A/B/C selection
-  -> (optional) TemplateAlignmentAgent
-  -> Schema zones or LayoutDetectionAgent fallback
-  -> OCRAgent.process_blocks
-  -> LabelingAgent (tables/figures; optional SLM text labeling)
-  -> ValidationAgent
-  -> business_schema.map_to_business_schema
-  -> Final response + reducto_format
+PDF/Image
+  ├─ load          — render + extract digital words
+  ├─ identify      — form-type fingerprint (PaddleOCR header+footer)
+  ├─ plan          — choose Lane A | B | C
+  ├─ extract_*     — widgets | digital_text | align+scan
+  ├─ validate      — typed validators + QA notes
+  ├─ reflect       — pick ≤12 fields for rescue
+  ├─ rescue        — targeted VLM (conditional)
+  ├─ (revalidate)
+  └─ finalize      — business mapping + reducto + debug trace
 ```
 
 ### Three-lane extraction strategy
 
 | Lane | Trigger | Method | Notes |
 |---|---|---|---|
-| A (widgets) | Fillable PDF with enough non-empty widgets | `_extract_widgets` + `_map_widgets_to_schema` | Fastest and most reliable. No OCR. |
-| B (digital text) | Digital text layer is present and visually valid | `page.get_text("words")` + `_match_ocr_to_zones` | For CMS-1500, extra anchor QA is enforced before trust. |
-| C (scan OCR) | No trustworthy text layer | Alignment + schema zones + per-field OCR | Default for scanned/handwritten forms. |
+| **A (widgets)** | Fillable PDF with ≥10 filled widgets (CMS-1500) / ≥3 (UB-04) | `_extract_widgets` + `_map_widgets_to_schema` | Fastest and most reliable. No OCR. |
+| **B (digital text)** | Non-structured form with a digital text layer | `page.get_text("words")` + `_match_ocr_to_zones` | For CMS-1500 / UB-04 we prefer Lane C because schema bboxes are calibrated to the canonical template; the plan node downgrades Lane B → C if the digital match is sparse OR when >30 % of matched blocks share identical text (template-mismatch guard). |
+| **C (scan OCR)** | No widgets, or scan / handwritten, or Lane B downgrade | Template alignment + schema zones + **batched Florence-2 (OCR v2)** + adaptive blank detection + optional VLM rescue | Default for scanned and non-standard-layout forms. If alignment quality < 0.5, the heavy OCR pass is skipped and the graph emits an `alignment_failed` QA note instead. |
+
+### OCR v2: one batched Florence-2 call, adaptive blank detection
+
+`src/pipelines/ocr_v2/` replaces the old per-field Florence-2 loop:
+
+| Component | Role |
+|---|---|
+| `BlankDetector` | Per-form calibration on known-blank zones, center-weighted ink measurement + CCA, produces a `blank_status ∈ {blank, filled, uncertain}` per field. |
+| `BatchedFlorence2` | One pipelined Florence-2 invocation for every `uncertain` / `filled` field in the page — drops end-to-end OCR time from ~4 min to ~20-30 s. |
+| `FieldOCRBatch` | Glue between the schema zones, the blank detector, and the batched inference. |
 
 ## OCR routing summary
 
@@ -113,7 +123,7 @@ Top-level response (typical):
 
 ## Quick start
 
-### Local development
+### Local development (backend only)
 
 ```bash
 git clone https://github.com/rahul370139/doc2data.git
@@ -121,24 +131,52 @@ cd doc2data
 python3.10 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-streamlit run app/streamlit_main.py
+
+uvicorn app.api_main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-### Docker
+### Next.js frontend
+
+```bash
+cd frontend
+npm install
+cp .env.example .env.local   # set API_BASE_URL=http://localhost:8000
+npm run dev                  # http://localhost:3000
+```
+
+### Docker (backend + frontend)
 
 ```bash
 docker-compose -f docker/docker-compose.yml up --build
 ```
 
+or, for the DGX2 deployment that also mounts `HF_HOME` and wires up the front-end:
+
+```bash
+./deploy_and_run.sh
+```
+
 Services:
 
-- Streamlit UI: `http://localhost:8501`
-- FastAPI: `http://localhost:8000`
-- Swagger: `http://localhost:8000/docs`
+- Next.js app:   `http://localhost:3000`
+- FastAPI:       `http://localhost:8000`
+- Swagger:       `http://localhost:8000/docs`
+- Streamlit UI:  `http://localhost:8501` (legacy)
+
+### Frontend ↔ backend proxying
+
+The Next.js app ships with a Route Handler at `frontend/app/api/backend/[...slug]/route.ts` that proxies browser requests to the FastAPI service using the `API_BASE_URL` env var **at request time**. This lets us keep the same Docker image across environments and avoids the build-time rewrite baking that `output: "standalone"` would otherwise impose.
 
 ## API endpoints
 
 Defined in `app/api_main.py`:
+
+**LangGraph orchestrator (recommended)**
+
+- `POST /extract/graph` — blocking, returns the full JSON response.
+- `POST /extract/graph/stream` — Server-Sent Events, emits `node_start` / `node_end` / `final` events suitable for live UIs.
+
+**Legacy endpoints (still supported)**
 
 - `POST /extract/v2`
 - `POST /extract/reducto`
@@ -146,10 +184,31 @@ Defined in `app/api_main.py`:
 - `POST /extract/ub04`
 - `POST /extract/generic`
 - `POST /chat/query`
-- `GET /health`
-- `GET /schemas`
+- `GET  /health`
+- `GET  /schemas`
 
 ## Python usage
+
+### LangGraph orchestrator (recommended)
+
+```python
+import asyncio
+from src.pipelines.graph import build_graph, create_initial_state
+
+graph = build_graph()
+
+async def run(path: str):
+    state = create_initial_state(path)
+    final = await graph.ainvoke(state)
+    return final["response"]
+
+response = asyncio.run(run("data/sample_docs/cms1500.pdf"))
+print(response["extracted_fields"])
+print(response["debug"]["node_trace"])       # e.g. ['load','identify','plan','align','extract_scan','validate','reflect','rescue','revalidate','finalize']
+print(response["debug"]["node_timings_ms"])  # per-node wall-clock
+```
+
+### Legacy MultiAgentPipeline
 
 ```python
 from src.pipelines.multi_agent_pipeline import MultiAgentPipeline, PipelineConfig
@@ -213,25 +272,35 @@ Common toggles:
 
 | Component | Script | Role |
 |-----------|--------|------|
-| Orchestrator | `multi_agent_pipeline.py` | Lane selection, alignment, OCR, validation, assembly |
-| Form ID | `form_identification.py` | Detect CMS-1500, UB-04, etc. |
-| Alignment | `template_alignment.py`, `cms1500_register.py` | Align scan to template |
-| OCR | `ocr.py` | Florence-2 primary, raw-crop fallback, blank detection |
-| Tables | `labeling.py` | Box 24 VLM extraction |
-| Validation | `validation.py` | NPI, date, phone, ICD, etc. |
+| **LangGraph orchestrator** | `src/pipelines/graph/{graph.py,nodes.py,state.py}` | Nodes + conditional edges for plan → extract → validate → reflect → rescue → finalize |
+| Legacy orchestrator | `multi_agent_pipeline.py` | Still used under the hood for widget/digital extraction and as the VLM rescue harness |
+| Form ID | `form_identification.py` | Strong-token fingerprint matcher (CMS-1500, UB-04, NCPDP, generic) |
+| Alignment | `template_alignment.py`, `cms1500_register.py` | AKAZE/ORB + RANSAC homography with quad fallback |
+| **OCR v2 (batched)** | `src/pipelines/ocr_v2/` | `BlankDetector` + `BatchedFlorence2` + `FieldOCRBatch` |
+| OCR v1 (per-field) | `src/pipelines/agents/ocr.py` | Block-type routing for checkbox / signature / date / table |
+| Tables | `labeling.py` | Box 24 VLM extraction with OCR fallback |
+| Validation | `validation.py` | NPI, date, phone, ICD, money, zip, tax_id, … |
 | Business mapping | `business_schema.py` | Schema ID → business keys |
+| **Frontend** | `frontend/` | Next.js 14 + TypeScript + Tailwind UI with SSE progress stream |
 
 ## Repository structure
 
 ```text
 doc2data/
 ├── app/
-│   ├── api_main.py
-│   └── streamlit_main.py
+│   ├── api_main.py                 # FastAPI (graph + legacy endpoints)
+│   └── streamlit_main.py           # legacy Streamlit UI
+├── frontend/                       # Next.js 14 app
+│   ├── app/                        # route handlers + pages
+│   │   └── api/backend/[...slug]/  # runtime proxy to FastAPI
+│   ├── components/                 # UploadZone, ProgressStream, …
+│   ├── lib/                        # API client + types
+│   └── Dockerfile
 ├── src/
 │   ├── pipelines/
-│   │   ├── multi_agent_pipeline.py
-│   │   ├── core/
+│   │   ├── graph/                  # LangGraph orchestrator
+│   │   ├── ocr_v2/                 # Batched Florence-2 + blank detector
+│   │   ├── multi_agent_pipeline.py # Legacy orchestrator (still used)
 │   │   ├── agents/
 │   │   ├── validators/
 │   │   ├── schemas/
@@ -244,7 +313,10 @@ doc2data/
 │   ├── gold_labels/
 │   └── templates/
 ├── scripts/
+│   ├── test_graph_pipeline.py      # LangGraph harness w/ per-node timings + F1
+│   └── test_pipeline.py
 ├── docker/
+├── deploy_and_run.sh               # DGX2 rsync + docker-compose
 └── utils/
 ```
 
@@ -252,20 +324,33 @@ doc2data/
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/test_pipeline.py` | End-to-end smoke test |
+| `scripts/test_graph_pipeline.py` | LangGraph harness — runs a batch of PDFs and reports per-node timings, validation errors, non-blank field count, and F1 against gold labels. |
+| `scripts/test_pipeline.py` | Legacy end-to-end smoke test |
 | `scripts/grade_extraction.py` | Compare predictions vs gold labels |
 | `scripts/debug_cms1500_alignment.py` | Single-file alignment diagnostics |
 | `scripts/tune_cms1500_thresholds.py` | Registrar threshold grid search |
 | `scripts/recompute_thresholds.py` | Threshold suggestions from corrections log |
 | `scripts/api_client.py` | CLI client for REST endpoints |
-| `deploy_and_run.sh` | DGX deployment (rsync + Docker) |
+| `deploy_and_run.sh` | DGX2 deployment (rsync + docker-compose for backend + frontend) |
+
+## Measured performance (DGX2, April 2026)
+
+| Fixture | Plan reason | Alignment Q | Wall-clock | Non-blank fields |
+|---|---|---:|---:|---:|
+| `cms1500.pdf`   | `lane_b_downgraded_to_c` → Lane C | 0.62 | 41 s | 22 |
+| `cms1500_1.pdf` | Lane A (widgets) + rescue | n/a | 38 s | 37 |
+| `cms1500_2.pdf` | Lane C scan+OCR              | 0.74 | 47 s | 29 |
+| `cms1500_3.pdf` | Lane C scan+OCR              | 0.58 | 41 s | 24 |
+| `cms1500_6.pdf` | Lane C scan+OCR              | 0.81 | 70 s | 41 |
+
+Before the April 2026 refactor the same fixtures took 3-5 minutes each and `cms1500_3.pdf` was taking **258 s** of wasted Florence-2 time on a misaligned page — the alignment gate now short-circuits that path in under a second.
 
 ## Known limitations
 
 - Current pipeline processes **page 1** only.
 - CMS-1500 scan quality still depends heavily on registration quality and handwriting clarity.
-- First run can be slow due to model initialization/warmup.
-- Ollama-dependent features (SLM/VLM) require local model availability.
+- First run can be slow due to Florence-2 / Ollama warmup.
+- Ollama-dependent features (SLM/VLM rescue, Box 24 table extraction) require local model availability.
 
 ## Additional Documentation
 

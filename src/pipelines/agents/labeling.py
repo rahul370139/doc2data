@@ -352,124 +352,201 @@ Respond in JSON format:
 
         if is_box24:
             self.log("Table Box 24 → VLM direct (structured extraction)")
-            prompt = """You are reading a CMS-1500 Box 24 service lines table from a medical claim form.
-The table has 6 numbered rows on the left. Some rows have handwritten data, others are blank.
+            # Prompt design notes:
+            # - We ask for pipe-separated output (not JSON) because smaller
+            #   VLMs like minicpm-v often break JSON syntax on long tables.
+            # - We drop the leading "ROW" column from the required format —
+            #   the model used to confuse it with literal text headers and
+            #   emit "ROW | date | ..." which then had to be filtered out.
+            # - The example line is explicit about what "empty" looks like
+            #   (two adjacent pipes, no space) so the parser doesn't
+            #   mis-align columns when the modifier is blank.
+            prompt = (
+                "You are reading CMS-1500 Box 24 — the service lines table. "
+                "It has 6 rows. Some rows have handwritten data, the rest are blank.\n\n"
+                "For EACH row that has ANY handwritten data, output ONE line "
+                "in this format (pipe-separated, 8 columns, empty values "
+                "kept as empty strings):\n"
+                "date_from | date_to | place | cpt | modifier | charges | units | npi\n\n"
+                "Column rules:\n"
+                "- date_from, date_to: MM/DD/YY or MM/DD/YYYY\n"
+                "- place: 2-digit place-of-service code (e.g. 11, 21, 12)\n"
+                "- cpt: 5-character CPT/HCPCS code (e.g. 99213, V5259, H2557)\n"
+                "- modifier: 2-char modifier if present, else empty\n"
+                "- charges: dollar amount as plain number (e.g. 83.40)\n"
+                "- units: integer day/unit count\n"
+                "- npi: 10-digit NPI on the far right, else empty\n\n"
+                "Example (row 1 has data, modifier is empty):\n"
+                "09/20/24 | 09/20/24 | 11 | 99213 |  | 150.00 | 1 | 1234567893\n\n"
+                "Output ONLY pipe-separated data lines. No headers, no "
+                "commentary, no markdown, no JSON."
+            )
 
-For EACH row that has handwritten data, output one line in this exact format:
-ROW | date_from | date_to | place | CPT_code | modifier | charges | units | rendering_NPI
+            def _count_pipe_rows(resp: str) -> int:
+                if not resp:
+                    return 0
+                return sum(
+                    1 for ln in resp.strip().split("\n")
+                    if "|" in ln and any(c.isdigit() for c in ln)
+                )
 
-Column guide:
-- ROW: row number (1-6)
-- date_from, date_to: MM/DD/YY
-- place: 2-digit place of service code
-- CPT_code: 5-character CPT/HCPCS code (e.g., 99213, H2557, V5259)
-- modifier: modifier code if present, else empty
-- charges: dollar amount (e.g., 83.40)
-- units: days or units count
-- rendering_NPI: 10-digit NPI number on the far right
-
-RULES:
-- Read ONLY rows with actual handwritten data. Skip blank rows.
-- Read the exact values written — do not guess, invent, or repeat rows.
-- Output ONLY pipe-separated data lines. No headers, no commentary, no markdown."""
+            resp_primary = ""
+            resp_fallback = ""
             try:
                 resp_primary = self._call_vlm(
                     prompt, clean_crop, max_tokens=2000, timeout=300,
                     model=self.VLM_TABLE_MODEL, temperature=0.0,
+                ) or ""
+                primary_lines = _count_pipe_rows(resp_primary)
+                self.log(
+                    f"Primary VLM ({self.VLM_TABLE_MODEL}): {primary_lines} "
+                    f"pipe-rows, {len(resp_primary)} chars"
                 )
-                primary_lines = len([l for l in (resp_primary or '').strip().split('\n') if '|' in l]) if resp_primary else 0
-                self.log(f"Primary VLM ({self.VLM_TABLE_MODEL}): {primary_lines} pipe-rows, {len(resp_primary or '')} chars")
+            except Exception as e:
+                table_data["vlm_primary_error"] = str(e)
+                self.log(f"Primary VLM table call failed: {e}")
 
+            try:
                 resp_fallback = self._call_vlm(
                     prompt, clean_crop, max_tokens=2000, timeout=300,
                     model=self.VLM_TABLE_FALLBACK, temperature=0.0,
+                ) or ""
+                fallback_lines = _count_pipe_rows(resp_fallback)
+                self.log(
+                    f"Fallback VLM ({self.VLM_TABLE_FALLBACK}): {fallback_lines} "
+                    f"pipe-rows, {len(resp_fallback)} chars"
                 )
-                fallback_lines = len([l for l in (resp_fallback or '').strip().split('\n') if '|' in l]) if resp_fallback else 0
-                self.log(f"Fallback VLM ({self.VLM_TABLE_FALLBACK}): {fallback_lines} pipe-rows, {len(resp_fallback or '')} chars")
-
-                if fallback_lines > primary_lines:
-                    self.log(f"Using fallback ({fallback_lines} > {primary_lines} rows)")
-                    response = resp_fallback
-                else:
-                    response = resp_primary
-                self.log(f"VLM Box 24 raw response ({len(response) if response else 0} chars): {(response or '')[:300]}")
-                if response:
-                    json_match = re.search(r'\[[\s\S]*?\]', response)
-                    if json_match:
-                        try:
-                            rows = json.loads(json_match.group())
-                            if rows and isinstance(rows, list):
-                                table_data["rows"] = rows
-                                table_data["extraction_method"] = "vlm_direct"
-                        except json.JSONDecodeError:
-                            pass
-
-                    if not table_data["rows"]:
-                        parsed_rows = []
-                        for line in response.strip().split('\n'):
-                            line = line.strip()
-                            if not line or line.startswith('#') or 'example' in line.lower() or 'row' in line.lower()[:4] and 'date' in line.lower():
-                                continue
-                            parts = [p.strip() for p in line.split('|')]
-                            if len(parts) >= 4 and any(c.isdigit() for c in line):
-                                offset = 0
-                                if len(parts) >= 8 and parts[0].strip().isdigit():
-                                    offset = 1
-                                row = {
-                                    "date_from": parts[offset] if len(parts) > offset else "",
-                                    "date_to": parts[offset + 1] if len(parts) > offset + 1 else "",
-                                    "place_of_service": parts[offset + 2] if len(parts) > offset + 2 else "",
-                                    "cpt_code": parts[offset + 3] if len(parts) > offset + 3 else "",
-                                    "modifier": parts[offset + 4] if len(parts) > offset + 4 else "",
-                                    "charges": parts[offset + 5] if len(parts) > offset + 5 else "",
-                                    "units": parts[offset + 6] if len(parts) > offset + 6 else "",
-                                    "npi": parts[offset + 7] if len(parts) > offset + 7 else "",
-                                }
-                                parsed_rows.append(row)
-                        if parsed_rows:
-                            table_data["rows"] = parsed_rows
-                            table_data["extraction_method"] = "vlm_direct_parsed"
-
-                    if table_data["rows"]:
-                        seen = set()
-                        unique_rows = []
-                        for r in table_data["rows"]:
-                            cpt = re.sub(r'\s+', '', str(r.get("cpt_code", ""))).upper()
-                            chg = re.sub(r'[^\d.]', '', str(r.get("charges", "")))
-                            key = (cpt, chg)
-                            if key not in seen and cpt:
-                                seen.add(key)
-                                unique_rows.append(r)
-                        if len(unique_rows) < len(table_data["rows"]):
-                            self.log(f"Deduped {len(table_data['rows'])} → {len(unique_rows)} rows")
-                        table_data["rows"] = unique_rows
-                        table_data["total_rows"] = len(unique_rows)
-                        parts = []
-                        for r in unique_rows:
-                            p = []
-                            if r.get("date_from"):
-                                p.append(str(r["date_from"]))
-                            if r.get("date_to"):
-                                p.append(str(r["date_to"]))
-                            if r.get("place_of_service"):
-                                p.append(str(r["place_of_service"]))
-                            if r.get("cpt_code"):
-                                p.append(str(r["cpt_code"]))
-                            if r.get("modifier"):
-                                p.append(str(r["modifier"]))
-                            if r.get("charges"):
-                                p.append(f"${r.get('charges', '')}")
-                            if r.get("units"):
-                                p.append(f"{r.get('units', '')} units")
-                            if r.get("npi"):
-                                p.append(str(r["npi"]))
-                            if p:
-                                parts.append(" | ".join(p))
-                        table_data["summary"] = "\n".join(parts)
-                        self.log(f"VLM extracted {len(unique_rows)} service line rows")
             except Exception as e:
-                table_data["vlm_error"] = str(e)
-                self.log(f"VLM table extraction failed: {e}")
+                table_data["vlm_fallback_error"] = str(e)
+                self.log(f"Fallback VLM table call failed: {e}")
+
+            primary_lines = _count_pipe_rows(resp_primary)
+            fallback_lines = _count_pipe_rows(resp_fallback)
+            response = resp_fallback if fallback_lines > primary_lines else resp_primary
+
+            # Always preserve the raw VLM output so the debug panel (and
+            # us, next iteration) can see exactly what the model said
+            # when zero rows get parsed.
+            table_data["vlm_raw_primary"] = resp_primary[:800]
+            table_data["vlm_raw_fallback"] = resp_fallback[:800]
+            table_data["vlm_model_used"] = (
+                self.VLM_TABLE_FALLBACK
+                if fallback_lines > primary_lines
+                else self.VLM_TABLE_MODEL
+            )
+
+            if response:
+                # First try JSON — some VLMs ignore the pipe-format
+                # instruction and return JSON anyway; still valid input.
+                json_match = re.search(r'\[[\s\S]*?\]', response)
+                if json_match:
+                    try:
+                        rows = json.loads(json_match.group())
+                        if rows and isinstance(rows, list):
+                            table_data["rows"] = rows
+                            table_data["extraction_method"] = "vlm_direct"
+                    except json.JSONDecodeError:
+                        pass
+
+                # Pipe-line parser — tolerant of the model dropping the
+                # NPI column, adding a leading row number, or leaving
+                # trailing whitespace/unicode bars.
+                if not table_data["rows"]:
+                    parsed_rows = []
+                    for line in response.strip().split("\n"):
+                        line = line.strip().rstrip("|").lstrip("|").strip()
+                        if not line:
+                            continue
+                        low = line.lower()
+                        # Skip ANY line that looks like a header/example
+                        # from our own prompt bleeding into the output.
+                        if (
+                            low.startswith("#")
+                            or low.startswith("example")
+                            or (
+                                "date_from" in low
+                                and "date_to" in low
+                            )
+                            or low.startswith("row ")
+                            or low.startswith("---")
+                        ):
+                            continue
+                        # Require at least one pipe and one digit.  This
+                        # keeps commentary lines out without dropping
+                        # rows where modifier/NPI are missing.
+                        if "|" not in line or not any(c.isdigit() for c in line):
+                            continue
+                        parts = [p.strip() for p in line.split("|")]
+                        # Drop leading row-number if the model insisted
+                        # on including it (e.g. "1 | 09/20/24 | …").
+                        offset = 1 if parts and re.fullmatch(r"\d{1,2}", parts[0] or "") else 0
+                        padded = parts + [""] * 8
+                        row = {
+                            "date_from": padded[offset] if len(padded) > offset else "",
+                            "date_to": padded[offset + 1] if len(padded) > offset + 1 else "",
+                            "place_of_service": padded[offset + 2] if len(padded) > offset + 2 else "",
+                            "cpt_code": padded[offset + 3] if len(padded) > offset + 3 else "",
+                            "modifier": padded[offset + 4] if len(padded) > offset + 4 else "",
+                            "charges": padded[offset + 5] if len(padded) > offset + 5 else "",
+                            "units": padded[offset + 6] if len(padded) > offset + 6 else "",
+                            "npi": padded[offset + 7] if len(padded) > offset + 7 else "",
+                        }
+                        # Keep rows that carry SOMETHING substantive.
+                        # CPT used to be required, which silently dropped
+                        # rows where only dates + charges were read.
+                        if any(row[k] for k in ("cpt_code", "charges", "date_from", "npi")):
+                            parsed_rows.append(row)
+                    if parsed_rows:
+                        table_data["rows"] = parsed_rows
+                        table_data["extraction_method"] = "vlm_direct_parsed"
+
+                if table_data["rows"]:
+                    # Dedup on (cpt, charges) — if both are empty we keep
+                    # the row (the dates/place/NPI still carry info).
+                    seen = set()
+                    unique_rows = []
+                    for r in table_data["rows"]:
+                        cpt = re.sub(r"\s+", "", str(r.get("cpt_code", ""))).upper()
+                        chg = re.sub(r"[^\d.]", "", str(r.get("charges", "")))
+                        key = (cpt, chg)
+                        if cpt == "" and chg == "":
+                            unique_rows.append(r)
+                            continue
+                        if key not in seen:
+                            seen.add(key)
+                            unique_rows.append(r)
+                    if len(unique_rows) < len(table_data["rows"]):
+                        self.log(
+                            f"Deduped {len(table_data['rows'])} → "
+                            f"{len(unique_rows)} rows"
+                        )
+                    table_data["rows"] = unique_rows
+                    table_data["total_rows"] = len(unique_rows)
+                    parts = []
+                    for r in unique_rows:
+                        p = []
+                        if r.get("date_from"):
+                            p.append(str(r["date_from"]))
+                        if r.get("date_to"):
+                            p.append(str(r["date_to"]))
+                        if r.get("place_of_service"):
+                            p.append(str(r["place_of_service"]))
+                        if r.get("cpt_code"):
+                            p.append(str(r["cpt_code"]))
+                        if r.get("modifier"):
+                            p.append(str(r["modifier"]))
+                        if r.get("charges"):
+                            p.append(f"${r.get('charges', '')}")
+                        if r.get("units"):
+                            p.append(f"{r.get('units', '')} units")
+                        if r.get("npi"):
+                            p.append(str(r["npi"]))
+                        if p:
+                            parts.append(" | ".join(p))
+                    table_data["summary"] = "\n".join(parts)
+                    self.log(
+                        f"VLM extracted {len(unique_rows)} service line rows"
+                    )
         
         # ── Fallback for non-Box24 tables or when VLM fails: SLM parsing ────
         if not table_data["rows"] and self.config.enable_slm_labeling and block.text:

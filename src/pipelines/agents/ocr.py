@@ -138,7 +138,7 @@ def _florence2_ocr_run(image: np.ndarray) -> Optional[str]:
         with torch.no_grad():
             gen = _florence2_model.generate(
                 **inputs,
-                max_new_tokens=1024, do_sample=False, num_beams=3,
+                max_new_tokens=128, do_sample=False, num_beams=1,
             )
         raw_text = _florence2_processor.batch_decode(gen, skip_special_tokens=False)[0]
         parsed = _florence2_processor.post_process_generation(
@@ -1015,10 +1015,20 @@ Text:"""
         h, w = image.shape[:2]
         x0, y0, x1, y1 = block.bbox
         
-        # Expand bbox to capture edges; controlled by config (UI slider `ocr_padding`)
-        pad = int(getattr(self.config, "zone_padding_px", 10))
-        x0_p, y0_p = max(0, x0 - pad), max(0, y0 - pad)
-        x1_p, y1_p = min(w, x1 + pad), min(h, y1 + pad)
+        # PADDING v2: the bbox coming from _load_schema_zones is already
+        # padded with a small, safe margin.  Adding another pad here caused
+        # neighbouring fields to leak into the crop (e.g. Box 24 rows bleed
+        # into each other, checkbox labels bleed into the checkbox crop).
+        # We keep an OPTIONAL small extra pad, controlled by
+        # ``extra_ocr_padding_px`` (default 0) so advanced users can turn it
+        # back on, but the default is now NO double padding.
+        extra = int(getattr(self.config, "extra_ocr_padding_px", 0))
+        if extra > 0:
+            x0_p, y0_p = max(0, x0 - extra), max(0, y0 - extra)
+            x1_p, y1_p = min(w, x1 + extra), min(h, y1 + extra)
+        else:
+            x0_p, y0_p = int(max(0, x0)), int(max(0, y0))
+            x1_p, y1_p = int(min(w, x1)), int(min(h, y1))
         crop = image[int(y0_p):int(y1_p), int(x0_p):int(x1_p)]
         
         if crop.size == 0:
@@ -1190,47 +1200,81 @@ Text:"""
 
         return False
 
-    _CMS_TEMPLATE_KEYWORDS = re.compile(
-        r"RESERVED|NUCC|N0CC|NLICC|FOR\s*USE|CLAIM\s*(CODE|ID)"
-        r"|ACCEPT\s*ASSIGN|INSURANCE\s*(PLAN|TYPE)|EMPLOYER|REFERRING"
-        r"|BILLING\s*PROVIDER|SERVICE\s*FACILITY|TELEPHONE"
-        r"|PATIENT'?S?\s*(NAME|ADDRESS|BIRTH|CONDITION|SIGNATURE|ACCOUNT|RELATIONSHIP)"
-        r"|INSURED'?S?\s*(NAME|ID|ADDRESS|DATE|POLICY|SIGNATURE|GROUP)"
-        r"|OTHER\s*INSURED|ZIP\s*CODE|CITY|STATE|SEX|NPI|DOB"
-        r"|AMOUNT\s*PAID|TOTAL\s*CHARGE|OUTSIDE\s*LAB|\bCHARGES\b"
-        r"|PRIOR\s*AUTH|AUTHORIZATION|RESUBMISSION|HOSPITALIZATION"
-        r"|DIAGNOSIS|FEDERAL\s*TAX|SIGNATURE\s*OF"
-        r"|HEALTH\s*INSURANCE|CLAIM\s*FORM|CURRENT\s*ILLNESS"
-        r"|PLACE\s*OF\s*SERVICE|DATE\s*OF|PLEASE\s*PRINT"
-        r"|Delaware|FECA|PROGRAM",
-        re.IGNORECASE,
-    )
+    # The hardcoded keyword lists that used to live here (_CMS_TEMPLATE_
+    # KEYWORDS and _TEMPLATE_BLEED_PHRASES) have been replaced with a
+    # schema-driven vocabulary: the ``template_chrome`` array plus every
+    # field label lives in ``data/schemas/<form>.json``.  We delegate the
+    # decision to ``rescue_strategies._looks_like_template_label`` below
+    # (via a tiny helper) so both V1 and V2 code paths share one source
+    # of truth.  Adding a new form is now a JSON edit, not a Python edit.
 
-    _TEMPLATE_BLEED_PHRASES = re.compile(
-        r"\bCARRIER\b|\bPICA\b|\bPLEASE\s+PRINT\s+OR\s+TYPE\b"
-        r"|\bHEALTH\s+INSURANCE\s+CLAIM\s+FORM\b"
-        r"|\bAPPROVED\s+BY\b|\bNUCC\b|\b02/12\b"
-        r"|\bAPPROVED\s+OMB\b|\bFORM\s+CMS[\s-]*1500\b",
-        re.IGNORECASE,
-    )
+    def _is_template_leak(self, text: str, form_type: str = "") -> bool:
+        """Return True iff ``text`` looks like printed template chrome.
+
+        Thin adapter over the graph's schema-aware detector.  When
+        ``form_type`` is missing we default to ``"cms-1500"`` because
+        this method is only reachable from the legacy CMS V1 path —
+        the graph's V2 path calls the detector directly with the
+        per-block form_type tag.
+        """
+        if not text or not text.strip():
+            return False
+        try:
+            from src.pipelines.graph.rescue_strategies import (
+                _looks_like_template_label as _llt,
+            )
+            return bool(_llt(text, form_type or "cms-1500"))
+        except Exception:
+            return False
 
     def _strip_template_bleed(self, text: str, field_name: str) -> str:
-        """Remove template phrases that bleed into field text from padded bounding box.
+        """Remove template phrases that bleed into field text.
 
-        Padding around bounding boxes can capture neighboring template labels
-        (e.g. "CARRIER" above the header area).  Instead of blanking the whole
-        field, we surgically remove known template fragments and keep the real
-        handwritten/typed content.
+        Legacy V1 helper.  When the whole string looks like template
+        chrome, we drop it; otherwise we pass it through unchanged —
+        the V1 path is intentionally LESS aggressive here than V2
+        because V1 runs without a crop-level blank detector.
         """
         if not text:
             return text
-        cleaned = self._TEMPLATE_BLEED_PHRASES.sub("", text)
-        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+        if self._is_template_leak(text):
+            return ""
+        cleaned = re.sub(r"[ \t]{2,}", " ", text)
         cleaned = re.sub(r"(?m)^\s*\n", "", cleaned)
-        cleaned = cleaned.strip()
-        if not cleaned and text.strip():
-            return text
-        return cleaned
+        return cleaned.strip() or text
+
+    def _compute_center_ink(self, crop: np.ndarray, margin: float = 0.20) -> float:
+        """Ink density in the center of a crop using Otsu thresholding.
+
+        Two key differences from the previous adaptive-threshold approach:
+
+        1. **Tighter center focus (60%):** 20% trimmed from each edge
+           instead of 15%.  This better excludes padding bleed from
+           neighboring fields and alignment artifacts at borders.
+
+        2. **Otsu (global) threshold instead of adaptive:**  Adaptive
+           threshold finds local contrast and ALWAYS marks something as
+           ink — even in nearly-blank areas where only faint scanner
+           noise exists.  Otsu uses the global histogram, so a
+           nearly-blank crop correctly gets ~0.0 ink density.  This is
+           the critical fix for blank-field false positives across
+           different scan qualities.
+
+        A std-deviation pre-check short-circuits to 0.0 for uniform
+        regions where Otsu would be unreliable (unimodal histogram).
+        """
+        h, w = crop.shape[:2]
+        if h < 10 or w < 10:
+            return 0.0
+        mx, my = max(1, int(w * margin)), max(1, int(h * margin))
+        center = crop[my:h - my, mx:w - mx]
+        if center.size == 0:
+            return 0.0
+        gray = cv2.cvtColor(center, cv2.COLOR_RGB2GRAY) if center.ndim == 3 else center
+        if float(np.std(gray)) < 8.0:
+            return 0.0
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        return float(np.count_nonzero(binary)) / max(1, binary.size)
 
     def _is_vlm_template_text(self, text: str) -> bool:
         """Detect if VLM output is CMS template label text rather than actual field content.
@@ -1243,11 +1287,11 @@ Text:"""
         if not text or len(text.strip()) < 3:
             return False
         t = text.strip()
-        if self._CMS_TEMPLATE_KEYWORDS.search(t):
-            matches = list(self._CMS_TEMPLATE_KEYWORDS.finditer(t))
-            kw_chars = sum(m.end() - m.start() for m in matches)
-            if kw_chars / max(1, len(t)) > 0.5:
-                return True
+        # Schema-driven template-leak detection.  Replaces the old
+        # hand-authored CMS keyword regex — the vocabulary now lives in
+        # ``data/schemas/cms-1500.json`` under ``template_chrome``.
+        if self._is_template_leak(t):
+            return True
         upper_ratio = sum(1 for c in t if c.isupper()) / max(1, sum(1 for c in t if c.isalpha()))
         if len(t) > 8 and upper_ratio > 0.75 and not any(c.isdigit() for c in t):
             return True
@@ -1507,12 +1551,9 @@ Text:"""
         if self._is_vlm_template_text(raw_text):
             self.log(f"Raw-fallback template text: '{raw_text[:40]}' for {field_name}")
             return "", 0.0
-        if self._CMS_TEMPLATE_KEYWORDS.search(raw_text):
-            matches = list(self._CMS_TEMPLATE_KEYWORDS.finditer(raw_text))
-            kw_chars = sum(m.end() - m.start() for m in matches)
-            if kw_chars / max(1, len(raw_text.strip())) > 0.5:
-                self.log(f"Raw-fallback keyword density: '{raw_text[:40]}' for {field_name}")
-                return "", 0.0
+        if self._is_template_leak(raw_text):
+            self.log(f"Raw-fallback template leak: '{raw_text[:40]}' for {field_name}")
+            return "", 0.0
         if len(raw_text.strip()) < 2:
             return "", 0.0
         if field_type == "text" and re.match(r'^\d{1,3}[a-z]?\.?$', raw_text.strip()):
@@ -1549,6 +1590,18 @@ Text:"""
         if field_type in ("date", "date_range"):
             return self._process_date_field_vlm(crop_for_ocr, crop_raw, block, field_name, ink_ratio)
 
+        # ── Step 0: Fast blank pre-check (skip Florence-2 entirely) ────────
+        # For fields where the template-subtracted crop has near-zero ink
+        # in both the overall ratio AND the center, skip the F2 call.
+        # This saves ~150ms per blank field (~40-50 fields/form = 6-8s).
+        if ink_ratio < 0.005:
+            self.log(f"Fast-blank (ink={ink_ratio:.4f}): {field_name}")
+            block.text = ""
+            block.confidence = 0.0
+            block.metadata["ocr_engine"] = "blank_fast"
+            block.metadata["is_blank"] = True
+            return block
+
         # ── Step 1: Florence-2 primary OCR ─────────────────────────────────
         florence_text, florence_conf = self._florence2_ocr(crop_for_ocr)
 
@@ -1564,12 +1617,9 @@ Text:"""
         if florence_text:
             if self._is_hallucination(florence_text, field_type):
                 florence_text, florence_conf = "", 0.0
-            elif self._CMS_TEMPLATE_KEYWORDS.search(florence_text):
-                matches = list(self._CMS_TEMPLATE_KEYWORDS.finditer(florence_text))
-                kw_chars = sum(m.end() - m.start() for m in matches)
-                if kw_chars / max(1, len(florence_text.strip())) > 0.5:
-                    self.log(f"Florence-2 template text filtered ({kw_chars}/{len(florence_text.strip())} kw): '{florence_text[:40]}' for {field_name}")
-                    florence_text, florence_conf = "", 0.0
+            elif self._is_template_leak(florence_text):
+                self.log(f"Florence-2 template leak filtered: '{florence_text[:40]}' for {field_name}")
+                florence_text, florence_conf = "", 0.0
             elif len(florence_text.strip()) < 2:
                 florence_text, florence_conf = "", 0.0
             elif field_type == "text" and re.match(r'^\d{1,3}[a-z]?\.?$', florence_text.strip()):
@@ -1579,14 +1629,18 @@ Text:"""
         # ── Case A: Florence-2 empty → try recovery, then blank ────────────
         # Trust Florence-2 for blank detection.  Recovery paths:
         #   1. Upscale retry (ink > 0.008) — cheap, Florence-2 only
-        #   2. Raw crop fallback (inner_ink > 0.10) — run Florence-2 on the
-        #      ORIGINAL crop (before template subtraction).  Gated by
-        #      INNER ink ratio (center 70% of crop, excluding padding
-        #      edges) to avoid false triggers from neighboring fields
-        #      bleeding into padded bbox.  Template keywords get caught
-        #      by filters; real content passes through.
+        #   2. Raw crop fallback (center_ink > 0.05) — run Florence-2 on
+        #      the ORIGINAL crop (before template subtraction).  Gated by
+        #      CENTER ink using Otsu threshold on center 60% of crop.
+        #      Otsu (global) is critical: adaptive threshold amplifies
+        #      faint noise in nearly-blank areas, causing false triggers.
+        #      Otsu correctly sees blank areas as ~0.0.  The tighter
+        #      center focus (20% margin) excludes edge bleed from
+        #      neighbors and alignment artifacts.
         if not florence_text:
-            if ink_ratio > 0.008:
+            center_ink = self._compute_center_ink(crop_for_ocr)
+
+            if center_ink > 0.05 and ink_ratio > 0.008:
                 h_c, w_c = crop_for_ocr.shape[:2]
                 up = cv2.resize(crop_for_ocr, (w_c * 2, h_c * 2), interpolation=cv2.INTER_CUBIC)
                 retry_text, retry_conf = self._florence2_ocr(up)
@@ -1606,18 +1660,8 @@ Text:"""
                         block.metadata["escalation"] = "upscaled_retry"
                         return block
 
-            h_c, w_c = crop_for_ocr.shape[:2]
-            mx = max(1, int(w_c * 0.15))
-            my = max(1, int(h_c * 0.15))
-            interior = crop_for_ocr[my:h_c - my, mx:w_c - mx]
-            inner_ink = 0.0
-            if interior.size > 0:
-                gi = cv2.cvtColor(interior, cv2.COLOR_RGB2GRAY) if interior.ndim == 3 else interior
-                bi = cv2.adaptiveThreshold(gi, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 9)
-                inner_ink = float(np.count_nonzero(bi)) / max(1, bi.size)
-
-            if inner_ink > 0.10:
-                self.log(f"Raw-fallback gate: ink={ink_ratio:.4f} inner_ink={inner_ink:.4f} for {field_name}")
+            if center_ink > 0.05:
+                self.log(f"Raw-fallback gate: ink={ink_ratio:.4f} center_ink={center_ink:.4f} for {field_name}")
                 raw_text, raw_conf = self._florence2_raw_fallback(crop_raw, field_name, field_type)
                 if raw_text:
                     text = self._llm_normalize_field(raw_text, field_type)
@@ -1630,7 +1674,7 @@ Text:"""
                     block.metadata["escalation"] = "raw_crop_retry"
                     return block
 
-            self.log(f"Blank (Florence-2 empty, ink={ink_ratio:.4f} inner={inner_ink:.4f}): {field_name}")
+            self.log(f"Blank (Florence-2 empty, ink={ink_ratio:.4f} center={center_ink:.4f}): {field_name}")
             block.text = ""
             block.confidence = 0.0
             block.metadata["ocr_engine"] = "blank_confirmed"
@@ -1650,6 +1694,22 @@ Text:"""
 
         if not self._has_meaningful_content(crop_for_cca, min_components=1):
             self.log(f"Noise discard (text='{florence_text[:30]}' no structure): {field_name}")
+            block.text = ""
+            block.confidence = 0.0
+            block.metadata["ocr_engine"] = "blank_confirmed"
+            block.metadata["is_blank"] = True
+            return block
+
+        # Secondary check: CCA can pass on edge residue from imperfect
+        # alignment, but the CENTER of a truly blank field is empty.
+        # Otsu on center 60% catches this — if center is blank, the text
+        # Florence-2 read was edge noise, not real content.
+        center_ink_b = self._compute_center_ink(crop_for_ocr)
+        if center_ink_b < 0.03:
+            self.log(
+                f"Center-blank (text='{florence_text[:30]}' "
+                f"center={center_ink_b:.4f}): {field_name}"
+            )
             block.text = ""
             block.confidence = 0.0
             block.metadata["ocr_engine"] = "blank_confirmed"
@@ -1716,16 +1776,8 @@ Text:"""
                         )
 
             if not text_confirmed:
-                h_c2, w_c2 = crop_for_ocr.shape[:2]
-                mx2 = max(1, int(w_c2 * 0.15))
-                my2 = max(1, int(h_c2 * 0.15))
-                interior2 = crop_for_ocr[my2:h_c2 - my2, mx2:w_c2 - mx2]
-                inner_ink2 = 0.0
-                if interior2.size > 0:
-                    gi2 = cv2.cvtColor(interior2, cv2.COLOR_RGB2GRAY) if interior2.ndim == 3 else interior2
-                    bi2 = cv2.adaptiveThreshold(gi2, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 9)
-                    inner_ink2 = float(np.count_nonzero(bi2)) / max(1, bi2.size)
-                if inner_ink2 > 0.10:
+                center_ink2 = self._compute_center_ink(crop_for_ocr)
+                if center_ink2 > 0.05:
                     raw_text, raw_conf = self._florence2_raw_fallback(crop_raw, field_name, field_type)
                     if raw_text:
                         text = self._llm_normalize_field(raw_text, field_type)
@@ -1804,6 +1856,15 @@ Text:"""
 
         def _is_complete_date(t: str) -> bool:
             return bool(re.match(r'^\d{1,2}/\d{1,2}/\d{2,4}$', t.strip()))
+
+        # Fast blank pre-check for date fields too
+        if ink_ratio < 0.005:
+            self.log(f"Fast-blank date (ink={ink_ratio:.4f}): {field_name}")
+            block.text = ""
+            block.confidence = 0.0
+            block.metadata["ocr_engine"] = "blank_fast"
+            block.metadata["is_blank"] = True
+            return block
 
         # ── Step 1: Florence-2 + CCA hybrid ─────────────────────────────
         florence_text, florence_conf = self._florence2_ocr(crop_for_ocr)
@@ -1903,27 +1964,32 @@ Text:"""
     async def process_blocks(self, image: np.ndarray, blocks: List[DetectedBlock]) -> List[DetectedBlock]:
         """Process all blocks through the multi-engine OCR pipeline.
 
-        Flow per field type (v1.3 — multi-engine consensus):
+        Flow per field type:
           - Checkbox  → fill-ratio detector
           - Signature → "[SIGNED]" only (no OCR)
-          - Date      → PaddleOCR + TrOCR + Florence-2 → consensus pick → VLM rescue
-          - Text      → PaddleOCR + TrOCR + Florence-2 → consensus pick → VLM rescue
+          - CMS-1500 text/date/money/etc → OCR v2 batched Florence-2
+          - General forms → PaddleOCR → TrOCR → VLM rescue chain
           - Table     → skipped here (handled by labeling_agent)
 
-        Empty fields (no ink) are skipped and excluded from output.
+        OCR v2 (default): all CMS-1500 scan text fields go through one
+        batched Florence-2 call instead of 86 individual forward passes,
+        dropping latency from ~60s to ~10s on CPU.
         """
         await self.initialize()
         t0 = time.time()
 
-        # Florence-2 is used on every field now, so serialize to avoid GPU
-        # contention between Florence-2 + TrOCR running in parallel threads.
-        sem = asyncio.Semaphore(2)
+        if getattr(self.config, "use_ocr_v2", True) and self._is_cms1500_batch(blocks):
+            results = await self._process_blocks_v2(image, blocks)
+        else:
+            sem = asyncio.Semaphore(max(1, int(
+                getattr(self.config, "vlm_parallel_calls", 4) or 4
+            )))
 
-        async def _process_one(block: DetectedBlock) -> DetectedBlock:
-            async with sem:
-                return await asyncio.to_thread(self._process_sync, image, block)
+            async def _process_one(block: DetectedBlock) -> DetectedBlock:
+                async with sem:
+                    return await asyncio.to_thread(self._process_sync, image, block)
 
-        results = list(await asyncio.gather(*[_process_one(b) for b in blocks]))
+            results = list(await asyncio.gather(*[_process_one(b) for b in blocks]))
 
         # ── Paired checkbox resolution ──────────────────────────────────
         # For yes/no pairs (e.g. 11d_another_health_plan_yes / _no),
@@ -2029,3 +2095,157 @@ Text:"""
             filtered.append(block)
 
         return filtered
+
+    # ────────────────────────────────────────────────────────────────
+    # OCR v2: batched Florence-2 + adaptive blank detection (CMS-1500)
+    # ────────────────────────────────────────────────────────────────
+
+    def _is_cms1500_batch(self, blocks: List[DetectedBlock]) -> bool:
+        """Detect if a blocks batch is a CMS-1500 scan-path run."""
+        for b in blocks:
+            form_type = (b.metadata or {}).get("form_type", "")
+            source = (b.metadata or {}).get("source", "")
+            if form_type in ("cms-1500", "CMS1500", "cms1500") and source == "schema_zones":
+                return True
+        return False
+
+    async def _process_blocks_v2(
+        self, image: np.ndarray, blocks: List[DetectedBlock]
+    ) -> List[DetectedBlock]:
+        """OCR v2: batched Florence-2 + structural blank detection.
+
+        Steps:
+          1. Short-circuit checkbox/signature/table/widget blocks as before
+             (synchronous per-block, no model involved for checkbox/sig).
+          2. Crop every remaining CMS text/numeric/address/date field once.
+          3. Run template subtraction + adaptive blank pre-classification.
+          4. Batch-run Florence-2 on UNCERTAIN + FILLED crops.
+          5. Apply field-type filters and write results back into blocks.
+        """
+        from src.pipelines.ocr_v2 import (
+            BlankDetector, FieldOCRBatch, FieldOCRRequest,
+        )
+        from src.pipelines.ocr_v2 import get_batched_florence2
+
+        form_type = next(
+            ((b.metadata or {}).get("form_type", "") for b in blocks
+             if (b.metadata or {}).get("form_type")),
+            "cms-1500",
+        )
+
+        # 1) Calibrate blank detector once per page
+        blank_margin = float(getattr(self.config, "ocr_v2_blank_margin", 0.008))
+        filled_margin = float(getattr(self.config, "ocr_v2_filled_margin", 0.025))
+        detector = BlankDetector(
+            blank_margin=blank_margin, filled_margin=filled_margin,
+        )
+        template_rgb = self._get_template_rgb(form_type)
+        try:
+            detector.calibrate(template_rgb=template_rgb, aligned_scan_rgb=image)
+        except Exception as e:
+            self.log(f"[OCRv2] calibration fell back to defaults: {e}")
+
+        # 2) Separate blocks into: checkbox/signature (handled directly),
+        #    table/widget blocks (skipped here), CMS text fields (batched).
+        direct_blocks: List[DetectedBlock] = []
+        batch_blocks: List[DetectedBlock] = []
+        for b in blocks:
+            if b.block_type == BlockType.TABLE:
+                # Tables are handled by labeling_agent — keep metadata but skip OCR.
+                b.metadata["ocr_engine"] = "skipped_table_route"
+                direct_blocks.append(b)
+                continue
+            if b.block_type in (BlockType.CHECKBOX, BlockType.SIGNATURE):
+                direct_blocks.append(b)
+                continue
+            # Already has text from zone matching → keep as-is
+            if (b.metadata or {}).get("source") == "ocr_zone_matching" \
+                    and b.text and str(b.text).strip():
+                ft_early = (b.metadata or {}).get("field_type", "")
+                if ft_early not in ("date", "date_range"):
+                    b.metadata["ocr_engine"] = "full_page_zone_matching"
+                    direct_blocks.append(b)
+                    continue
+            batch_blocks.append(b)
+
+        # 3) Process direct blocks (checkbox/signature) synchronously in a
+        #    thread pool — they do not benefit from batching.
+        if direct_blocks:
+            async def _one_direct(blk):
+                return await asyncio.to_thread(self._process_sync, image, blk)
+            direct_results = await asyncio.gather(
+                *[_one_direct(b) for b in direct_blocks]
+            )
+        else:
+            direct_results = []
+
+        # 4) Build batch OCR requests (crop + template subtract + ink ratio).
+        requests: List[FieldOCRRequest] = []
+        for b in batch_blocks:
+            h_img, w_img = image.shape[:2]
+            x0, y0, x1, y1 = [int(round(v)) for v in b.bbox]
+            x0 = max(0, x0); y0 = max(0, y0)
+            x1 = min(w_img, x1); y1 = min(h_img, y1)
+            if x1 - x0 < 4 or y1 - y0 < 4:
+                b.text = ""
+                b.confidence = 0.0
+                b.metadata["is_blank"] = True
+                b.metadata["ocr_engine"] = "blank_fast"
+                continue
+            crop_raw = image[y0:y1, x0:x1]
+
+            ink_ratio = 1.0
+            crop_for_ocr = crop_raw
+            if template_rgb is not None:
+                try:
+                    crop_for_ocr, ink_ratio = self._template_subtract(
+                        crop_raw, template_rgb, (x0, y0, x1, y1),
+                    )
+                    b.metadata["template_subtract_used"] = True
+                    b.metadata["ink_ratio"] = round(float(ink_ratio), 4)
+                except Exception:
+                    crop_for_ocr = crop_raw
+
+            field_type = (b.metadata or {}).get("field_type", "text")
+            # Pull the form_type tag set by the schema-zone loader so
+            # the OCRv2 post-filter can consult the schema-aware label
+            # matcher (catches "PICA", "RESERVED FOR NUCC USE", etc.).
+            form_type_tag = str((b.metadata or {}).get("form_type", "") or "")
+            requests.append(FieldOCRRequest(
+                field_id=b.id,
+                field_type=field_type,
+                crop_for_ocr=crop_for_ocr,
+                crop_raw=crop_raw,
+                ink_ratio_hint=float(ink_ratio),
+                form_type=form_type_tag,
+            ))
+
+        # 5) Run batched OCR
+        batch_size = max(1, int(getattr(self.config, "ocr_v2_batch_size", 8)))
+        driver = FieldOCRBatch(
+            blank_detector=detector,
+            florence=get_batched_florence2(batch_size=batch_size),
+        )
+        ocr_results = await asyncio.to_thread(driver.run, requests)
+
+        # 6) Write results back into blocks
+        result_map = {r.field_id: r for r in ocr_results}
+        for b in batch_blocks:
+            r = result_map.get(b.id)
+            if r is None:
+                continue
+            b.text = r.text
+            b.confidence = float(r.confidence)
+            engine = r.engine
+            b.metadata["ocr_engine"] = engine
+            b.metadata["escalation"] = r.escalation
+            if r.blank or engine in ("blank_fast", "blank_confirmed"):
+                b.metadata["is_blank"] = True
+            if r.decision is not None:
+                b.metadata.update(r.decision.to_metadata())
+            # Strip known template bleed words after OCR
+            if b.text:
+                field_name = (b.metadata or {}).get("field_name", "") or b.id
+                b.text = self._strip_template_bleed(b.text, field_name)
+
+        return direct_results + batch_blocks

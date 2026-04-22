@@ -52,11 +52,19 @@ class FormIdentificationAgent(BaseAgent):
     }
     
     # High-confidence discriminative tokens (if found, strongly indicates that form)
-    # UB-04 patterns are more extensive to prevent CMS-1500 misclassification
+    # UB-04 patterns are more extensive to prevent CMS-1500 misclassification.
+    # CMS-1500 tokens now include the non-branded phrasing seen on most real-world
+    # scans (custom headers, community templates) where "CMS-1500" is not printed.
     STRONG_TOKENS = {
-        FormType.UB04: ["ub-04", "ub04", "uniform bill", "ub 04", "type of bill", 
+        FormType.UB04: ["ub-04", "ub04", "uniform bill", "ub 04", "type of bill",
                         "fl 42", "revenue code", "occurrence span"],
-        FormType.CMS1500: ["cms-1500", "cms 1500", "cms1500", "hcfa-1500", "form 1500 02-12"],
+        FormType.CMS1500: [
+            "cms-1500", "cms 1500", "cms1500",
+            "hcfa-1500", "form 1500 02-12",
+            "health insurance claim form",
+            "national uniform claim committee",
+            "nucc",
+        ],
         FormType.NCPDP: ["ncpdp"],
     }
     
@@ -148,34 +156,55 @@ class FormIdentificationAgent(BaseAgent):
         return ""
     
     def _match_fingerprint(self, text: str) -> Tuple[FormType, float]:
-        """Match text against form fingerprints with strong-token priority."""
+        """Match text against form fingerprints with strong-token priority.
+
+        Strategy (in order):
+          1. UB-04 strong tokens win first (to prevent CMS-1500 confusion).
+          2. CMS-1500 strong tokens (including "health insurance claim form",
+             "national uniform claim committee", "nucc") win next.
+          3. Fallback: pattern-count score with a 2-match corroboration rule.
+        """
         text_lower = text.lower()
-        
-        # First check strong discriminative tokens (override generic matches)
-        for form_type, strong_tokens in self.STRONG_TOKENS.items():
-            for token in strong_tokens:
-                if token in text_lower:
-                    # Strong token match: high confidence
-                    return form_type, 0.70
-        
+
+        # UB-04 check first — if ANY UB-04 token fires, lock in UB-04
+        for token in self.STRONG_TOKENS.get(FormType.UB04, []):
+            if token in text_lower:
+                return FormType.UB04, 0.70
+
+        # CMS-1500 strong tokens (counted for cumulative confidence)
+        cms_strong_hits = sum(
+            1 for t in self.STRONG_TOKENS.get(FormType.CMS1500, [])
+            if t in text_lower
+        )
+        if cms_strong_hits >= 1:
+            # Confidence scales with number of independent CMS-1500 phrases
+            return FormType.CMS1500, min(0.95, 0.60 + 0.08 * cms_strong_hits)
+
+        # NCPDP strong tokens
+        for token in self.STRONG_TOKENS.get(FormType.NCPDP, []):
+            if token in text_lower:
+                return FormType.NCPDP, 0.70
+
+        # Fallback: pattern-count (fingerprint lists)
         best_match = FormType.UNKNOWN
         best_score = 0.0
-        
+        best_matches = 0
+
         for form_type, patterns in self.FINGERPRINTS.items():
             matches = sum(1 for p in patterns if p in text_lower)
-            # Boost score if multiple unique patterns match
             if matches > 0:
-                score = matches / len(patterns) + 0.15  # Reduced base boost
+                score = matches / max(len(patterns), 1) + 0.15
                 if score > best_score:
                     best_score = score
                     best_match = form_type
-        
-        # Raised threshold for acceptance (0.45 instead of 0.15)
-        # Prevents "CLAIM FORM" alone from matching CMS-1500
-        if best_score < 0.45:
-            return FormType.GENERIC, best_score
-            
-        return best_match, best_score
+                    best_matches = matches
+
+        # Accept when score >= 0.35 AND at least 2 independent patterns matched
+        # (prevents a lone phrase like "CLAIM FORM" from dictating a lane).
+        if best_score >= 0.35 and best_matches >= 2:
+            return best_match, best_score
+
+        return FormType.GENERIC, best_score
     
     def _detect_version(self, text: str) -> Optional[str]:
         """Detect form version from text."""

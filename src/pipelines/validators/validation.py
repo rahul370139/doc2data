@@ -33,6 +33,22 @@ ZIP_PATTERN = re.compile(r"^\d{5}(?:-\d{4})?$")
 MONEY_PATTERN = re.compile(r"^[\$]?\d{1,6}(?:,\d{3})*(?:\.\d{1,2})?$")
 TAXID_PATTERN = re.compile(r"^\d{2}-?\d{7}$")
 
+# US state codes — 50 states + DC + US territories.  Kept as a set so
+# ``validate_state`` can do an O(1) check.  Not "hardcoding a form" —
+# these are the canonical USPS state abbreviations every US claim form
+# uses, regardless of form type.
+US_STATE_CODES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+    "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+    "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+    "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+    "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+    # Federal district + territories
+    "DC", "PR", "VI", "GU", "AS", "MP",
+    # Military / diplomatic
+    "AA", "AE", "AP",
+}
+
 
 def validate_npi(value: str) -> Tuple[bool, Dict[str, Any]]:
     digits = re.sub(r"[^0-9]", "", value)
@@ -169,6 +185,27 @@ def validate_cpt(value: str) -> Tuple[bool, Dict[str, Any]]:
     return False, {"reason": "format"}
 
 
+def validate_state(value: str) -> Tuple[bool, Dict[str, Any]]:
+    """Validate US state abbreviation.
+
+    OCR on tiny state boxes routinely mangles "FL" into glyph noise
+    (arabic-looking shapes, broken ligatures, etc.).  Without a typed
+    validator those garbage strings still pass through as "filled"
+    values because the field_type in schema is just "text".  Tagging
+    state fields as ``field_type: "state"`` routes them here and any
+    value that isn't a known USPS code fails → triggers the rescue
+    ladder.
+    """
+    if not value:
+        return False, {"reason": "empty"}
+    cleaned = re.sub(r"[^A-Za-z]", "", value).upper()
+    if len(cleaned) != 2:
+        return False, {"reason": "length"}
+    if cleaned not in US_STATE_CODES:
+        return False, {"reason": "unknown_state_code"}
+    return True, {"normalized": cleaned}
+
+
 FIELD_VALIDATORS = {
     "npi": validate_npi,
     "ndc": validate_ndc,
@@ -184,6 +221,7 @@ FIELD_VALIDATORS = {
     "zip": validate_zip,
     "money": validate_money,
     "tax_id": validate_tax_id,
+    "state": validate_state,
 }
 
 

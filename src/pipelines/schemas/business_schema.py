@@ -24,56 +24,186 @@ US_STATE_CODES = {
 
 
 # Mapping from business field -> schema field ids (ordered by preference)
-# Field names aligned with gold label format for grading
+# Field names aligned with gold label format for grading.  Order is the
+# order they render in the UI.  Stakeholder priorities drive what's
+# included here: claim identification, parties, dates, diagnoses, money.
 CMS1500_BUSINESS_MAPPING: Dict[str, Dict[str, Any]] = {
-    # Patient info
+    # ── Claim header / type ───────────────────────────────────────────
+    "insurance_type": {
+        # Composed from the 7 type checkboxes at the top of the form.
+        "sources": [
+            "1_insurance_type_medicare", "1_insurance_type_medicaid",
+            "1_insurance_type_tricare", "1_insurance_type_champva",
+            "1_insurance_type_group", "1_insurance_type_feca",
+            "1_insurance_type_other",
+        ],
+        "composer": "insurance_type",
+    },
+
+    # ── Patient ───────────────────────────────────────────────────────
     "patient_name": {"sources": ["2_patient_name"]},
     "patient_dob": {"sources": ["3_patient_dob"], "validator": "date"},
-    "patient_sex": {"sources": ["3_patient_sex_m", "3_patient_sex_f", "3_patient_sex"], "composer": "sex"},
+    "patient_sex": {
+        "sources": ["3_patient_sex_m", "3_patient_sex_f", "3_patient_sex"],
+        "composer": "sex",
+    },
     "patient_address": {"sources": ["5_patient_address"]},
     "patient_city": {"sources": ["5_patient_city"]},
     "patient_state": {"sources": ["5_patient_state"]},
     "patient_zip": {"sources": ["5_patient_zip"]},
     "patient_phone": {"sources": ["5_patient_phone"], "validator": "phone"},
-    
-    # Insured info  
+    "patient_relationship": {
+        "sources": [
+            "6_patient_relationship_self", "6_patient_relationship_spouse",
+            "6_patient_relationship_child", "6_patient_relationship_other",
+            "6_patient_relationship",
+        ],
+        "composer": "patient_relationship",
+    },
+
+    # ── Insured ───────────────────────────────────────────────────────
     "insured_name": {"sources": ["4_insured_name"]},
     "insured_id": {"sources": ["1a_insured_id"], "validator": "member_id"},
     "insured_dob": {"sources": ["11a_insured_dob"], "validator": "date"},
-    "insured_sex": {"sources": ["11a_insured_sex_m", "11a_insured_sex_f", "11a_insured_sex"], "composer": "sex"},
+    "insured_sex": {
+        "sources": [
+            "11a_insured_sex_m", "11a_insured_sex_f", "11a_insured_sex",
+        ],
+        "composer": "sex",
+    },
     "insured_address": {"sources": ["7_insured_address"]},
     "insured_city": {"sources": ["7_insured_city"]},
     "insured_state": {"sources": ["7_insured_state"]},
     "insured_zip": {"sources": ["7_insured_zip"]},
     "insured_phone": {"sources": ["7_insured_phone"], "validator": "phone"},
-    
-    # Insurance/Policy
-    "insurance_plan": {"sources": ["11c_insurance_plan_name", "11c_insurance_plan"]},
-    "policy_number": {"sources": ["11_insured_policy_group", "11_policy_group_number", "11_group_number"]},
-    
-    # Account/Claim
-    "patient_account": {"sources": ["26_patient_account"]},
+
+    # ── Insurance / policy / employer ─────────────────────────────────
+    "insurance_plan": {
+        "sources": ["11c_insurance_plan_name", "11c_insurance_plan"],
+    },
+    "policy_number": {
+        "sources": [
+            "11_insured_policy_group", "11_policy_group_number",
+            "11_group_number",
+        ],
+    },
+    "other_claim_id": {"sources": ["11b_other_claim_id"]},
+    "another_health_plan": {
+        "sources": [
+            "11d_another_health_plan_yes", "11d_another_health_plan_no",
+        ],
+        "composer": "yes_no",
+    },
+
+    # ── Condition relation (Box 10) ───────────────────────────────────
+    "condition_employment": {
+        "sources": ["10a_employment_yes", "10a_employment_no"],
+        "composer": "yes_no",
+    },
+    "condition_auto_accident": {
+        "sources": ["10b_auto_accident_yes", "10b_auto_accident_no"],
+        "composer": "yes_no",
+    },
+    "condition_other_accident": {
+        "sources": ["10c_other_accident_yes", "10c_other_accident_no"],
+        "composer": "yes_no",
+    },
+
+    # ── Dates / referral / hospitalization ────────────────────────────
+    "current_illness_date": {
+        "sources": ["14_date_of_illness"], "validator": "date",
+    },
+    "other_date": {
+        "sources": ["15_Other_date", "15_other_date"], "validator": "date",
+    },
+    "unable_to_work_dates": {
+        "sources": ["16_dates_unable_to_work"], "validator": "date_range",
+    },
+    "referring_provider": {"sources": ["17_referring_provider"]},
+    "referring_npi": {
+        "sources": ["17b_referring_npi"], "validator": "npi",
+    },
+    "hospitalization_dates": {
+        "sources": ["18_hospitalization_dates"], "validator": "date_range",
+    },
+    "additional_claim_info": {"sources": ["19_additional_claim_info"]},
+
+    # ── Outside lab / diagnosis / claim codes ─────────────────────────
+    "outside_lab": {
+        "sources": ["20_outside_lab_yes", "20_outside_lab_no"],
+        "composer": "yes_no",
+    },
+    "outside_lab_charges": {
+        "sources": ["20_charges"], "validator": "money",
+    },
+    # Combined diagnosis area (the 21_diagnosis_all field already covers
+    # codes A-L on the form).  Kept as a single string here for the
+    # demo; downstream consumers can split on whitespace if needed.
+    "diagnosis_codes": {
+        "sources": [
+            "21_diagnosis_all", "21_diagnosis_a", "21_diagnosis_1",
+        ],
+    },
+    "resubmission_code": {"sources": ["22_resubmission_code"]},
+    "original_ref_number": {"sources": ["22_original_ref_number"]},
+    "prior_authorization": {"sources": ["23_prior_authorization"]},
+
+    # ── Service lines (Box 24 table) ─────────────────────────────────
+    # The table block stores its parsed rows on metadata.table_rows;
+    # we expose the joined summary string here so the schema view stays
+    # human-readable.  The full structured rows are also surfaced
+    # under business_field_details.notes for downstream systems.
+    "service_lines": {"sources": ["24_service_lines"]},
+
+    # ── Tax / accounts / charges ─────────────────────────────────────
     "tax_id": {"sources": ["25_federal_tax_id", "25_tax_id"]},
-    
-    # Diagnosis codes (individual fields for grading)
-    "diagnosis_code_1": {"sources": ["21_diagnosis_a", "21_diagnosis_1"], "validator": "icd"},
-    "diagnosis_code_2": {"sources": ["21_diagnosis_b", "21_diagnosis_2"], "validator": "icd"},
-    "diagnosis_code_3": {"sources": ["21_diagnosis_c", "21_diagnosis_3"], "validator": "icd"},
-    "diagnosis_code_4": {"sources": ["21_diagnosis_d", "21_diagnosis_4"], "validator": "icd"},
-    
-    # Service facility
-    "service_facility": {"sources": ["32_service_facility_name", "32_service_facility"]},
-    "service_facility_address": {"sources": ["32_service_facility_address"], "composer": "address"},
-    
-    # Billing provider
-    "billing_provider": {"sources": ["33_billing_provider_name", "33_billing_provider"]},
-    "billing_provider_address": {"sources": ["33_billing_provider_address"], "composer": "address"},
-    "billing_provider_phone": {"sources": ["33_billing_provider_phone"], "validator": "phone"},
-    "billing_npi": {"sources": ["33a_npi", "32a_npi"], "validator": "npi"},
-    
-    # Charges
+    "tax_id_type": {
+        "sources": [
+            "25b_federal_tax_id_type_ssn",
+            "25b_federal_tax_id_type_ein",
+        ],
+        "composer": "tax_id_type",
+    },
+    "patient_account": {"sources": ["26_patient_account"]},
+    "accept_assignment": {
+        "sources": [
+            "27_accept_assignment_yes", "27_accept_assignment_no",
+        ],
+        "composer": "yes_no",
+    },
     "total_charge": {"sources": ["28_total_charge"], "validator": "money"},
     "amount_paid": {"sources": ["29_amount_paid"], "validator": "money"},
+
+    # ── Provider / facility / signature ──────────────────────────────
+    "physician_signature_date": {
+        "sources": ["31_physician_signature_date"], "validator": "date",
+    },
+    "physician_signature_present": {
+        "sources": ["31_physician_signature"], "composer": "signed_marker",
+    },
+    # The CMS-1500 schema collapses the service facility / billing
+    # provider name, street, and city/state/zip into a single multi-line
+    # bbox (*_address).  We surface the same value under two keys —
+    # one verbatim and one as ``address`` block — so stakeholders get
+    # both "the whole block" and a parsed-address view when we can
+    # split it.
+    "service_facility": {"sources": ["32_service_facility_address"]},
+    "service_facility_address": {
+        "sources": ["32_service_facility_address"], "composer": "address",
+    },
+    "service_facility_npi": {
+        "sources": ["32_a_npi", "32a_npi"], "validator": "npi",
+    },
+    "billing_provider": {"sources": ["33_billing_provider_address"]},
+    "billing_provider_address": {
+        "sources": ["33_billing_provider_address"], "composer": "address",
+    },
+    "billing_provider_phone": {
+        "sources": ["33_billing_provider_phone"], "validator": "phone",
+    },
+    "billing_npi": {
+        "sources": ["33a_npi", "33_a_npi"], "validator": "npi",
+    },
 }
 
 
@@ -315,6 +445,93 @@ def _compose_sex(values: Dict[str, str]) -> str:
     return ""
 
 
+def _is_check_marked(value: Any) -> bool:
+    """Treat anything non-blank that isn't an explicit unchecked sentinel as checked.
+
+    Checkbox detector outputs typically look like ``"X"`` (filled),
+    ``""`` (empty), or rarely ``"checked"`` / ``"true"`` / ``"1"`` from
+    the SLM cleanup path.  Some pipelines also return the literal mark
+    glyph ``✓`` or ``✗``.
+    """
+    if value is None:
+        return False
+    s = str(value).strip().lower()
+    if not s or s in ("none", "null", "0", "false", "off", "no"):
+        return False
+    return (
+        "x" in s or "✓" in s or "✗" in s
+        or s in ("checked", "true", "yes", "on", "1")
+    )
+
+
+def _compose_yes_no(yes_value: Any, no_value: Any) -> str:
+    """Pick "yes"/"no"/empty from a yes/no checkbox pair."""
+    yes = _is_check_marked(yes_value)
+    no = _is_check_marked(no_value)
+    if yes and not no:
+        return "yes"
+    if no and not yes:
+        return "no"
+    if yes and no:
+        # Both marked → ambiguous, prefer the stronger signal we got
+        # downstream by leaving it visible to the validation panel.
+        return "ambiguous"
+    return ""
+
+
+def _compose_insurance_type(extracted: Dict[str, Any]) -> str:
+    """Pick the insurance program from the 7 type checkboxes at the top.
+
+    Returns one of the canonical labels expected by clearinghouses
+    (MEDICARE / MEDICAID / TRICARE / CHAMPVA / GROUP / FECA / OTHER) or
+    ``""`` when none are visibly checked.  When more than one is
+    marked we return the highest-priority single label and tag the
+    remainder under business_field_details.notes via the caller.
+    """
+    candidates = [
+        ("MEDICARE", extracted.get("1_insurance_type_medicare")),
+        ("MEDICAID", extracted.get("1_insurance_type_medicaid")),
+        ("TRICARE",  extracted.get("1_insurance_type_tricare")),
+        ("CHAMPVA",  extracted.get("1_insurance_type_champva")),
+        ("GROUP",    extracted.get("1_insurance_type_group")),
+        ("FECA",     extracted.get("1_insurance_type_feca")),
+        ("OTHER",    extracted.get("1_insurance_type_other")),
+    ]
+    marked = [name for name, val in candidates if _is_check_marked(val)]
+    if marked:
+        return marked[0]
+    # Fallback: a free-text "1_insurance_type" sometimes carries the
+    # literal name when the checkboxes were unreadable.
+    raw = (extracted.get("1_insurance_type") or "").strip()
+    if raw:
+        return raw.upper()
+    return ""
+
+
+def _compose_patient_relationship(extracted: Dict[str, Any]) -> str:
+    """Patient relationship to insured: SELF / SPOUSE / CHILD / OTHER."""
+    pairs = [
+        ("SELF",   extracted.get("6_patient_relationship_self")),
+        ("SPOUSE", extracted.get("6_patient_relationship_spouse")),
+        ("CHILD",  extracted.get("6_patient_relationship_child")),
+        ("OTHER",  extracted.get("6_patient_relationship_other")),
+    ]
+    for name, val in pairs:
+        if _is_check_marked(val):
+            return name
+    raw = (extracted.get("6_patient_relationship") or "").strip()
+    return raw.upper() if raw else ""
+
+
+def _compose_tax_id_type(extracted: Dict[str, Any]) -> str:
+    """SSN vs EIN type indicator (Box 25b)."""
+    if _is_check_marked(extracted.get("25b_federal_tax_id_type_ein")):
+        return "EIN"
+    if _is_check_marked(extracted.get("25b_federal_tax_id_type_ssn")):
+        return "SSN"
+    return ""
+
+
 def _pick_value_from_sources(
     sources: List[str],
     extracted_fields: Dict[str, Any],
@@ -465,35 +682,132 @@ def map_to_business_schema(
             source_field = sources[0] if sources else None
             conf = 0.8 if value else 0.0
             bbox = (_find_detail_for_field(source_field, field_details) or {}).get("bbox") if source_field else None
-        elif biz_field == "diagnosis_codes":
-            diag_values = []
-            for sid in sources:
-                diag_val = extracted_fields.get(sid)
-                if diag_val:
-                    diag_values.append(str(diag_val))
-            value = diag_values
-            source_field = sources[0] if diag_values else None
-            conf = 0.55 if diag_values else 0.0
+        elif composer == "yes_no":
+            # Sources is a [yes_id, no_id] pair (in that order).  Default
+            # to (None, None) when fewer ids are provided so the helper
+            # treats the missing side as unchecked instead of raising.
+            yes_id = sources[0] if len(sources) > 0 else None
+            no_id = sources[1] if len(sources) > 1 else None
+            value = _compose_yes_no(
+                extracted_fields.get(yes_id) if yes_id else None,
+                extracted_fields.get(no_id) if no_id else None,
+            )
+            source_field = yes_id if value == "yes" else (no_id if value == "no" else (yes_id or no_id))
+            conf = 0.85 if value in ("yes", "no") else (0.5 if value else 0.0)
             bbox = (_find_detail_for_field(source_field, field_details) or {}).get("bbox") if source_field else None
+        elif composer == "insurance_type":
+            value = _compose_insurance_type(extracted_fields)
+            # Pick the source whose checkbox we actually picked so the
+            # frontend can highlight it on the PDF.
+            tag = value.lower()
+            preferred = next(
+                (sid for sid in sources if tag and tag in sid), sources[0] if sources else None,
+            )
+            source_field = preferred
+            conf = 0.85 if value else 0.0
+            bbox = (_find_detail_for_field(source_field, field_details) or {}).get("bbox") if source_field else None
+        elif composer == "patient_relationship":
+            value = _compose_patient_relationship(extracted_fields)
+            tag = value.lower()
+            preferred = next(
+                (sid for sid in sources if tag and tag in sid), sources[0] if sources else None,
+            )
+            source_field = preferred
+            conf = 0.85 if value else 0.0
+            bbox = (_find_detail_for_field(source_field, field_details) or {}).get("bbox") if source_field else None
+        elif composer == "tax_id_type":
+            value = _compose_tax_id_type(extracted_fields)
+            preferred = sources[0] if sources else None
+            if value:
+                preferred = next(
+                    (sid for sid in sources if value.lower() in sid),
+                    preferred,
+                )
+            source_field = preferred
+            conf = 0.85 if value else 0.0
+            bbox = (_find_detail_for_field(source_field, field_details) or {}).get("bbox") if source_field else None
+        elif composer == "signed_marker":
+            # 31 physician signature shows up as "[SIGNED]" or any ink.
+            raw = (extracted_fields.get(sources[0]) if sources else "") or ""
+            raw_str = str(raw).strip()
+            value = "yes" if raw_str else ""
+            source_field = sources[0] if sources else None
+            conf = 0.9 if value else 0.0
+            bbox = (_find_detail_for_field(source_field, field_details) or {}).get("bbox") if source_field else None
+        elif biz_field == "diagnosis_codes":
+            # The 21_diagnosis_all field holds the full text;
+            # split by whitespace so downstream consumers get a list.
+            joined = ""
+            primary_id = None
+            for sid in sources:
+                v = (extracted_fields.get(sid) or "").strip()
+                if v:
+                    joined = v
+                    primary_id = sid
+                    break
+            if joined:
+                # Split into 1-7 character ICD-10 candidates by
+                # whitespace / commas.  Validator will mark each
+                # member individually.
+                parts = [p.strip(" ,;.") for p in re.split(r"[\s,]+", joined) if p.strip()]
+                value = [p for p in parts if 2 <= len(p) <= 8]
+            else:
+                value = []
+            source_field = primary_id
+            conf = 0.7 if value else 0.0
+            bbox = (_find_detail_for_field(source_field, field_details) or {}).get("bbox") if source_field else None
+        elif biz_field == "service_lines":
+            # Pull both the human-readable summary AND the structured
+            # rows the table extractor parked on metadata.table_rows.
+            primary_id = sources[0] if sources else None
+            detail = _find_detail_for_field(primary_id, field_details) if primary_id else None
+            meta = (detail or {}).get("metadata") or {}
+            rows = meta.get("table_rows") or []
+            summary = (extracted_fields.get(primary_id) or "").strip() if primary_id else ""
+            if rows:
+                value = rows
+                conf = 0.75
+                notes = f"summary: {summary}" if summary else None
+            elif summary:
+                value = summary
+                conf = 0.6
+            else:
+                value = []
+                conf = 0.0
+            source_field = primary_id
+            bbox = (detail or {}).get("bbox") if detail else None
         else:
             value, source_field, conf, bbox = _pick_value_from_sources(sources, extracted_fields, field_details)
 
-        # Apply validator if available
+        # Apply validator if available.  Guard `passed` so the list branch
+        # (which validates per-item) doesn't leak `passed` from the
+        # previous iteration of the outer loop — that was a latent
+        # NameError when the first business field happened to be a list.
+        passed = False
         if validator_name and value not in (None, "", []):
             # Handle list values (e.g., diagnosis_codes) by validating each item
             if isinstance(value, list):
-                validated_items = []
+                validated_items: List[Any] = []
                 all_passed = True
                 for item in value:
-                    if item:
-                        passed, info = validate_field(validator_name, str(item))
-                        if passed:
-                            validated_items.append(info.get("normalized") or item)
-                        else:
-                            validated_items.append(item)
-                            all_passed = False
+                    if not item:
+                        continue
+                    # Skip non-string items (e.g. dict service-line rows
+                    # that don't have a meaningful flat-string validator).
+                    if not isinstance(item, (str, int, float)):
+                        validated_items.append(item)
+                        continue
+                    item_passed, info = validate_field(
+                        validator_name, str(item),
+                    )
+                    if item_passed:
+                        validated_items.append(info.get("normalized") or item)
+                    else:
+                        validated_items.append(item)
+                        all_passed = False
                 value = validated_items
                 validator_passed = all_passed
+                passed = all_passed
                 if all_passed:
                     conf = max(conf, 0.75)
                 else:
@@ -502,12 +816,12 @@ def map_to_business_schema(
                 passed, info = validate_field(validator_name, value)
                 validator_passed = bool(passed)
                 normalized = info.get("normalized")
-            if passed:
-                value = normalized if normalized else value
-                conf = max(conf, 0.75)
-            else:
-                notes = f"failed_{validator_name}"
-                conf = min(conf, 0.55)
+                if passed:
+                    value = normalized if normalized else value
+                    conf = max(conf, 0.75)
+                else:
+                    notes = f"failed_{validator_name}"
+                    conf = min(conf, 0.55)
 
         # Final assignment
         business_fields[biz_field] = value

@@ -26,13 +26,31 @@ requests>=2.31.0
 
 # Table processing
 table-transformer>=0.1.0
-transformers>=4.30.0
+transformers>=4.49.0  # GOT-OCR 2.0 + native Florence-2 support
 timm>=0.9.0
+# accelerate is not strictly required for single-GPU inference but
+# several transformers paths (including device_map="auto" shorthand)
+# fail loudly without it.  Install unconditionally.
+accelerate>=0.30.0
+huggingface_hub>=0.23.0
+# pytorch_lightning — required by PARSeq (baudm/parseq) via torch.hub.
+# The upstream model extends pl.LightningModule so we can't load the
+# published checkpoints without it.  ~250MB installed; if you want to
+# skip PARSeq entirely, comment this out AND set enable_parseq=False.
+pytorch_lightning>=2.0.0
+# PARSeq's strhub/models/base.py imports nltk.edit_distance at module
+# load time — install the tiny nltk package so the import chain succeeds.
+nltk>=3.8
 
 # Web framework
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 streamlit>=1.28.0
+python-multipart>=0.0.6
+
+# Agentic orchestration
+langgraph>=0.2.0
+langchain-core>=0.3.0
 
 # Utilities
 numpy>=1.24.0

@@ -41,30 +41,53 @@ try:
 except: pass
 " 2>/dev/null || true
 
-    # Pull required VLM model if not already available
-    VLM_MODEL="${OLLAMA_MODEL_VLM:-minicpm-v}"
-    HAS_VLM=$(curl -sf http://localhost:11434/api/tags 2>/dev/null | python3 -c "
+    # Required models:
+    #   - $OLLAMA_MODEL_VLM              (minicpm-v)       → rescue + table fallback
+    #   - $VLM_MODEL_SECTION             (minicpm-o4.5)    → Tier-1 section reads
+    #   - $VLM_MODEL_SECTION_FALLBACK    (minicpm-v)       → Tier-1 fallback
+    REQUIRED_MODELS=(
+        "${OLLAMA_MODEL_VLM:-minicpm-v}"
+        "${VLM_MODEL_SECTION:-openbmb/minicpm-o4.5:latest}"
+        "${VLM_MODEL_SECTION_FALLBACK:-minicpm-v}"
+    )
+    # Deduplicate while preserving order
+    declare -A SEEN_MODELS
+    UNIQUE_REQUIRED=()
+    for m in "${REQUIRED_MODELS[@]}"; do
+        if [ -n "$m" ] && [ -z "${SEEN_MODELS[$m]:-}" ]; then
+            SEEN_MODELS[$m]=1
+            UNIQUE_REQUIRED+=("$m")
+        fi
+    done
+
+    for MODEL in "${UNIQUE_REQUIRED[@]}"; do
+        HAS_MODEL=$(curl -sf http://localhost:11434/api/tags 2>/dev/null | python3 -c "
 import json,sys
 try:
     d=json.load(sys.stdin)
     names=[m['name'] for m in d.get('models',[])]
-    print('yes' if any('$VLM_MODEL' in n for n in names) else 'no')
+    print('yes' if any('$MODEL' in n or n.split(':')[0] == '$MODEL'.split(':')[0] for n in names) else 'no')
 except: print('no')
 " 2>/dev/null || echo "no")
 
-    if [ "$HAS_VLM" != "yes" ]; then
-        echo "📥 Pulling VLM model: $VLM_MODEL (required for table extraction + OCR rescue)..."
-        /usr/local/bin/ollama pull "$VLM_MODEL" 2>&1 | tail -5 || echo "⚠️ Failed to pull $VLM_MODEL"
-    else
-        echo "✅ VLM model $VLM_MODEL already available"
-    fi
+        if [ "$HAS_MODEL" != "yes" ]; then
+            echo "📥 Pulling $MODEL ..."
+            /usr/local/bin/ollama pull "$MODEL" 2>&1 | tail -5 || echo "⚠️ Failed to pull $MODEL"
+        else
+            echo "✅ Model $MODEL already available"
+        fi
+    done
 
-    # Pre-warm only the models we use: minicpm-v (rescue + table) and llava (table fallback)
-    for m in "minicpm-v" "llava"; do
+    # Pre-warm only the models we actually use as primaries.
+    WARM_MODELS=(
+        "${OLLAMA_MODEL_VLM:-minicpm-v}"
+        "${VLM_MODEL_SECTION:-openbmb/minicpm-o4.5:latest}"
+    )
+    for m in "${WARM_MODELS[@]}"; do
         echo "🔥 Pre-warming $m ..."
         curl -sf http://localhost:11434/api/generate \
             -d "{\"model\": \"$m\", \"prompt\": \"hi\", \"stream\": false, \"options\": {\"num_predict\": 1}}" \
-            --max-time 120 > /dev/null 2>&1 && echo "✅ $m warm" || echo "⚠️ $m warm-up failed"
+            --max-time 180 > /dev/null 2>&1 && echo "✅ $m warm" || echo "⚠️ $m warm-up failed"
     done
 else
     echo "⚠️ Ollama binary not found at /usr/local/bin/ollama - VLM/SLM features disabled"
